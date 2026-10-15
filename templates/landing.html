@@ -2,12 +2,12 @@
 {% block title %}{{ app_name }}{% endblock %}
 {% block content %}
 <div class="row justify-content-center py-4 py-lg-5">
-  <div class="col-xl-9 text-center">
+  <div class="col-12 text-center">
     <img class="landing-logo mb-3" src="{{ url_for('static', filename=brand_logo) }}" alt="Logo {{ school_name }}">
-    <div class="text-uppercase fw-semibold brand-school-lg">{{ school_name }}</div>
-    <h1 class="display-5 fw-bold mt-2 brand-heading">{{ app_name }}</h1>
+    <h1 class="fw-bold mt-2 brand-heading landing-app-title">{{ app_name }}</h1>
     <p class="lead mt-3">{{ app_tagline }}</p>
     <a class="btn btn-primary btn-lg mt-3 px-4" href="{{ url_for('login') }}">Đăng nhập bằng Google</a>
+    <div class="mt-3 small"><a href="{{ url_for('privacy_policy') }}">Chính sách quyền riêng tư</a></div>
     <div class="authors-card card shadow-sm mt-5 mx-auto text-start">
       <div class="card-body">
         <div class="fw-bold mb-2">Nhóm tác giả</div>

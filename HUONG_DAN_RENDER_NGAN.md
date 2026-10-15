@@ -1,13 +1,13 @@
-# Cập nhật v2.0 lên Render — hướng dẫn ngắn
+# Cập nhật v2.3 lên Render — hướng dẫn ngắn
 
-1. Giữ nguyên Web Service và PostgreSQL đang chạy trên Render.
-2. Thay mã nguồn repository GitHub bằng bộ v2.0 này; không đưa `.env` hoặc secret lên GitHub.
-3. Kiểm tra có file `static/branding/logo_truong.png`.
+1. Giữ nguyên Web Service và PostgreSQL hiện tại trên Render.
+2. Giải nén bộ v2.3 và upload toàn bộ mã nguồn lên repository GitHub đang dùng.
+3. Không đưa `.env`, Client Secret hoặc token lên GitHub.
 4. Commit lên nhánh `main`.
-5. Render đang Auto-Deploy sẽ tự build lại; nếu không, chọn **Manual Deploy → Deploy latest commit**.
+5. Render Auto-Deploy sẽ tự build lại; nếu không, chọn **Manual Deploy → Deploy latest commit**.
 6. Chờ trạng thái **Live**.
-7. Mở `/health` để kiểm tra database.
-8. Đăng nhập → Kênh YouTube → Đồng bộ → Kho video học liệu → gán video vào học phần → tạo QR hàng loạt.
-9. Tải một PNG để kiểm tra QR có logo trường và dùng điện thoại quét thử.
+7. Mở trang **Học phần** để kiểm tra: form chỉ còn **Tên học phần** và **Tên khoa/bộ môn**; mã học phần được tạo tự động.
+8. Khi thêm lớp, form chỉ còn **Tên lớp**; mã lớp được tạo tự động.
+9. Tên khoa/bộ môn đã dùng trước đây sẽ xuất hiện dưới dạng gợi ý để chọn lại nhanh.
 
-Bản v2.0 bổ sung bảng `course_videos`; khi `AUTO_CREATE_DB=1`, bảng này được tạo tự động trong PostgreSQL hiện tại, không cần xóa database cũ.
+Bản v2.3 không thay đổi cấu trúc database so với v2.2, vì vậy không cần xóa hoặc tạo lại PostgreSQL.

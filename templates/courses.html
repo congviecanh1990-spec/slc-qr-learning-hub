@@ -1,24 +1,110 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="row g-4">
-  <div class="col-lg-4"><h2>Quản lý học phần</h2><p class="text-muted">Tạo học phần, quản lý lớp và tạo mã QR hàng loạt cho các video đã được gán.</p><form method="post" class="card card-body shadow-sm"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label class="form-label">Mã học phần</label><input class="form-control mb-3" name="code" required><label class="form-label">Tên học phần</label><input class="form-control mb-3" name="name" required><label class="form-label">Đơn vị/khoa/bộ môn</label><input class="form-control mb-3" name="unit_name"><button class="btn btn-primary">Thêm học phần</button></form></div>
-  <div class="col-lg-8"><h2 class="invisible d-none d-lg-block">.</h2>
-  {% for c in courses %}
-    {% set total = c.video_links|length %}
-    {% set ns = namespace(qr_count=0, usable_missing=0) %}
-    {% for link in c.video_links %}{% if link.qr_id and link.qr and link.qr.active %}{% set ns.qr_count = ns.qr_count + 1 %}{% elif link.video.is_available and link.video.embeddable is not false and link.video.privacy_status != 'private' %}{% set ns.usable_missing = ns.usable_missing + 1 %}{% endif %}{% endfor %}
-    <div class="card mb-3 shadow-sm"><div class="card-body">
-      <div class="d-flex flex-wrap justify-content-between gap-3"><div><h5 class="mb-1">{{ c.code }} — {{ c.name }}</h5><div class="text-muted small">{{ c.unit_name or 'Chưa ghi đơn vị' }}</div></div><div class="text-end small"><div>Video đã gán: <b>{{ total }}</b></div><div>Đã có mã QR: <b>{{ ns.qr_count }}</b></div><div>Chưa có mã QR: <b>{{ ns.usable_missing }}</b></div></div></div>
-      <div class="d-flex flex-wrap gap-2 mt-3">
-        <form method="post" action="{{ url_for('create_course_qrs_bulk', course_id=c.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-primary btn-sm" {{ 'disabled' if ns.usable_missing == 0 else '' }}>Tạo mã QR cho tất cả video chưa có mã</button></form>
-        <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if ns.qr_count == 0 else '' }}" href="{{ url_for('download_course_qrs', course_id=c.id) }}">Tải toàn bộ mã QR của học phần</a>
+  <div class="col-lg-4">
+    <h2>Quản lý học phần</h2>
+    <p class="text-muted">Giảng viên chỉ cần nhập tên học phần và tên khoa/bộ môn. Mã học phần được hệ thống tự động tạo.</p>
+
+    <form method="post" class="card card-body shadow-sm" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label class="form-label">Tên học phần</label>
+      <input
+        class="form-control mb-3"
+        name="course_name"
+        required
+        autocomplete="off"
+        placeholder="Ví dụ: Tin học văn phòng">
+
+      <label class="form-label">Tên khoa/bộ môn</label>
+      <input
+        class="form-control"
+        name="unit_name"
+        list="unit-name-options"
+        required
+        autocomplete="organization"
+        placeholder="Gõ mới hoặc chọn tên đã dùng">
+      <datalist id="unit-name-options">
+        {% for unit in unit_options %}<option value="{{ unit }}"></option>{% endfor %}
+      </datalist>
+      <div class="form-text mb-3">Các tên khoa/bộ môn đã nhập trước đây được gợi ý để có thể chọn lại nhanh.</div>
+
+      <button class="btn btn-primary">Thêm học phần</button>
+    </form>
+  </div>
+
+  <div class="col-lg-8">
+    <h2 class="invisible d-none d-lg-block">.</h2>
+    {% for c in courses %}
+      {% set total = c.video_links|length %}
+      {% set ns = namespace(qr_count=0, usable_missing=0) %}
+      {% for link in c.video_links %}
+        {% if link.qr_id and link.qr and link.qr.active %}
+          {% set ns.qr_count = ns.qr_count + 1 %}
+        {% elif link.video.is_available and link.video.embeddable is not false and link.video.privacy_status != 'private' %}
+          {% set ns.usable_missing = ns.usable_missing + 1 %}
+        {% endif %}
+      {% endfor %}
+
+      <div class="card mb-3 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex flex-wrap justify-content-between gap-3">
+            <div>
+              <h5 class="mb-1">{{ c.name }}</h5>
+              <div class="text-muted small">{{ c.unit_name or 'Chưa ghi khoa/bộ môn' }}</div>
+            </div>
+            <div class="text-end small">
+              <div>Video đã gán: <b>{{ total }}</b></div>
+              <div>Đã có mã QR: <b>{{ ns.qr_count }}</b></div>
+              <div>Chưa có mã QR: <b>{{ ns.usable_missing }}</b></div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <form method="post" action="{{ url_for('create_course_qrs_bulk', course_id=c.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-primary btn-sm" {{ 'disabled' if ns.usable_missing == 0 else '' }}>Tạo mã QR cho tất cả video chưa có mã</button>
+            </form>
+            <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if ns.qr_count == 0 else '' }}" href="{{ url_for('download_course_qrs', course_id=c.id) }}">Tải toàn bộ mã QR của học phần</a>
+          </div>
+
+          <hr>
+          <div class="small fw-semibold mb-2">Video trong học phần</div>
+          <div class="course-video-list mb-3">
+            {% for link in c.video_links %}
+              <div class="small py-1 border-bottom d-flex justify-content-between gap-2">
+                <span>{{ link.video.title }}</span>
+                <span>
+                  {% if link.qr_id %}<span class="badge text-bg-success">Đã có QR</span>
+                  {% else %}<span class="badge text-bg-light border">Chưa có QR</span>{% endif %}
+                </span>
+              </div>
+            {% else %}
+              <span class="text-muted small">Chưa gán video. Hãy vào “Kho video học liệu” để chọn video và gán vào học phần.</span>
+            {% endfor %}
+          </div>
+
+          <div class="small fw-semibold mb-2">Lớp</div>
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            {% for cls in c.classes %}<span class="badge text-bg-light border">{{ cls.name }}</span>
+            {% else %}<span class="text-muted small">Chưa có lớp.</span>{% endfor %}
+          </div>
+
+          <form method="post" action="{{ url_for('add_class', course_id=c.id) }}" class="row g-2" autocomplete="off">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-9">
+              <input name="class_name" class="form-control form-control-sm" placeholder="Tên lớp" required autocomplete="off">
+              <div class="form-text">Mã lớp được hệ thống tự động tạo.</div>
+            </div>
+            <div class="col-md-3">
+              <button class="btn btn-outline-primary btn-sm w-100">Thêm lớp</button>
+            </div>
+          </form>
+        </div>
       </div>
-      <hr><div class="small fw-semibold mb-2">Video trong học phần</div>
-      <div class="course-video-list mb-3">{% for link in c.video_links %}<div class="small py-1 border-bottom d-flex justify-content-between gap-2"><span>{{ link.video.title }}</span><span>{% if link.qr_id %}<span class="badge text-bg-success">Đã có QR</span>{% else %}<span class="badge text-bg-light border">Chưa có QR</span>{% endif %}</span></div>{% else %}<span class="text-muted small">Chưa gán video. Hãy vào “Kho video học liệu” để chọn video và gán vào học phần.</span>{% endfor %}</div>
-      <div class="small fw-semibold mb-2">Lớp</div><div class="d-flex flex-wrap gap-2 mb-3">{% for cls in c.classes %}<span class="badge text-bg-light border">{{ cls.code }} · {{ cls.name }}</span>{% else %}<span class="text-muted small">Chưa có lớp.</span>{% endfor %}</div>
-      <form method="post" action="{{ url_for('add_class', course_id=c.id) }}" class="row g-2"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="col-md-3"><input name="code" class="form-control form-control-sm" placeholder="Mã lớp" required></div><div class="col-md-6"><input name="name" class="form-control form-control-sm" placeholder="Tên lớp" required></div><div class="col-md-3"><button class="btn btn-outline-primary btn-sm w-100">Thêm lớp</button></div></form>
-    </div></div>
-  {% else %}<div class="text-muted">Chưa có học phần.</div>{% endfor %}
+    {% else %}
+      <div class="text-muted">Chưa có học phần.</div>
+    {% endfor %}
   </div>
 </div>
 {% endblock %}

@@ -13,7 +13,7 @@
   <div class="col-lg-4"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted">Tỷ lệ phiên xem hoàn thành</div><div class="display-6">{{ completion_rate }}%</div><div class="small text-muted mt-2">Chỉ là dữ liệu hành vi xem; không dùng để suy diễn mức độ hiểu bài hoặc kết quả học tập.</div></div></div></div>
   <div class="col-lg-8">
     <div class="card shadow-sm"><div class="card-header fw-semibold">Lượt quét gần đây</div><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Thời gian</th><th>Mã GV/SV</th><th>Vai trò</th><th>Học phần</th><th>Mã QR</th><th>Video</th><th>Kết quả</th></tr></thead><tbody>
-    {% for s in recent_scans %}<tr><td>{{ s.scanned_at }}</td><td>{{ s.participant_code }}</td><td>{{ 'Giảng viên' if s.role == 'GV' else 'Sinh viên' }}</td><td>{{ s.course.code if s.course else '—' }}</td><td>{{ s.qr.slug if s.qr else '' }}</td><td>{{ s.video.title[:45] if s.video else '' }}</td><td>{{ '✓' if s.success else '✕' }}</td></tr>{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}
+    {% for s in recent_scans %}<tr><td>{{ s.scanned_at }}</td><td>{{ s.participant_code }}</td><td>{{ 'Giảng viên' if s.role == 'GV' else 'Sinh viên' }}</td><td>{{ s.course.name if s.course else '—' }}</td><td>{{ s.qr.slug if s.qr else '' }}</td><td>{{ s.video.title[:45] if s.video else '' }}</td><td>{{ '✓' if s.success else '✕' }}</td></tr>{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}
     </tbody></table></div></div>
   </div>
 </div>

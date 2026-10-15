@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% block title %}Chính sách quyền riêng tư · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-9 col-xl-8">
+    <div class="card shadow-sm border-0">
+      <div class="card-body p-4 p-lg-5 privacy-policy">
+        <div class="d-flex align-items-center gap-3 mb-4">
+          <img src="{{ url_for('static', filename=brand_logo) }}" alt="Logo {{ school_name }}" style="width:72px;height:72px;object-fit:contain">
+          <div>
+            <div class="text-muted small text-uppercase fw-semibold">{{ school_name }}</div>
+            <h1 class="h3 mb-1">Chính sách quyền riêng tư</h1>
+            <div class="text-muted">Áp dụng cho ứng dụng “{{ app_name }}”</div>
+          </div>
+        </div>
+
+        <p><strong>Cập nhật lần cuối: 15/10/2026.</strong> Chính sách này mô tả cách ứng dụng truy cập, sử dụng, lưu trữ và bảo vệ dữ liệu khi giảng viên và người học sử dụng hệ thống.</p>
+
+        <h2 class="h5 mt-4">1. Đơn vị và mục đích sử dụng</h2>
+        <p>Ứng dụng được xây dựng phục vụ nghiên cứu khoa học cấp trường và hoạt động giảng dạy tại {{ school_name }}. Hệ thống hỗ trợ giảng viên kết nối kênh YouTube, đồng bộ video, gán video vào học phần, tạo mã QR động, theo dõi lượt quét và ghi nhận quá trình xem học liệu phục vụ thống kê, kiểm thử và đánh giá việc khai thác học liệu.</p>
+
+        <h2 class="h5 mt-4">2. Dữ liệu Google/YouTube được truy cập</h2>
+        <p>Khi giảng viên đăng nhập bằng Google, ứng dụng yêu cầu các quyền tối thiểu cần thiết để:</p>
+        <ul>
+          <li>xác thực tài khoản bằng thông tin cơ bản gồm tên, email và định danh tài khoản Google;</li>
+          <li>đọc dữ liệu YouTube theo quyền chỉ đọc (<code>youtube.readonly</code>) để nhận diện kênh, danh sách phát, video và trạng thái học liệu;</li>
+          <li>không đăng video, không sửa video, không xóa video và không thay đổi nội dung kênh YouTube của người dùng.</li>
+        </ul>
+
+        <h2 class="h5 mt-4">3. Dữ liệu ứng dụng lưu trữ</h2>
+        <p>Để cung cấp các chức năng của hệ thống, ứng dụng có thể lưu:</p>
+        <ul>
+          <li>tên, email, vai trò và định danh Google của giảng viên đã đăng nhập;</li>
+          <li>token OAuth cần thiết để duy trì kết nối Google/YouTube; token được mã hóa trước khi lưu trong cơ sở dữ liệu;</li>
+          <li>metadata của kênh, danh sách phát và video như tiêu đề, mã YouTube, trạng thái riêng tư, khả năng nhúng và thời điểm đồng bộ;</li>
+          <li>thông tin học phần, lớp, mã QR động và lịch sử thay đổi video đích;</li>
+          <li>mã định danh GV/SV, vai trò, lớp, học phần, mã QR, video và thời điểm quét;</li>
+          <li>dữ liệu quá trình xem video như play/pause/ended, thời lượng xem ước tính, vị trí xa nhất và tỷ lệ hoàn thành.</li>
+        </ul>
+        <p>Hệ thống thử nghiệm <strong>không lưu địa chỉ IP thô</strong> trong lịch sử quét mã QR.</p>
+
+        <h2 class="h5 mt-4">4. Cách dữ liệu được sử dụng</h2>
+        <p>Dữ liệu chỉ được sử dụng để cung cấp và cải thiện các chức năng hiển thị trong ứng dụng, bao gồm đồng bộ học liệu, tạo và quản lý QR động, thống kê việc khai thác học liệu, kiểm thử kỹ thuật, sao lưu/khôi phục và tổng hợp minh chứng cho đề tài nghiên cứu.</p>
+        <p>Dữ liệu thời lượng xem chỉ là giá trị ước tính từ trạng thái trình phát; ứng dụng không dùng dữ liệu này để tự động kết luận mức độ chú ý, mức độ hiểu bài hoặc kết quả học tập của người học.</p>
+
+        <h2 class="h5 mt-4">5. Chia sẻ và chuyển giao dữ liệu</h2>
+        <p>Ứng dụng không bán dữ liệu người dùng, không cung cấp dữ liệu cho mạng quảng cáo, nhà môi giới dữ liệu hoặc bên thứ ba để quảng cáo cá nhân hóa, chấm điểm tín dụng hay các mục đích thương mại không liên quan đến chức năng của ứng dụng.</p>
+        <p>Dữ liệu có thể được xử lý bởi các dịch vụ hạ tầng cần thiết để vận hành ứng dụng (ví dụ máy chủ ứng dụng và cơ sở dữ liệu) và bởi Google/YouTube khi thực hiện xác thực hoặc truy vấn API. Việc sử dụng dữ liệu Google tuân theo <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, bao gồm các yêu cầu Limited Use.</p>
+
+        <h2 class="h5 mt-4">6. Bảo vệ dữ liệu</h2>
+        <p>Ứng dụng sử dụng HTTPS khi triển khai công khai, giới hạn quyền truy cập theo vai trò, mã hóa token OAuth trước khi lưu và không đưa Client Secret hoặc token người dùng vào mã nguồn công khai. Nhật ký lỗi và dữ liệu thống kê chỉ được truy cập theo quyền của hệ thống.</p>
+
+        <h2 class="h5 mt-4">7. Lưu giữ và xóa dữ liệu</h2>
+        <p>Dữ liệu được lưu trong thời gian cần thiết để vận hành ứng dụng, phục vụ giảng dạy, kiểm thử và nghiên cứu theo phạm vi đề tài. Người dùng có thể thu hồi quyền truy cập của ứng dụng trong phần bảo mật của Tài khoản Google. Khi cần yêu cầu xóa dữ liệu tài khoản hoặc dữ liệu liên quan trong hệ thống, người dùng liên hệ quản trị viên/nhóm nghiên cứu qua thông tin liên hệ bên dưới.</p>
+
+        <h2 class="h5 mt-4">8. Quyền và trách nhiệm của người dùng</h2>
+        <p>Người dùng có thể từ chối cấp quyền Google, thu hồi quyền đã cấp hoặc yêu cầu giải thích về dữ liệu đang được xử lý. Việc thu hồi quyền Google có thể làm mất khả năng đồng bộ kênh YouTube cho đến khi người dùng cấp quyền lại.</p>
+
+        <h2 class="h5 mt-4">9. Thay đổi chính sách</h2>
+        <p>Chính sách này sẽ được cập nhật khi ứng dụng thay đổi cách truy cập, sử dụng, lưu trữ hoặc chia sẻ dữ liệu. Phiên bản hiện hành luôn được công bố tại trang này.</p>
+
+        <h2 class="h5 mt-4">10. Liên hệ</h2>
+        <p class="mb-1"><strong>Đơn vị:</strong> {{ school_name }}</p>
+        <p class="mb-1"><strong>Nhóm tác giả:</strong> {{ authors|join(' – ') }}</p>
+        {% if support_email %}<p class="mb-0"><strong>Email hỗ trợ:</strong> <a href="mailto:{{ support_email }}">{{ support_email }}</a></p>{% else %}<p class="mb-0"><strong>Liên hệ:</strong> Quản trị viên ứng dụng hoặc nhóm tác giả tại {{ school_name }}.</p>{% endif %}
+
+        <div class="alert alert-light border mt-4 mb-0">
+          <strong>Cam kết Limited Use:</strong> Việc sử dụng dữ liệu người dùng nhận từ Google APIs tuân thủ Google API Services User Data Policy, bao gồm các yêu cầu Limited Use; dữ liệu không được sử dụng để phục vụ quảng cáo hoặc huấn luyện mô hình AI/ML tổng quát.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

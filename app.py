@@ -116,10 +116,37 @@ def owner_filter(model):
 
 
 def safe_filename(value: str, fallback: str = "ma_qr") -> str:
-    value = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii")
-    value = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")
-    value = re.sub(r"_+", "_", value)
-    return (value[:150] or fallback)
+    """Tạo tên tệp an toàn nhưng GIỮ NGUYÊN tiếng Việt có dấu.
+
+    Chỉ loại các ký tự không hợp lệ trong tên tệp Windows/macOS và ký tự điều khiển;
+    không phiên âm/khử dấu. Nhờ đó tên tệp QR tải về đúng tên video YouTube.
+    """
+    value = unicodedata.normalize("NFC", (value or "").strip())
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", value)
+    value = re.sub(r"\s+", " ", value).strip(" .")
+    return (value[:180] or fallback)
+
+
+
+
+def assign_auto_course_code(course: Course) -> str:
+    """Sinh mã học phần tự động, ổn định và không yêu cầu GV nhập.
+
+    Dùng khóa chính của CSDL để mã không trùng ngay cả khi nhiều giảng viên thao tác
+    đồng thời. Mã chỉ phục vụ nhận diện nội bộ; người dùng chủ yếu làm việc bằng tên học phần.
+    """
+    if not course.id:
+        db.session.flush()
+    course.code = f"HP{course.id:06d}"
+    return course.code
+
+
+def assign_auto_class_code(class_group: ClassGroup) -> str:
+    """Sinh mã lớp tự động; GV chỉ cần nhập tên lớp."""
+    if not class_group.id:
+        db.session.flush()
+    class_group.code = f"L{class_group.id:06d}"
+    return class_group.code
 
 
 def video_is_usable(video: Video | None) -> bool:
@@ -166,11 +193,14 @@ def create_qr_for_course_video(course: Course, video: Video, user: User, link: C
     if link and link.qr_id:
         existing = db.session.get(QrCode, link.qr_id)
         if existing and existing.active:
+            # Luôn đồng bộ tên mã QR theo đúng tên video YouTube, giữ nguyên tiếng Việt có dấu.
+            existing.title = (video.title or "Video")[:255]
             return existing, False
     existing = active_qr_for_course_video(course.id, video.id, user.id)
     if existing:
         if link and link.qr_id != existing.id:
             link.qr_id = existing.id
+        existing.title = (video.title or "Video")[:255]
         return existing, False
     t0 = time.perf_counter()
     slug = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:12]
@@ -239,9 +269,10 @@ def generate_branded_qr(qr: QrCode):
 
 
 def qr_download_name(qr: QrCode) -> str:
-    course_code = safe_filename(qr.course.code if qr.course else "QR")
-    title = safe_filename(qr.title, qr.slug)
-    return f"{course_code}_{title}.png"
+    # Tên tệp QR = đúng tên video, không thêm mã học phần/slug; giữ nguyên tiếng Việt có dấu.
+    target = qr.current_target
+    video_title = target.video.title if target and target.video and target.video.title else qr.title
+    return f"{safe_filename(video_title, qr.slug)}.png"
 
 
 def register_routes(app):
@@ -256,6 +287,7 @@ def register_routes(app):
             "school_name": current_app.config["SCHOOL_NAME"],
             "authors": current_app.config["AUTHORS"],
             "brand_logo": current_app.config["BRAND_LOGO"],
+            "support_email": sorted(current_app.config["ADMIN_EMAILS"])[0] if current_app.config["ADMIN_EMAILS"] else "",
         }
 
     @app.get("/health")
@@ -265,6 +297,10 @@ def register_routes(app):
             return jsonify({"status": "ok", "database": "ok"})
         except Exception as exc:
             return jsonify({"status": "error", "detail": str(exc)}), 500
+
+    @app.get("/privacy")
+    def privacy_policy():
+        return render_template("privacy.html")
 
     @app.get("/")
     def index():
@@ -478,22 +514,32 @@ def register_routes(app):
     def courses_page():
         user = current_user()
         if request.method == "POST":
-            code = request.form.get("code", "").strip()
-            name = request.form.get("name", "").strip()
+            name = request.form.get("course_name", "").strip()
             unit = request.form.get("unit_name", "").strip()
-            if not code or not name:
-                flash("Cần nhập mã và tên học phần.", "warning")
+            if not name or not unit:
+                flash("Vui lòng nhập tên học phần và tên khoa/bộ môn.", "warning")
             else:
                 try:
-                    db.session.add(Course(owner_id=user.id, code=code, name=name, unit_name=unit))
+                    # GV không phải tự đặt mã. Tạo mã tạm để lấy ID, sau đó đổi sang mã tự động ổn định.
+                    course = Course(
+                        owner_id=user.id,
+                        code=f"TMP-{secrets.token_hex(8)}",
+                        name=name,
+                        unit_name=unit,
+                    )
+                    db.session.add(course)
+                    db.session.flush()
+                    assign_auto_course_code(course)
                     db.session.commit()
-                    flash("Đã thêm học phần.", "success")
+                    flash(f"Đã thêm học phần “{course.name}”. Mã học phần được hệ thống tự tạo.", "success")
                 except Exception as exc:
                     db.session.rollback()
                     flash(f"Không thêm được học phần: {exc}", "danger")
             return redirect(url_for("courses_page"))
         courses = Course.query.filter_by(owner_id=user.id).order_by(Course.created_at.desc()).all()
-        return render_template("courses.html", courses=courses)
+        # Chỉ gợi ý lại tên khoa/bộ môn đã dùng; không gợi ý lại tên học phần cũ.
+        unit_options = sorted({(c.unit_name or "").strip() for c in courses if (c.unit_name or "").strip()}, key=str.casefold)
+        return render_template("courses.html", courses=courses, unit_options=unit_options)
 
     @app.post("/courses/<int:course_id>/classes")
     @login_required
@@ -502,16 +548,24 @@ def register_routes(app):
         user = current_user()
         if user.role != "admin" and course.owner_id != user.id:
             abort(403)
-        code = request.form.get("code", "").strip()
-        name = request.form.get("name", "").strip()
-        if code and name:
-            try:
-                db.session.add(ClassGroup(course_id=course.id, code=code, name=name))
-                db.session.commit()
-                flash("Đã thêm lớp.", "success")
-            except Exception as exc:
-                db.session.rollback()
-                flash(f"Không thêm được lớp: {exc}", "danger")
+        name = request.form.get("class_name", "").strip()
+        if not name:
+            flash("Vui lòng nhập tên lớp.", "warning")
+            return redirect(url_for("courses_page"))
+        try:
+            class_group = ClassGroup(
+                course_id=course.id,
+                code=f"TMP-{secrets.token_hex(8)}",
+                name=name,
+            )
+            db.session.add(class_group)
+            db.session.flush()
+            assign_auto_class_code(class_group)
+            db.session.commit()
+            flash(f"Đã thêm lớp “{class_group.name}”. Mã lớp được hệ thống tự tạo.", "success")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thêm được lớp: {exc}", "danger")
         return redirect(url_for("courses_page"))
 
     @app.post("/courses/<int:course_id>/qr/bulk")
@@ -542,7 +596,10 @@ def register_routes(app):
             f"Tạo mã QR hoàn tất: {created} mã mới, {existing} video đã có mã, {skipped} video chưa đủ điều kiện sử dụng.",
             "success" if created or existing else "warning",
         )
-        return redirect(url_for("courses_page"))
+        # Khi tạo mã từ trang Quản lý mã QR động, giữ người dùng ở chính trang đó.
+        # Khi tạo từ trang Học phần, quay lại trang Học phần như trước.
+        return_to = request.form.get("return_to", "courses").strip().lower()
+        return redirect(url_for("qr_page" if return_to == "qr" else "courses_page"))
 
     @app.get("/courses/<int:course_id>/qr.zip")
     @login_required
@@ -580,12 +637,13 @@ def register_routes(app):
                 return redirect(url_for("qr_page"))
             if course and not course_owned_by_user(course, user):
                 abort(403)
-            title = (request.form.get("title", "").strip() or video.title or "Video")[:255]
+            # Tên mã QR luôn đúng bằng tên video YouTube, giữ nguyên tiếng Việt có dấu.
+            title = (video.title or "Video")[:255]
             if course:
                 link, _ = ensure_course_video_link(course, video, user)
                 qr, was_created = create_qr_for_course_video(course, video, user, link)
+                qr.title = title
                 if was_created:
-                    qr.title = title
                     db.session.commit()
                     flash("Đã tạo mã QR động thành công.", "success")
                 else:
@@ -604,6 +662,19 @@ def register_routes(app):
             return redirect(url_for("qr_page"))
 
         qrs = QrCode.query.filter_by(owner_id=user.id).order_by(QrCode.created_at.desc()).all()
+        # Đồng bộ lại tên các mã QR cũ: tên hiển thị luôn chính xác bằng tên video hiện tại,
+        # không thêm mã học phần, slug hay bất kỳ tiền tố/hậu tố nào.
+        title_changed = False
+        for existing_qr in qrs:
+            target = existing_qr.current_target
+            if target and target.video and target.video.title:
+                exact_title = target.video.title[:255]
+                if existing_qr.title != exact_title:
+                    existing_qr.title = exact_title
+                    title_changed = True
+        if title_changed:
+            db.session.commit()
+
         videos = visible_video_query(user).filter(
             Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False)
         ).order_by(Video.title).all()
@@ -850,6 +921,13 @@ def register_routes(app):
         scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(500).all()
         watches = watch_q.order_by(WatchSession.started_at.desc()).limit(500).all()
 
+        # Bộ lọc lớp dùng tên lớp thân thiện; mã lớp tự động chỉ dùng nội bộ.
+        class_q = ClassGroup.query.join(Course, ClassGroup.course_id == Course.id)
+        if user.role != "admin":
+            class_q = class_q.filter(Course.owner_id == user.id)
+        class_options = class_q.order_by(ClassGroup.name).all()
+        class_name_map = {c.code: c.name for c in class_options}
+
         day_q = db.session.query(func.date(ScanLog.scanned_at), func.count(ScanLog.id)).join(QrCode, ScanLog.qr_id == QrCode.id)
         if user.role != "admin":
             day_q = day_q.filter(QrCode.owner_id == user.id)
@@ -857,7 +935,8 @@ def register_routes(app):
         chart_labels = [str(x[0]) for x in by_day]
         chart_values = [x[1] for x in by_day]
         return render_template("analytics.html", scans=scans, watches=watches,
-                               chart_labels=chart_labels, chart_values=chart_values)
+                               chart_labels=chart_labels, chart_values=chart_values,
+                               class_options=class_options, class_name_map=class_name_map)
 
     @app.get("/exports/scans.csv")
     @login_required

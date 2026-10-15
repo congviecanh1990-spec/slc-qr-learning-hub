@@ -12,7 +12,7 @@
 <form method="post" action="{{ url_for('assign_videos_to_course') }}" id="assignForm">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="card shadow-sm mb-3"><div class="card-body d-flex flex-wrap gap-2 align-items-end">
-    <div class="flex-grow-1"><label class="form-label small">Học phần đích</label><select class="form-select" name="course_id" required><option value="">— Chọn học phần —</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.code }} — {{ c.name }}</option>{% endfor %}</select></div>
+    <div class="flex-grow-1"><label class="form-label small">Học phần đích</label><select class="form-select" name="course_id" required><option value="">— Chọn học phần —</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
     <button class="btn btn-primary">Gán video đã chọn vào học phần</button>
     <span class="text-muted small" id="selectedCount">Đã chọn: 0 video</span>
   </div></div>
@@ -21,7 +21,7 @@
     <td><input class="form-check-input video-check" type="checkbox" name="video_ids" value="{{ v.id }}"></td>
     <td><div class="d-flex gap-2 align-items-center">{% if v.thumbnail_url %}<img class="thumb" src="{{ v.thumbnail_url }}" alt="">{% endif %}<div><div class="fw-semibold">{{ v.title }}</div><div class="small text-muted">{{ v.youtube_video_id }}</div></div></div></td>
     <td>{{ v.channel.title }}</td>
-    <td>{% for link in v.course_links %}<span class="badge text-bg-light border me-1 mb-1">{{ link.course.code }}</span>{% else %}<span class="text-muted small">Chưa gán</span>{% endfor %}</td>
+    <td>{% for link in v.course_links %}<span class="badge text-bg-light border me-1 mb-1">{{ link.course.name }}</span>{% else %}<span class="text-muted small">Chưa gán</span>{% endfor %}</td>
     <td>{{ 'Có thể phát' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'Cần kiểm tra' }}</td>
     <td><span class="badge {{ 'text-bg-success' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'text-bg-warning' }}">{{ v.status_label }}</span></td>
   </tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Không có video phù hợp bộ lọc.</td></tr>{% endfor %}
