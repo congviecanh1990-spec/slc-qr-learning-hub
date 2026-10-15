@@ -7,3 +7,6 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 
 /* v2.2: tiêu đề trang đăng nhập luôn hiển thị trên một dòng. */
 .landing-app-title{white-space:nowrap;font-size:clamp(.72rem,3.1vw,2.8rem);letter-spacing:-.02em;line-height:1.15;max-width:100%;margin-left:auto;margin-right:auto}
+
+/* v2.5: chức năng đang mở được làm nổi bật rõ ràng trên thanh menu. */
+.navbar .nav-link.nav-current{color:#dc3545!important;font-weight:800}

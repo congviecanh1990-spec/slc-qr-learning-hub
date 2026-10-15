@@ -105,7 +105,11 @@ class Course(db.Model):
     owner_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     code = db.Column(db.String(64), nullable=False)
     name = db.Column(db.String(255), nullable=False)
+    # unit_name được giữ để tương thích dữ liệu/backup cũ. Từ v2.5,
+    # faculty_name và department_name là hai thông tin nghiệp vụ riêng biệt.
     unit_name = db.Column(db.String(255), nullable=True)
+    faculty_name = db.Column(db.String(255), nullable=True)
+    department_name = db.Column(db.String(255), nullable=True)
     active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     owner = db.relationship("User", backref=db.backref("courses", cascade="all,delete"))

@@ -23,7 +23,7 @@ from flask import (
     render_template, request, send_file, session, url_for
 )
 from flask_wtf.csrf import CSRFProtect
-from sqlalchemy import func, text, DateTime
+from sqlalchemy import func, text, DateTime, inspect
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
@@ -64,9 +64,34 @@ def create_app():
     with app.app_context():
         if app.config["AUTO_CREATE_DB"]:
             db.create_all()
+            ensure_schema_upgrades()
 
     return app
 
+
+
+def ensure_schema_upgrades():
+    """Nâng cấp nhẹ schema khi deploy mà không xóa PostgreSQL hiện có.
+
+    db.create_all() không tự thêm cột vào bảng đã tồn tại, vì vậy v2.5 tự bổ sung
+    khoa và bộ môn cho bảng courses, đồng thời giữ nguyên dữ liệu v2.4 trở về trước.
+    """
+    inspector = inspect(db.engine)
+    if "courses" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("courses")}
+    with db.engine.begin() as conn:
+        if "faculty_name" not in columns:
+            conn.execute(text("ALTER TABLE courses ADD COLUMN faculty_name VARCHAR(255)"))
+        if "department_name" not in columns:
+            conn.execute(text("ALTER TABLE courses ADD COLUMN department_name VARCHAR(255)"))
+        # Dữ liệu cũ chỉ có unit_name. Giữ nguyên nội dung đó như tên khoa để không mất dữ liệu.
+        conn.execute(text("""
+            UPDATE courses
+            SET faculty_name = unit_name
+            WHERE (faculty_name IS NULL OR faculty_name = '')
+              AND unit_name IS NOT NULL AND unit_name <> ''
+        """))
 
 def login_required(fn):
     @wraps(fn)
@@ -278,8 +303,22 @@ def qr_download_name(qr: QrCode) -> str:
 def register_routes(app):
     @app.context_processor
     def inject_globals():
+        endpoint = request.endpoint or ""
+        section_map = {
+            "youtube_page": "youtube", "youtube_sync": "youtube", "youtube_websub_subscribe": "youtube",
+            "videos_page": "videos", "assign_videos_to_course": "videos",
+            "courses_page": "courses", "add_class": "courses", "update_course_info": "courses",
+            "create_course_qrs_bulk": "courses", "download_course_qrs": "courses",
+            "qr_page": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr",
+            "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
+            "research_page": "research",
+            "error_logs_page": "errors",
+            "backup_zip": "backup",
+            "restore_backup": "restore",
+        }
         return {
             "me": current_user(),
+            "active_section": section_map.get(endpoint, ""),
             "heartbeat_seconds": current_app.config["HEARTBEAT_SECONDS"],
             "completion_threshold": current_app.config["COMPLETION_THRESHOLD"],
             "app_name": current_app.config["APP_NAME"],
@@ -363,8 +402,9 @@ def register_routes(app):
             else:
                 user.name = info.get("name") or user.name
                 user.google_sub = info.get("sub") or user.google_sub
-                if email in current_app.config["ADMIN_EMAILS"]:
-                    user.role = "admin"
+                # Quyền quản trị chỉ dựa trên ADMIN_EMAILS hiện hành. Mọi tài khoản
+                # Google khác luôn là giảng viên, kể cả trước đây từng được cấu hình admin.
+                user.role = "admin" if email in current_app.config["ADMIN_EMAILS"] else "lecturer"
             user.last_login_at = utcnow()
 
             account = OAuthAccount.query.filter_by(user_id=user.id).first()
@@ -475,10 +515,12 @@ def register_routes(app):
             q = q.filter(Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False))
         if search:
             q = q.filter(Video.title.ilike(f"%{search}%"))
+        owned_course_ids = db.session.query(Course.id).filter(Course.owner_id == user.id)
+        assigned_video_ids = db.session.query(CourseVideo.video_id).filter(CourseVideo.course_id.in_(owned_course_ids))
         if assignment == "unassigned":
-            q = q.outerjoin(CourseVideo, CourseVideo.video_id == Video.id).filter(CourseVideo.id.is_(None))
+            q = q.filter(~Video.id.in_(assigned_video_ids))
         elif assignment == "assigned":
-            q = q.join(CourseVideo, CourseVideo.video_id == Video.id).distinct()
+            q = q.filter(Video.id.in_(assigned_video_ids))
         videos = q.order_by(Video.published_at.desc().nullslast(), Video.id.desc()).all()
         courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
         return render_template("videos.html", videos=videos, status=status, assignment=assignment, search=search, courses=courses)
@@ -515,9 +557,10 @@ def register_routes(app):
         user = current_user()
         if request.method == "POST":
             name = request.form.get("course_name", "").strip()
-            unit = request.form.get("unit_name", "").strip()
-            if not name or not unit:
-                flash("Vui lòng nhập tên học phần và tên khoa/bộ môn.", "warning")
+            faculty = request.form.get("faculty_name", "").strip()
+            department = request.form.get("department_name", "").strip()
+            if not name or not faculty or not department:
+                flash("Vui lòng nhập tên học phần, tên khoa và bộ môn quản lý học phần.", "warning")
             else:
                 try:
                     # GV không phải tự đặt mã. Tạo mã tạm để lấy ID, sau đó đổi sang mã tự động ổn định.
@@ -525,7 +568,9 @@ def register_routes(app):
                         owner_id=user.id,
                         code=f"TMP-{secrets.token_hex(8)}",
                         name=name,
-                        unit_name=unit,
+                        unit_name=faculty,  # giữ tương thích dữ liệu/backup cũ
+                        faculty_name=faculty,
+                        department_name=department,
                     )
                     db.session.add(course)
                     db.session.flush()
@@ -537,9 +582,34 @@ def register_routes(app):
                     flash(f"Không thêm được học phần: {exc}", "danger")
             return redirect(url_for("courses_page"))
         courses = Course.query.filter_by(owner_id=user.id).order_by(Course.created_at.desc()).all()
-        # Chỉ gợi ý lại tên khoa/bộ môn đã dùng; không gợi ý lại tên học phần cũ.
-        unit_options = sorted({(c.unit_name or "").strip() for c in courses if (c.unit_name or "").strip()}, key=str.casefold)
-        return render_template("courses.html", courses=courses, unit_options=unit_options)
+        # Không gợi ý tên học phần cũ. Tên khoa và bộ môn được gợi ý để GV chọn lại nhanh.
+        faculty_options = sorted({((c.faculty_name or c.unit_name) or "").strip() for c in courses if ((c.faculty_name or c.unit_name) or "").strip()}, key=str.casefold)
+        department_options = sorted({(c.department_name or "").strip() for c in courses if (c.department_name or "").strip()}, key=str.casefold)
+        return render_template(
+            "courses.html",
+            courses=courses,
+            faculty_options=faculty_options,
+            department_options=department_options,
+        )
+
+    @app.post("/courses/<int:course_id>/info")
+    @login_required
+    def update_course_info(course_id):
+        user = current_user()
+        course = db.session.get(Course, course_id) or abort(404)
+        if not course_owned_by_user(course, user):
+            abort(403)
+        faculty = request.form.get("faculty_name", "").strip()
+        department = request.form.get("department_name", "").strip()
+        if not faculty or not department:
+            flash("Vui lòng nhập đầy đủ tên khoa và bộ môn quản lý học phần.", "warning")
+            return redirect(url_for("courses_page"))
+        course.faculty_name = faculty
+        course.department_name = department
+        course.unit_name = faculty  # giữ tương thích với dữ liệu cũ
+        db.session.commit()
+        flash(f"Đã cập nhật khoa và bộ môn cho học phần “{course.name}”.", "success")
+        return redirect(url_for("courses_page"))
 
     @app.post("/courses/<int:course_id>/classes")
     @login_required
@@ -630,7 +700,7 @@ def register_routes(app):
         if request.method == "POST":
             video_id = request.form.get("video_id", type=int)
             course_id = request.form.get("course_id", type=int)
-            video = db.session.get(Video, video_id) if video_id else None
+            video = visible_video_query(user).filter(Video.id == video_id).first() if video_id else None
             course = db.session.get(Course, course_id) if course_id else None
             if not video or not video_is_usable(video):
                 flash("Vui lòng chọn một video có thể sử dụng.", "warning")
@@ -696,7 +766,9 @@ def register_routes(app):
         if user.role != "admin" and qr.owner_id != user.id:
             abort(403)
         video_id = request.form.get("video_id", type=int)
-        video = db.session.get(Video, video_id) or abort(400)
+        video = visible_video_query(user).filter(Video.id == video_id).first() if video_id else None
+        if not video:
+            abort(403)
         if not video_is_usable(video):
             flash("Video mới chưa đủ điều kiện sử dụng.", "warning")
             return redirect(url_for("qr_page"))
@@ -970,6 +1042,8 @@ def register_routes(app):
     @login_required
     def research_page():
         user = current_user()
+        if user.role != "admin":
+            abort(403)
         if request.method == "POST":
             form_type = request.form.get("form_type")
             try:
@@ -1011,9 +1085,9 @@ def register_routes(app):
             return redirect(url_for("research_page"))
 
         metrics = acceptance_metrics(user)
-        experiments = ExperimentRun.query.filter_by(owner_id=user.id).order_by(ExperimentRun.created_at.desc()).limit(50).all()
-        tests = FunctionalTestRun.query.filter_by(owner_id=user.id).order_by(FunctionalTestRun.created_at.desc()).limit(50).all()
-        surveys = SurveyResult.query.filter_by(owner_id=user.id).order_by(SurveyResult.created_at.desc()).limit(50).all()
+        experiments = ExperimentRun.query.order_by(ExperimentRun.created_at.desc()).limit(100).all()
+        tests = FunctionalTestRun.query.order_by(FunctionalTestRun.created_at.desc()).limit(100).all()
+        surveys = SurveyResult.query.order_by(SurveyResult.created_at.desc()).limit(100).all()
         return render_template("research.html", metrics=metrics, experiments=experiments, tests=tests, surveys=surveys)
 
     @app.get("/admin/backup.zip")
@@ -1177,6 +1251,12 @@ def restore_from_zip(fileobj):
         db.session.commit()
 
 def acceptance_metrics(user):
+    """Tính chỉ tiêu nghiệm thu.
+
+    Khi người dùng là quản trị viên, số liệu được tổng hợp trên toàn hệ thống để
+    phản ánh thực nghiệm của nhiều giảng viên/bộ môn. Nhánh người dùng thường vẫn
+    được giữ để hàm có thể tái sử dụng khi cần.
+    """
     scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
     if user.role != "admin":
         scan_q = scan_q.filter(QrCode.owner_id == user.id)
@@ -1184,16 +1264,19 @@ def acceptance_metrics(user):
     scans_success = scan_q.filter(ScanLog.success.is_(True)).count()
     scan_rate = round(100 * scans_success / scans_total, 1) if scans_total else None
 
-    tests_total = FunctionalTestRun.query.filter_by(owner_id=user.id).count()
-    tests_pass = FunctionalTestRun.query.filter_by(owner_id=user.id, passed=True).count()
+    tests_q = FunctionalTestRun.query if user.role == "admin" else FunctionalTestRun.query.filter_by(owner_id=user.id)
+    tests_total = tests_q.count()
+    tests_pass = tests_q.filter(FunctionalTestRun.passed.is_(True)).count()
     test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
 
-    manual = ExperimentRun.query.filter_by(owner_id=user.id, mode="manual").all()
-    webapp = ExperimentRun.query.filter_by(owner_id=user.id, mode="webapp").all()
+    exp_q = ExperimentRun.query if user.role == "admin" else ExperimentRun.query.filter_by(owner_id=user.id)
+    manual = exp_q.filter(ExperimentRun.mode == "manual").all()
+    webapp = exp_q.filter(ExperimentRun.mode == "webapp").all()
     manual_ops = sum(x.operations_count for x in manual) / len(manual) if manual else None
     app_ops = sum(x.operations_count for x in webapp) / len(webapp) if webapp else None
     manual_time = sum(x.elapsed_seconds for x in manual) / len(manual) if manual else None
     app_time = sum(x.elapsed_seconds for x in webapp) / len(webapp) if webapp else None
+
     qr_perf_q = QrCode.query.filter(QrCode.processing_seconds.isnot(None))
     if user.role != "admin":
         qr_perf_q = qr_perf_q.filter(QrCode.owner_id == user.id)
@@ -1204,8 +1287,9 @@ def acceptance_metrics(user):
     reduction_ops = round(100 * (manual_ops - app_ops) / manual_ops, 1) if manual_ops and app_ops is not None else None
     reduction_time = round(100 * (manual_time - app_time) / manual_time, 1) if manual_time and app_time is not None else None
 
-    lecturer_s = SurveyResult.query.filter_by(owner_id=user.id, respondent_type="GV").all()
-    student_s = SurveyResult.query.filter_by(owner_id=user.id, respondent_type="SV").all()
+    survey_q = SurveyResult.query if user.role == "admin" else SurveyResult.query.filter_by(owner_id=user.id)
+    lecturer_s = survey_q.filter(SurveyResult.respondent_type == "GV").all()
+    student_s = survey_q.filter(SurveyResult.respondent_type == "SV").all()
     lecturer_sat = round(100 * len([x for x in lecturer_s if x.rating >= 4]) / len(lecturer_s), 1) if lecturer_s else None
     student_sat = round(100 * len([x for x in student_s if x.rating >= 4]) / len(student_s), 1) if student_s else None
 
@@ -1219,14 +1303,28 @@ def acceptance_metrics(user):
     if user.role != "admin":
         video_q = video_q.filter(YouTubeChannel.user_id == user.id)
 
+    course_q = Course.query if user.role == "admin" else Course.query.filter_by(owner_id=user.id)
+    course_count = course_q.count()
+
+    # Mỗi tổ hợp Khoa + Bộ môn được tính là một đơn vị tham gia thực nghiệm.
+    # Nhờ vậy nhiều bộ môn trong cùng một khoa vẫn được ghi nhận riêng.
+    unit_rows = course_q.with_entities(Course.faculty_name, Course.department_name, Course.unit_name).all()
+    unit_keys = set()
+    for faculty, department, legacy_unit in unit_rows:
+        faculty = (faculty or legacy_unit or "").strip()
+        department = (department or "").strip()
+        if faculty or department:
+            unit_keys.add((faculty.casefold(), department.casefold()))
+    unit_count = len(unit_keys)
+
     return [
         metric("Tỷ lệ QR quét thành công", scan_rate, ">=", 98, "%"),
         metric("Thời gian xử lý hệ thống trung bình/video", round(avg_processing, 2) if avg_processing is not None else None, "<=", 5, " giây"),
         metric("Giảm số thao tác so với thủ công", reduction_ops, ">=", 30, "%"),
         metric("Giảm tổng thời gian so với thủ công", reduction_time, ">=", 30, "%"),
         metric("Tỷ lệ ca kiểm thử chức năng đạt", test_rate, ">=", 95, "%"),
-        metric("Số học phần thực nghiệm", Course.query.filter_by(owner_id=user.id).count(), ">=", 3, ""),
-        metric("Số đơn vị/khoa/bộ môn", db.session.query(func.count(func.distinct(Course.unit_name))).filter(Course.owner_id == user.id, Course.unit_name.isnot(None), Course.unit_name != "").scalar() or 0, ">=", 2, ""),
+        metric("Số học phần thực nghiệm", course_count, ">=", 3, ""),
+        metric("Số đơn vị/khoa/bộ môn", unit_count, ">=", 2, ""),
         metric("Số giảng viên tham gia", gv_count, ">=", 5, ""),
         metric("Số sinh viên tham gia", sv_count, ">=", 60, ""),
         metric("Số video/tình huống kiểm thử", video_q.count(), ">=", 100, ""),

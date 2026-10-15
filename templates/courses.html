@@ -3,7 +3,7 @@
 <div class="row g-4">
   <div class="col-lg-4">
     <h2>Quản lý học phần</h2>
-    <p class="text-muted">Giảng viên chỉ cần nhập tên học phần và tên khoa/bộ môn. Mã học phần được hệ thống tự động tạo.</p>
+    <p class="text-muted">Giảng viên chỉ cần nhập tên học phần, tên khoa và bộ môn quản lý học phần. Mã học phần được hệ thống tự động tạo.</p>
 
     <form method="post" class="card card-body shadow-sm" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -16,18 +16,31 @@
         autocomplete="off"
         placeholder="Ví dụ: Tin học văn phòng">
 
-      <label class="form-label">Tên khoa/bộ môn</label>
+      <label class="form-label">Tên khoa</label>
       <input
         class="form-control"
-        name="unit_name"
-        list="unit-name-options"
+        name="faculty_name"
+        list="faculty-name-options"
         required
         autocomplete="organization"
-        placeholder="Gõ mới hoặc chọn tên đã dùng">
-      <datalist id="unit-name-options">
-        {% for unit in unit_options %}<option value="{{ unit }}"></option>{% endfor %}
+        placeholder="Gõ mới hoặc chọn tên khoa đã dùng">
+      <datalist id="faculty-name-options">
+        {% for faculty in faculty_options %}<option value="{{ faculty }}"></option>{% endfor %}
       </datalist>
-      <div class="form-text mb-3">Các tên khoa/bộ môn đã nhập trước đây được gợi ý để có thể chọn lại nhanh.</div>
+      <div class="form-text mb-3">Tên khoa đã nhập trước đây được gợi ý để có thể chọn lại nhanh.</div>
+
+      <label class="form-label">Bộ môn quản lý học phần</label>
+      <input
+        class="form-control"
+        name="department_name"
+        list="department-name-options"
+        required
+        autocomplete="organization-title"
+        placeholder="Ví dụ: Bộ môn Công nghệ thông tin">
+      <datalist id="department-name-options">
+        {% for department in department_options %}<option value="{{ department }}"></option>{% endfor %}
+      </datalist>
+      <div class="form-text mb-3">Bộ môn được lưu riêng với khoa để phục vụ thử nghiệm ở nhiều chuyên ngành/bộ môn khác nhau.</div>
 
       <button class="btn btn-primary">Thêm học phần</button>
     </form>
@@ -51,7 +64,8 @@
           <div class="d-flex flex-wrap justify-content-between gap-3">
             <div>
               <h5 class="mb-1">{{ c.name }}</h5>
-              <div class="text-muted small">{{ c.unit_name or 'Chưa ghi khoa/bộ môn' }}</div>
+              <div class="small"><span class="text-muted">Khoa:</span> <b>{{ c.faculty_name or c.unit_name or 'Chưa cập nhật' }}</b></div>
+              <div class="small"><span class="text-muted">Bộ môn quản lý:</span> <b>{{ c.department_name or 'Chưa cập nhật' }}</b></div>
             </div>
             <div class="text-end small">
               <div>Video đã gán: <b>{{ total }}</b></div>
@@ -59,6 +73,26 @@
               <div>Chưa có mã QR: <b>{{ ns.usable_missing }}</b></div>
             </div>
           </div>
+
+          {% if not c.department_name %}
+          <div class="alert alert-warning py-2 small mt-3 mb-2">Học phần này được tạo ở phiên bản cũ. Vui lòng bổ sung bộ môn quản lý để dữ liệu thực nghiệm đầy đủ.</div>
+          {% endif %}
+
+          <details class="mt-2 mb-3">
+            <summary class="small text-primary" style="cursor:pointer">Cập nhật khoa / bộ môn</summary>
+            <form method="post" action="{{ url_for('update_course_info', course_id=c.id) }}" class="row g-2 mt-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="col-md-5">
+                <input class="form-control form-control-sm" name="faculty_name" list="faculty-name-options" value="{{ c.faculty_name or c.unit_name or '' }}" placeholder="Tên khoa" required>
+              </div>
+              <div class="col-md-5">
+                <input class="form-control form-control-sm" name="department_name" list="department-name-options" value="{{ c.department_name or '' }}" placeholder="Bộ môn quản lý" required>
+              </div>
+              <div class="col-md-2">
+                <button class="btn btn-outline-primary btn-sm w-100">Lưu</button>
+              </div>
+            </form>
+          </details>
 
           <div class="d-flex flex-wrap gap-2 mt-3">
             <form method="post" action="{{ url_for('create_course_qrs_bulk', course_id=c.id) }}">

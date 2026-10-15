@@ -1,4 +1,4 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.3
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.5
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
@@ -105,3 +105,12 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Bổ sung cam kết tuân thủ Google API Services User Data Policy và Limited Use.
 - Thêm liên kết **Chính sách quyền riêng tư** tại trang đăng nhập và footer toàn hệ thống để người dùng truy cập dễ dàng.
 - URL dùng để điền trong Google Auth Platform sau khi deploy: `https://<ten-mien-cua-web-app>/privacy`.
+
+## Hiệu chỉnh v2.5 — phân quyền giảng viên, khoa/bộ môn và menu đang chọn
+- Tài khoản không nằm trong `ADMIN_EMAILS` luôn được xác định là **Giảng viên** khi đăng nhập. Tài khoản giảng viên chỉ đồng bộ kênh/video của chính họ; chỉ quản lý học phần, QR và thống kê thuộc dữ liệu họ phụ trách.
+- Các chức năng quản trị/nghiệm thu (**Đánh giá nghiệm thu, Nhật ký lỗi, Sao lưu dữ liệu, Khôi phục dữ liệu**) chỉ hiển thị và cho phép truy cập với tài khoản **Quản trị viên**.
+- Trang **Học phần** tách rõ **Tên khoa** và **Bộ môn quản lý học phần** để hỗ trợ thực nghiệm với giảng viên thuộc nhiều chuyên ngành/bộ môn, kể cả nhiều bộ môn trong cùng một khoa.
+- `courses` có thêm `faculty_name` và `department_name`. Khi deploy lên PostgreSQL hiện có, ứng dụng tự bổ sung cột và giữ nguyên dữ liệu cũ; giá trị `unit_name` cũ được bảo toàn và dùng để khởi tạo tên khoa nếu có.
+- Học phần cũ thiếu bộ môn có cảnh báo và biểu mẫu cập nhật ngay tại thẻ học phần.
+- Chỉ tiêu **Số đơn vị/khoa/bộ môn** trong trang nghiệm thu tính theo tổ hợp **Khoa + Bộ môn**, vì vậy nhiều bộ môn trong cùng một khoa được ghi nhận riêng.
+- Thanh menu làm nổi bật chức năng đang mở bằng **chữ đậm, màu đỏ**; các chức năng khác giữ định dạng bình thường.

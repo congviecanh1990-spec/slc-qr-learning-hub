@@ -32,16 +32,16 @@
       <button class="navbar-toggler ms-auto" type="button" data-bs-toggle="collapse" data-bs-target="#navMain"><span class="navbar-toggler-icon"></span></button>
       <div class="collapse navbar-collapse" id="navMain">
         <ul class="navbar-nav me-auto mb-2 mb-xl-0">
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('youtube_page') }}">Kênh YouTube</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('videos_page') }}">Kho video học liệu</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('courses_page') }}">Học phần</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('qr_page') }}">Mã QR động</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('analytics') }}">Thống kê khai thác</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('research_page') }}">Đánh giá nghiệm thu</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'youtube' else '' }}" href="{{ url_for('youtube_page') }}">Kênh YouTube</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'videos' else '' }}" href="{{ url_for('videos_page') }}">Kho video học liệu</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'courses' else '' }}" href="{{ url_for('courses_page') }}">Học phần</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'qr' else '' }}" href="{{ url_for('qr_page') }}">Mã QR động</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'analytics' else '' }}" href="{{ url_for('analytics') }}">Thống kê khai thác</a></li>
           {% if me.role == 'admin' %}
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('error_logs_page') }}">Nhật ký lỗi</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('backup_zip') }}">Sao lưu dữ liệu</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('restore_backup') }}">Khôi phục dữ liệu</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'research' else '' }}" href="{{ url_for('research_page') }}">Đánh giá nghiệm thu</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'errors' else '' }}" href="{{ url_for('error_logs_page') }}">Nhật ký lỗi</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'backup' else '' }}" href="{{ url_for('backup_zip') }}">Sao lưu dữ liệu</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'restore' else '' }}" href="{{ url_for('restore_backup') }}">Khôi phục dữ liệu</a></li>
           {% endif %}
         </ul>
         <div class="d-lg-none small border-top pt-2 mt-2">
