@@ -313,7 +313,7 @@ def register_routes(app):
             "videos_page": "videos", "assign_videos_to_course": "videos",
             "courses_page": "courses", "add_class": "courses", "update_course_info": "courses",
             "create_course_qrs_bulk": "courses", "download_course_qrs": "courses",
-            "qr_page": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr",
+            "qr_page": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr", "delete_all_qrs": "qr",
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
             "research_page": "research",
             "error_logs_page": "errors",
@@ -873,6 +873,24 @@ def register_routes(app):
         )
         return redirect(url_for("qr_page"))
 
+    @app.post("/qr/delete-all")
+    @login_required
+    def delete_all_qrs():
+        user = current_user()
+        qrs = QrCode.query.filter_by(owner_id=user.id, active=True).all()
+        if not qrs:
+            flash("Không có mã QR nào để xóa.", "info")
+            return redirect(url_for("qr_page"))
+        qr_ids = [q.id for q in qrs]
+        for q in qrs:
+            q.active = False
+        if qr_ids:
+            for link in CourseVideo.query.filter(CourseVideo.qr_id.in_(qr_ids)).all():
+                link.qr_id = None
+        db.session.commit()
+        flash(f"Đã xóa {len(qrs)} mã QR khỏi danh sách sử dụng. Lịch sử quét/xem trước đây vẫn được giữ lại.", "success")
+        return redirect(url_for("qr_page"))
+
     @app.get("/qr/<int:qr_id>/png")
     @login_required
     def qr_png(qr_id):
@@ -1182,6 +1200,26 @@ def register_routes(app):
         tests = FunctionalTestRun.query.order_by(FunctionalTestRun.created_at.desc()).limit(100).all()
         surveys = SurveyResult.query.order_by(SurveyResult.created_at.desc()).limit(100).all()
         return render_template("research.html", metrics=metrics, experiments=experiments, tests=tests, surveys=surveys)
+
+    @app.post("/admin/reset-all-data")
+    @login_required
+    def reset_all_data():
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        try:
+            # Xóa toàn bộ dữ liệu theo thứ tự ngược để tôn trọng khóa ngoại.
+            # Giữ nguyên cấu trúc DB và cấu hình Render/Google OAuth bên ngoài DB.
+            for _, model in reversed(backup_table_specs()):
+                db.session.execute(model.__table__.delete())
+            db.session.commit()
+            session.clear()
+            flash("Đã xóa toàn bộ dữ liệu đã lưu. Vui lòng đăng nhập lại để bắt đầu phiên thử nghiệm mới.", "success")
+            return redirect(url_for("index"))
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thể xóa toàn bộ dữ liệu: {exc}", "danger")
+            return redirect(url_for("index"))
 
     @app.get("/admin/backup.zip")
     @login_required

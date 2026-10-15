@@ -18,3 +18,17 @@
   </div>
 </div>
 {% endblock %}
+{% if me and me.role == 'admin' %}
+<div class="card border-danger shadow-sm mt-4">
+  <div class="card-header fw-bold text-danger">Xóa dữ liệu thử nghiệm</div>
+  <div class="card-body">
+    <p class="mb-2">Nút dưới đây xóa toàn bộ dữ liệu đang lưu trong cơ sở dữ liệu của ứng dụng, bao gồm tài khoản đăng nhập, kết nối YouTube, video đã đồng bộ, học phần, lớp, mã QR, lịch sử quét/xem, dữ liệu kiểm thử và khảo sát. Cấu hình Render/Google OAuth không bị xóa.</p>
+    <p class="small text-danger fw-bold mb-3">Chỉ sử dụng khi cần làm sạch hoàn toàn dữ liệu thử nghiệm. Sau khi xóa, bạn sẽ phải đăng nhập lại và đồng bộ lại kênh YouTube.</p>
+    <form method="post" action="{{ url_for('reset_all_data') }}" onsubmit="return confirm('CẢNH BÁO: Thao tác này sẽ xóa TOÀN BỘ dữ liệu ứng dụng và không thể hoàn tác. Bạn có chắc chắn?') && confirm('Xác nhận lần cuối: xóa toàn bộ dữ liệu đã lưu?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-danger">Xóa toàn bộ dữ liệu đã lưu</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+

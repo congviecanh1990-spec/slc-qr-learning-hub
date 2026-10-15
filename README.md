@@ -1,4 +1,4 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.7
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.8
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
@@ -125,9 +125,17 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Bổ sung xóa lớp theo kiểu ẩn khỏi danh sách; dữ liệu lịch sử vẫn giữ nguyên. Bảng `class_groups` được tự động bổ sung cột `active` khi deploy lên PostgreSQL hiện có.
 
 
-## Hiệu chỉnh v2.7 — hướng dẫn đăng nhập thử nghiệm và tinh gọn footer
+## Hiệu chỉnh v2.8 — hướng dẫn đăng nhập thử nghiệm và tinh gọn footer
 - Bổ sung khung **Lưu ý khi đăng nhập thử nghiệm** ngay dưới nút **Đăng nhập bằng Google**, hướng dẫn xử lý màn hình “Google chưa xác minh ứng dụng này” trong giai đoạn thử nghiệm.
 - Khung hướng dẫn nêu rõ ứng dụng chỉ dùng quyền đọc dữ liệu kênh/video YouTube, không đăng, sửa hoặc xóa video.
 - Footer bỏ hai dòng lặp lại **TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE** và **Trường Cao đẳng Sơn La**.
 - Nhóm tác giả hiển thị đậm; bổ sung **Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài)**.
 - Dòng **Sản phẩm nghiên cứu khoa học cấp trường phục vụ giảng dạy** được hiển thị chữ nghiêng.
+
+
+## Bổ sung v2.8
+- Nút **Tạo một mã QR riêng** được đưa lên đầu trang Quản lý mã QR động và mở/đóng form tạo QR riêng.
+- Thêm nút **Xóa toàn bộ mã QR đã tạo** cho tài khoản hiện tại; QR ngừng hoạt động nhưng lịch sử quét/xem vẫn được giữ.
+- Thêm nút quản trị **Xóa toàn bộ dữ liệu đã lưu** ở trang Tổng quan để làm sạch dữ liệu thử nghiệm; thao tác xóa toàn bộ dữ liệu trong DB và yêu cầu đăng nhập lại, nhưng không xóa cấu hình Render/Google OAuth.
+- Trang chờ đăng nhập bỏ khối Nhóm tác giả ở giữa; thông tin tác giả chỉ còn ở cuối giao diện.
+- Khung lưu ý đăng nhập thử nghiệm chuyển sang nền xanh nhạt.

@@ -1,13 +1,13 @@
-# CẬP NHẬT v2.7 TRÊN RENDER
+# CẬP NHẬT v2.8 TRÊN RENDER
 
-1. Giải nén bộ mã nguồn v2.7.
+1. Giải nén bộ mã nguồn v2.8.
 2. Upload toàn bộ file/thư mục lên repository GitHub `slc-qr-learning-hub` hiện tại.
 3. Commit vào nhánh `main`.
 4. Render tự deploy lại Web Service.
 5. Chờ trạng thái `Deploy succeeded` / `Live`.
 6. Mở Web App và nhấn Ctrl+F5.
 
-Không xóa PostgreSQL. Bản v2.7 chỉ hiệu chỉnh giao diện/trình bày và kế thừa nguyên trạng dữ liệu v2.6.
+Không xóa PostgreSQL. Bản v2.8 chỉ hiệu chỉnh giao diện/trình bày và kế thừa nguyên trạng dữ liệu v2.6.
 
 ## Kiểm tra nhanh sau deploy
 - Trang đăng nhập có khung **Lưu ý khi đăng nhập thử nghiệm** ngay dưới nút Đăng nhập bằng Google.

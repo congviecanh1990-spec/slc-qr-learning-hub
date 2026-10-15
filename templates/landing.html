@@ -8,21 +8,13 @@
     <p class="lead mt-3">{{ app_tagline }}</p>
     <a class="btn btn-primary btn-lg mt-3 px-4" href="{{ url_for('login') }}">Đăng nhập bằng Google</a>
 
-    <div class="login-trial-note alert alert-warning mt-4 mx-auto text-start" role="alert">
+    <div class="login-trial-note alert alert-info mt-4 mx-auto text-start" role="alert">
       <div class="fw-bold mb-2">Lưu ý khi đăng nhập thử nghiệm</div>
       <div>Ứng dụng đang trong giai đoạn thử nghiệm và chưa hoàn tất xác minh OAuth của Google. Khi Google hiển thị cảnh báo <b>“Google chưa xác minh ứng dụng này”</b>, vui lòng chọn <b>Nâng cao</b> → <b>Đi tới TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE</b> để tiếp tục đăng nhập. Sau đó kiểm tra các quyền được yêu cầu và chọn <b>Tiếp tục/Cho phép</b>.</div>
       <div class="mt-2">Ứng dụng chỉ sử dụng quyền <b>đọc</b> thông tin kênh/video YouTube để phục vụ quản lý học liệu và tạo mã QR; ứng dụng không đăng, sửa hoặc xóa video trên kênh YouTube của giảng viên.</div>
     </div>
 
     <div class="mt-3 small"><a href="{{ url_for('privacy_policy') }}">Chính sách quyền riêng tư</a></div>
-    <div class="authors-card card shadow-sm mt-5 mx-auto text-start">
-      <div class="card-body">
-        <div class="fw-bold mb-2">Nhóm tác giả</div>
-        <div>
-          {% for author in authors %}<strong>{{ author }}</strong>{% if not loop.last %} · {% endif %}{% endfor %}
-        </div>
-      </div>
-    </div>
   </div>
 </div>
 {% endblock %}
