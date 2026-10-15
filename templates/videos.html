@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><h2>Kho video</h2><div class="btn-group btn-group-sm"><a class="btn btn-outline-secondary" href="{{ url_for('videos_page') }}">Tất cả</a><a class="btn btn-outline-secondary" href="?status=private">Private</a><a class="btn btn-outline-secondary" href="?status=noembed">Không nhúng</a><a class="btn btn-outline-secondary" href="?status=unavailable">Không truy cập</a></div></div>
+<div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Video</th><th>Kênh</th><th>Quyền riêng tư</th><th>Nhúng</th><th>Trạng thái</th></tr></thead><tbody>
+{% for v in videos %}<tr><td><div class="d-flex gap-2 align-items-center">{% if v.thumbnail_url %}<img class="thumb" src="{{ v.thumbnail_url }}" alt="">{% endif %}<div><div class="fw-semibold">{{ v.title }}</div><div class="small text-muted">{{ v.youtube_video_id }}</div></div></div></td><td>{{ v.channel.title }}</td><td>{{ v.privacy_status or '—' }}</td><td>{{ 'Có' if v.embeddable else 'Không' }}</td><td><span class="badge {{ 'text-bg-success' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'text-bg-warning' }}">{{ v.status_label }}</span></td></tr>{% else %}<tr><td colspan="5" class="text-center text-muted py-4">Chưa có video.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

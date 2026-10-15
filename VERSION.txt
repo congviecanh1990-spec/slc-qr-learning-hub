@@ -1,0 +1,4 @@
+SLC QR Learning Hub
+Version: 1.0.0-research
+Target: Render Web Service + Render PostgreSQL
+Architecture: Flask + SQLAlchemy + PostgreSQL + Google OAuth + YouTube Data API + Hub/WebSub + IFrame Player API + Dynamic QR

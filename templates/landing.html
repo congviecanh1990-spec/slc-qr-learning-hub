@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}SLC QR Learning Hub{% endblock %}
+{% block content %}
+<div class="row justify-content-center py-5">
+  <div class="col-lg-8 text-center">
+    <h1 class="display-5 fw-bold">SLC QR Learning Hub</h1>
+    <p class="lead mt-3">Web App quản lý học liệu video, QR động, Focus Viewer và thống kê khai thác học liệu.</p>
+    <a class="btn btn-primary btn-lg mt-3" href="{{ url_for('login') }}">Đăng nhập bằng Google/YouTube</a>
+    <div class="mt-4 text-muted small">Người học chỉ cần trình duyệt và kết nối Internet.</div>
+  </div>
+</div>
+{% endblock %}
