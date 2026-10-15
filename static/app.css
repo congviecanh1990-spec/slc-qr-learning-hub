@@ -10,3 +10,9 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 
 /* v2.5: chức năng đang mở được làm nổi bật rõ ràng trên thanh menu. */
 .navbar .nav-link.nav-current{color:#dc3545!important;font-weight:800}
+
+/* v2.6: nhãn biểu mẫu được làm đậm để giảng viên dễ nhận biết trường cần nhập/chọn. */
+.form-label, form label:not(.form-check-label){font-weight:700!important}
+
+/* v2.7: hướng dẫn đăng nhập thử nghiệm hiển thị ngay tại trang đăng nhập. */
+.login-trial-note{max-width:850px;line-height:1.55}

@@ -73,25 +73,29 @@ def create_app():
 def ensure_schema_upgrades():
     """Nâng cấp nhẹ schema khi deploy mà không xóa PostgreSQL hiện có.
 
-    db.create_all() không tự thêm cột vào bảng đã tồn tại, vì vậy v2.5 tự bổ sung
-    khoa và bộ môn cho bảng courses, đồng thời giữ nguyên dữ liệu v2.4 trở về trước.
+    db.create_all() không tự thêm cột vào bảng đã tồn tại. v2.6 tiếp tục giữ nguyên
+    dữ liệu cũ, bổ sung khoa/bộ môn (nếu thiếu) và trạng thái hoạt động cho lớp để
+    có thể "xóa" lớp khỏi giao diện mà không làm mất dữ liệu lịch sử.
     """
     inspector = inspect(db.engine)
-    if "courses" not in inspector.get_table_names():
-        return
-    columns = {c["name"] for c in inspector.get_columns("courses")}
+    tables = set(inspector.get_table_names())
     with db.engine.begin() as conn:
-        if "faculty_name" not in columns:
-            conn.execute(text("ALTER TABLE courses ADD COLUMN faculty_name VARCHAR(255)"))
-        if "department_name" not in columns:
-            conn.execute(text("ALTER TABLE courses ADD COLUMN department_name VARCHAR(255)"))
-        # Dữ liệu cũ chỉ có unit_name. Giữ nguyên nội dung đó như tên khoa để không mất dữ liệu.
-        conn.execute(text("""
-            UPDATE courses
-            SET faculty_name = unit_name
-            WHERE (faculty_name IS NULL OR faculty_name = '')
-              AND unit_name IS NOT NULL AND unit_name <> ''
-        """))
+        if "courses" in tables:
+            columns = {c["name"] for c in inspector.get_columns("courses")}
+            if "faculty_name" not in columns:
+                conn.execute(text("ALTER TABLE courses ADD COLUMN faculty_name VARCHAR(255)"))
+            if "department_name" not in columns:
+                conn.execute(text("ALTER TABLE courses ADD COLUMN department_name VARCHAR(255)"))
+            conn.execute(text("""
+                UPDATE courses
+                SET faculty_name = unit_name
+                WHERE (faculty_name IS NULL OR faculty_name = '')
+                  AND unit_name IS NOT NULL AND unit_name <> ''
+            """))
+        if "class_groups" in tables:
+            class_columns = {c["name"] for c in inspector.get_columns("class_groups")}
+            if "active" not in class_columns:
+                conn.execute(text("ALTER TABLE class_groups ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE"))
 
 def login_required(fn):
     @wraps(fn)
@@ -347,8 +351,8 @@ def register_routes(app):
         if not user:
             return render_template("landing.html")
         videos = visible_video_query(user).count()
-        qrs = QrCode.query.filter_by(owner_id=user.id).count() if user.role != "admin" else QrCode.query.count()
-        courses = Course.query.filter_by(owner_id=user.id).count() if user.role != "admin" else Course.query.count()
+        qrs = QrCode.query.filter_by(owner_id=user.id, active=True).count() if user.role != "admin" else QrCode.query.filter_by(active=True).count()
+        courses = Course.query.filter_by(owner_id=user.id, active=True).count() if user.role != "admin" else Course.query.filter_by(active=True).count()
         scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
         watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id)
         if user.role != "admin":
@@ -453,8 +457,12 @@ def register_routes(app):
     @login_required
     def youtube_sync():
         try:
-            channels = sync_my_channel(current_user())
-            flash(f"Đã đồng bộ {len(channels)} kênh YouTube.", "success")
+            user = current_user()
+            channels = sync_my_channel(user)
+            # Đối soát lại toàn bộ video đã biết để phát hiện video bị xóa, chuyển
+            # riêng tư hoặc thay đổi khả năng nhúng. Nhờ vậy QR cũ được cảnh báo sớm.
+            checked = reconcile_user(user)
+            flash(f"Đã đồng bộ {len(channels)} kênh YouTube và kiểm tra trạng thái {checked} video.", "success")
         except Exception as exc:
             flash(f"Đồng bộ thất bại: {exc}", "danger")
         return redirect(url_for("youtube_page"))
@@ -515,7 +523,7 @@ def register_routes(app):
             q = q.filter(Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False))
         if search:
             q = q.filter(Video.title.ilike(f"%{search}%"))
-        owned_course_ids = db.session.query(Course.id).filter(Course.owner_id == user.id)
+        owned_course_ids = db.session.query(Course.id).filter(Course.owner_id == user.id, Course.active.is_(True))
         assigned_video_ids = db.session.query(CourseVideo.video_id).filter(CourseVideo.course_id.in_(owned_course_ids))
         if assignment == "unassigned":
             q = q.filter(~Video.id.in_(assigned_video_ids))
@@ -532,7 +540,7 @@ def register_routes(app):
         course_id = request.form.get("course_id", type=int)
         video_ids = request.form.getlist("video_ids")
         course = db.session.get(Course, course_id) if course_id else None
-        if not course or not course_owned_by_user(course, user):
+        if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
         if not video_ids:
             flash("Vui lòng chọn ít nhất một video để gán vào học phần.", "warning")
@@ -581,10 +589,12 @@ def register_routes(app):
                     db.session.rollback()
                     flash(f"Không thêm được học phần: {exc}", "danger")
             return redirect(url_for("courses_page"))
-        courses = Course.query.filter_by(owner_id=user.id).order_by(Course.created_at.desc()).all()
-        # Không gợi ý tên học phần cũ. Tên khoa và bộ môn được gợi ý để GV chọn lại nhanh.
-        faculty_options = sorted({((c.faculty_name or c.unit_name) or "").strip() for c in courses if ((c.faculty_name or c.unit_name) or "").strip()}, key=str.casefold)
-        department_options = sorted({(c.department_name or "").strip() for c in courses if (c.department_name or "").strip()}, key=str.casefold)
+        all_owned_courses = Course.query.filter_by(owner_id=user.id).order_by(Course.created_at.desc()).all()
+        courses = [c for c in all_owned_courses if c.active]
+        # Không gợi ý tên học phần cũ. Tên khoa và bộ môn từng dùng vẫn được giữ
+        # trong gợi ý để GV chọn lại nhanh, kể cả khi một học phần cũ đã được ẩn.
+        faculty_options = sorted({((c.faculty_name or c.unit_name) or "").strip() for c in all_owned_courses if ((c.faculty_name or c.unit_name) or "").strip()}, key=str.casefold)
+        department_options = sorted({(c.department_name or "").strip() for c in all_owned_courses if (c.department_name or "").strip()}, key=str.casefold)
         return render_template(
             "courses.html",
             courses=courses,
@@ -597,7 +607,7 @@ def register_routes(app):
     def update_course_info(course_id):
         user = current_user()
         course = db.session.get(Course, course_id) or abort(404)
-        if not course_owned_by_user(course, user):
+        if not course.active or not course_owned_by_user(course, user):
             abort(403)
         faculty = request.form.get("faculty_name", "").strip()
         department = request.form.get("department_name", "").strip()
@@ -618,6 +628,8 @@ def register_routes(app):
         user = current_user()
         if user.role != "admin" and course.owner_id != user.id:
             abort(403)
+        if not course.active:
+            abort(404)
         name = request.form.get("class_name", "").strip()
         if not name:
             flash("Vui lòng nhập tên lớp.", "warning")
@@ -638,12 +650,50 @@ def register_routes(app):
             flash(f"Không thêm được lớp: {exc}", "danger")
         return redirect(url_for("courses_page"))
 
+    @app.post("/courses/<int:course_id>/delete")
+    @login_required
+    def delete_course(course_id):
+        """Ẩn học phần khỏi danh sách sử dụng nhưng giữ dữ liệu lịch sử.
+
+        Không xóa cứng vì ScanLog/WatchSession/QR là minh chứng nghiên cứu. Các mã QR
+        đã phát hành vẫn được giữ nguyên và có thể được xóa riêng nếu giảng viên muốn.
+        """
+        user = current_user()
+        course = db.session.get(Course, course_id) or abort(404)
+        if not course_owned_by_user(course, user):
+            abort(403)
+        course.active = False
+        for cls in course.classes:
+            if hasattr(cls, "active"):
+                cls.active = False
+        db.session.commit()
+        flash(
+            f"Đã xóa học phần “{course.name}” khỏi danh sách sử dụng. Dữ liệu lịch sử và mã QR đã phát hành được giữ lại để không mất minh chứng.",
+            "success",
+        )
+        return redirect(url_for("courses_page"))
+
+    @app.post("/classes/<int:class_id>/delete")
+    @login_required
+    def delete_class(class_id):
+        user = current_user()
+        class_group = db.session.get(ClassGroup, class_id) or abort(404)
+        if not course_owned_by_user(class_group.course, user):
+            abort(403)
+        class_group.active = False
+        db.session.commit()
+        flash(
+            f"Đã xóa lớp “{class_group.name}” khỏi danh sách. Dữ liệu quét/xem đã ghi trước đó vẫn được giữ nguyên.",
+            "success",
+        )
+        return redirect(url_for("courses_page"))
+
     @app.post("/courses/<int:course_id>/qr/bulk")
     @login_required
     def create_course_qrs_bulk(course_id):
         user = current_user()
         course = db.session.get(Course, course_id) or abort(404)
-        if not course_owned_by_user(course, user):
+        if not course.active or not course_owned_by_user(course, user):
             abort(403)
         links = CourseVideo.query.filter_by(course_id=course.id).order_by(CourseVideo.id).all()
         created = 0
@@ -731,7 +781,7 @@ def register_routes(app):
                 flash("Đã tạo mã QR động thành công.", "success")
             return redirect(url_for("qr_page"))
 
-        qrs = QrCode.query.filter_by(owner_id=user.id).order_by(QrCode.created_at.desc()).all()
+        qrs = QrCode.query.filter_by(owner_id=user.id, active=True).order_by(QrCode.created_at.desc()).all()
         # Đồng bộ lại tên các mã QR cũ: tên hiển thị luôn chính xác bằng tên video hiện tại,
         # không thêm mã học phần, slug hay bất kỳ tiền tố/hậu tố nào.
         title_changed = False
@@ -755,7 +805,14 @@ def register_routes(app):
             total = len(links)
             has_qr = sum(1 for link in links if link.qr_id and link.qr and link.qr.active)
             usable_missing = sum(1 for link in links if not link.qr_id and video_is_usable(link.video))
-            course_stats.append({"course": course, "total": total, "has_qr": has_qr, "missing": usable_missing})
+            needs_retarget = sum(
+                1 for link in links
+                if link.qr_id and link.qr and link.qr.active and not video_is_usable(active_video_for_qr(link.qr))
+            )
+            course_stats.append({
+                "course": course, "total": total, "has_qr": has_qr,
+                "missing": usable_missing, "needs_retarget": needs_retarget,
+            })
         return render_template("qr.html", qrs=qrs, videos=videos, courses=courses, course_stats=course_stats)
 
     @app.post("/qr/<int:qr_id>/retarget")
@@ -765,6 +822,8 @@ def register_routes(app):
         user = current_user()
         if user.role != "admin" and qr.owner_id != user.id:
             abort(403)
+        if not qr.active:
+            abort(404)
         video_id = request.form.get("video_id", type=int)
         video = visible_video_query(user).filter(Video.id == video_id).first() if video_id else None
         if not video:
@@ -792,6 +851,28 @@ def register_routes(app):
         flash("Đã đổi video đích. Mã QR và đường dẫn không thay đổi.", "success")
         return redirect(url_for("qr_page"))
 
+    @app.post("/qr/<int:qr_id>/delete")
+    @login_required
+    def delete_qr(qr_id):
+        """Ngừng sử dụng một QR nhưng giữ log/lịch sử để phục vụ nghiên cứu."""
+        qr = db.session.get(QrCode, qr_id) or abort(404)
+        user = current_user()
+        if user.role != "admin" and qr.owner_id != user.id:
+            abort(403)
+        if not qr.active:
+            flash("Mã QR này đã được xóa khỏi danh sách sử dụng.", "info")
+            return redirect(url_for("qr_page"))
+        qr.active = False
+        # Gỡ liên kết hiện hành để video trong học phần có thể tạo một QR mới nếu cần.
+        for link in CourseVideo.query.filter_by(qr_id=qr.id).all():
+            link.qr_id = None
+        db.session.commit()
+        flash(
+            f"Đã xóa mã QR “{qr.title}” khỏi danh sách sử dụng. Lịch sử quét/xem trước đây vẫn được giữ nguyên.",
+            "success",
+        )
+        return redirect(url_for("qr_page"))
+
     @app.get("/qr/<int:qr_id>/png")
     @login_required
     def qr_png(qr_id):
@@ -799,6 +880,8 @@ def register_routes(app):
         user = current_user()
         if user.role != "admin" and qr.owner_id != user.id:
             abort(403)
+        if not qr.active:
+            abort(404)
         img = generate_branded_qr(qr)
         bio = io.BytesIO()
         img.save(bio, format="PNG")
@@ -809,7 +892,7 @@ def register_routes(app):
     @login_required
     def qr_download_all():
         user = current_user()
-        qrs = QrCode.query.all() if user.role == "admin" else QrCode.query.filter_by(owner_id=user.id).all()
+        qrs = QrCode.query.filter_by(active=True).all() if user.role == "admin" else QrCode.query.filter_by(owner_id=user.id, active=True).all()
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -833,7 +916,7 @@ def register_routes(app):
         if not session.get("participant_code"):
             session["identify_next"] = url_for("public_qr", slug=slug)
             course = qr.course
-            classes = course.classes if course else []
+            classes = [c for c in course.classes if getattr(c, "active", True)] if course else []
             return render_template("identify.html", qr=qr, classes=classes)
 
         pcode = session.get("participant_code")
@@ -860,9 +943,17 @@ def register_routes(app):
             db.session.commit()
 
         if not video:
-            return render_template("viewer_error.html", qr=qr, message="QR chưa được gán video đích."), 404
+            return render_template("viewer_error.html", qr=qr, message="Mã QR chưa được gán video đích. Vui lòng liên hệ giảng viên phụ trách."), 404
         if not success:
-            return render_template("viewer_error.html", qr=qr, message=f"Video hiện không thể phát trong trang học liệu ({video.status_label})."), 409
+            if not video.is_available:
+                message = "Video đích đã bị xóa hoặc không còn tồn tại trên YouTube. Mã QR vẫn được giữ nguyên để giảng viên có thể thay video mới mà không phải phát hành lại mã QR."
+            elif video.privacy_status == "private":
+                message = "Video đích hiện đang ở chế độ riêng tư. Mã QR vẫn được giữ nguyên; giảng viên cần đổi quyền video hoặc cập nhật video thay thế."
+            elif video.embeddable is False:
+                message = "Video đích hiện không cho phép phát nhúng. Mã QR vẫn được giữ nguyên; giảng viên có thể cập nhật một video thay thế phù hợp."
+            else:
+                message = f"Video hiện không thể phát trong trang học liệu ({video.status_label}). Mã QR vẫn được giữ nguyên để có thể cập nhật video đích."
+            return render_template("viewer_error.html", qr=qr, message=message), 409
         return render_template("viewer.html", qr=qr, video=video)
 
     @app.post("/identify")
@@ -997,8 +1088,10 @@ def register_routes(app):
         class_q = ClassGroup.query.join(Course, ClassGroup.course_id == Course.id)
         if user.role != "admin":
             class_q = class_q.filter(Course.owner_id == user.id)
-        class_options = class_q.order_by(ClassGroup.name).all()
-        class_name_map = {c.code: c.name for c in class_options}
+        all_classes = class_q.order_by(ClassGroup.name).all()
+        class_options = [c for c in all_classes if getattr(c, "active", True)]
+        # Giữ tên của lớp đã xóa khỏi danh sách để dữ liệu lịch sử vẫn hiển thị thân thiện.
+        class_name_map = {c.code: c.name for c in all_classes}
 
         day_q = db.session.query(func.date(ScanLog.scanned_at), func.count(ScanLog.id)).join(QrCode, ScanLog.qr_id == QrCode.id)
         if user.role != "admin":
@@ -1303,7 +1396,7 @@ def acceptance_metrics(user):
     if user.role != "admin":
         video_q = video_q.filter(YouTubeChannel.user_id == user.id)
 
-    course_q = Course.query if user.role == "admin" else Course.query.filter_by(owner_id=user.id)
+    course_q = Course.query.filter_by(active=True) if user.role == "admin" else Course.query.filter_by(owner_id=user.id, active=True)
     course_count = course_q.count()
 
     # Mỗi tổ hợp Khoa + Bộ môn được tính là một đơn vị tham gia thực nghiệm.

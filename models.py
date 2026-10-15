@@ -139,6 +139,7 @@ class ClassGroup(db.Model):
     course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     code = db.Column(db.String(64), nullable=False)
     name = db.Column(db.String(255), nullable=False)
+    active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     course = db.relationship("Course", backref=db.backref("classes", cascade="all,delete"))
     __table_args__ = (UniqueConstraint("course_id", "code", name="uq_course_class_code"),)

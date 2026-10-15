@@ -63,10 +63,8 @@
 </main>
 <footer class="app-footer mt-5 py-4 border-top bg-white">
   <div class="container text-center small">
-    <div class="fw-bold">{{ app_name }}</div>
-    <div>{{ school_name }}</div>
-    <div class="text-muted mt-1"><b>Nhóm tác giả:</b> {{ authors|join(' – ') }}</div>
-    <div class="text-muted mt-1">Sản phẩm nghiên cứu khoa học cấp trường phục vụ giảng dạy</div>
+    <div class="text-muted mt-1"><b>Nhóm tác giả:</b> {% for author in authors %}<strong>{{ author }}</strong>{% if not loop.last %} – {% endif %}{% endfor %}</div>
+    <div class="text-muted mt-1 fst-italic">Sản phẩm nghiên cứu khoa học cấp trường phục vụ giảng dạy</div>
     <div class="mt-2"><a href="{{ url_for('privacy_policy') }}">Chính sách quyền riêng tư</a></div>
   </div>
 </footer>

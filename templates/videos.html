@@ -21,7 +21,7 @@
     <td><input class="form-check-input video-check" type="checkbox" name="video_ids" value="{{ v.id }}"></td>
     <td><div class="d-flex gap-2 align-items-center">{% if v.thumbnail_url %}<img class="thumb" src="{{ v.thumbnail_url }}" alt="">{% endif %}<div><div class="fw-semibold">{{ v.title }}</div><div class="small text-muted">{{ v.youtube_video_id }}</div></div></div></td>
     <td>{{ v.channel.title }}</td>
-    <td>{% for link in v.course_links if link.course.owner_id == me.id %}<span class="badge text-bg-light border me-1 mb-1">{{ link.course.name }}</span>{% else %}<span class="text-muted small">Chưa gán</span>{% endfor %}</td>
+    <td>{% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}<span class="badge text-bg-light border me-1 mb-1">{{ link.course.name }}</span>{% else %}<span class="text-muted small">Chưa gán</span>{% endfor %}</td>
     <td>{{ 'Có thể phát' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'Cần kiểm tra' }}</td>
     <td><span class="badge {{ 'text-bg-success' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'text-bg-warning' }}">{{ v.status_label }}</span></td>
   </tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Không có video phù hợp bộ lọc.</td></tr>{% endfor %}

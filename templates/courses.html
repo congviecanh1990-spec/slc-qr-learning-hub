@@ -3,7 +3,7 @@
 <div class="row g-4">
   <div class="col-lg-4">
     <h2>Quản lý học phần</h2>
-    <p class="text-muted">Giảng viên chỉ cần nhập tên học phần, tên khoa và bộ môn quản lý học phần. Mã học phần được hệ thống tự động tạo.</p>
+    <p class="text-muted">Giảng viên chỉ cần nhập tên học phần, bộ môn quản lý và tên khoa. Mã học phần được hệ thống tự động tạo.</p>
 
     <form method="post" class="card card-body shadow-sm" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -16,22 +16,9 @@
         autocomplete="off"
         placeholder="Ví dụ: Tin học văn phòng">
 
-      <label class="form-label">Tên khoa</label>
-      <input
-        class="form-control"
-        name="faculty_name"
-        list="faculty-name-options"
-        required
-        autocomplete="organization"
-        placeholder="Gõ mới hoặc chọn tên khoa đã dùng">
-      <datalist id="faculty-name-options">
-        {% for faculty in faculty_options %}<option value="{{ faculty }}"></option>{% endfor %}
-      </datalist>
-      <div class="form-text mb-3">Tên khoa đã nhập trước đây được gợi ý để có thể chọn lại nhanh.</div>
-
       <label class="form-label">Bộ môn quản lý học phần</label>
       <input
-        class="form-control"
+        class="form-control mb-3"
         name="department_name"
         list="department-name-options"
         required
@@ -40,7 +27,18 @@
       <datalist id="department-name-options">
         {% for department in department_options %}<option value="{{ department }}"></option>{% endfor %}
       </datalist>
-      <div class="form-text mb-3">Bộ môn được lưu riêng với khoa để phục vụ thử nghiệm ở nhiều chuyên ngành/bộ môn khác nhau.</div>
+
+      <label class="form-label">Tên khoa</label>
+      <input
+        class="form-control mb-3"
+        name="faculty_name"
+        list="faculty-name-options"
+        required
+        autocomplete="organization"
+        placeholder="Gõ mới hoặc chọn tên khoa đã dùng">
+      <datalist id="faculty-name-options">
+        {% for faculty in faculty_options %}<option value="{{ faculty }}"></option>{% endfor %}
+      </datalist>
 
       <button class="btn btn-primary">Thêm học phần</button>
     </form>
@@ -50,10 +48,14 @@
     <h2 class="invisible d-none d-lg-block">.</h2>
     {% for c in courses %}
       {% set total = c.video_links|length %}
-      {% set ns = namespace(qr_count=0, usable_missing=0) %}
+      {% set ns = namespace(qr_count=0, usable_missing=0, broken_qr=0) %}
       {% for link in c.video_links %}
         {% if link.qr_id and link.qr and link.qr.active %}
           {% set ns.qr_count = ns.qr_count + 1 %}
+          {% set target = link.qr.current_target %}
+          {% if not target or not target.video or not target.video.is_available or target.video.embeddable is false or target.video.privacy_status == 'private' %}
+            {% set ns.broken_qr = ns.broken_qr + 1 %}
+          {% endif %}
         {% elif link.video.is_available and link.video.embeddable is not false and link.video.privacy_status != 'private' %}
           {% set ns.usable_missing = ns.usable_missing + 1 %}
         {% endif %}
@@ -64,13 +66,14 @@
           <div class="d-flex flex-wrap justify-content-between gap-3">
             <div>
               <h5 class="mb-1">{{ c.name }}</h5>
-              <div class="small"><span class="text-muted">Khoa:</span> <b>{{ c.faculty_name or c.unit_name or 'Chưa cập nhật' }}</b></div>
               <div class="small"><span class="text-muted">Bộ môn quản lý:</span> <b>{{ c.department_name or 'Chưa cập nhật' }}</b></div>
+              <div class="small"><span class="text-muted">Khoa:</span> <b>{{ c.faculty_name or c.unit_name or 'Chưa cập nhật' }}</b></div>
             </div>
             <div class="text-end small">
               <div>Video đã gán: <b>{{ total }}</b></div>
               <div>Đã có mã QR: <b>{{ ns.qr_count }}</b></div>
               <div>Chưa có mã QR: <b>{{ ns.usable_missing }}</b></div>
+              {% if ns.broken_qr %}<div class="text-danger">Mã QR cần đổi video: <b>{{ ns.broken_qr }}</b></div>{% endif %}
             </div>
           </div>
 
@@ -83,12 +86,14 @@
             <form method="post" action="{{ url_for('update_course_info', course_id=c.id) }}" class="row g-2 mt-1">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <div class="col-md-5">
-                <input class="form-control form-control-sm" name="faculty_name" list="faculty-name-options" value="{{ c.faculty_name or c.unit_name or '' }}" placeholder="Tên khoa" required>
-              </div>
-              <div class="col-md-5">
+                <label class="form-label small mb-1">Bộ môn quản lý</label>
                 <input class="form-control form-control-sm" name="department_name" list="department-name-options" value="{{ c.department_name or '' }}" placeholder="Bộ môn quản lý" required>
               </div>
-              <div class="col-md-2">
+              <div class="col-md-5">
+                <label class="form-label small mb-1">Tên khoa</label>
+                <input class="form-control form-control-sm" name="faculty_name" list="faculty-name-options" value="{{ c.faculty_name or c.unit_name or '' }}" placeholder="Tên khoa" required>
+              </div>
+              <div class="col-md-2 d-flex align-items-end">
                 <button class="btn btn-outline-primary btn-sm w-100">Lưu</button>
               </div>
             </form>
@@ -109,8 +114,16 @@
               <div class="small py-1 border-bottom d-flex justify-content-between gap-2">
                 <span>{{ link.video.title }}</span>
                 <span>
-                  {% if link.qr_id %}<span class="badge text-bg-success">Đã có QR</span>
-                  {% else %}<span class="badge text-bg-light border">Chưa có QR</span>{% endif %}
+                  {% if link.qr_id and link.qr and link.qr.active %}
+                    {% set target = link.qr.current_target %}
+                    {% if target and target.video and target.video.is_available and target.video.embeddable is not false and target.video.privacy_status != 'private' %}
+                      <span class="badge text-bg-success">Đã có QR</span>
+                    {% else %}
+                      <span class="badge text-bg-danger">QR cần đổi video</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge text-bg-light border">Chưa có QR</span>
+                  {% endif %}
                 </span>
               </div>
             {% else %}
@@ -120,19 +133,33 @@
 
           <div class="small fw-semibold mb-2">Lớp</div>
           <div class="d-flex flex-wrap gap-2 mb-3">
-            {% for cls in c.classes %}<span class="badge text-bg-light border">{{ cls.name }}</span>
+            {% for cls in c.classes if cls.active %}
+              <span class="badge text-bg-light border d-inline-flex align-items-center gap-2">
+                {{ cls.name }}
+                <form method="post" action="{{ url_for('delete_class', class_id=cls.id) }}" class="d-inline" onsubmit="return confirm('Xóa lớp này khỏi danh sách? Dữ liệu quét/xem đã ghi trước đây vẫn được giữ lại.');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-link btn-sm text-danger p-0 border-0 text-decoration-none" title="Xóa lớp">×</button>
+                </form>
+              </span>
             {% else %}<span class="text-muted small">Chưa có lớp.</span>{% endfor %}
           </div>
 
           <form method="post" action="{{ url_for('add_class', course_id=c.id) }}" class="row g-2" autocomplete="off">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="col-md-9">
+              <label class="form-label small mb-1">Tên lớp</label>
               <input name="class_name" class="form-control form-control-sm" placeholder="Tên lớp" required autocomplete="off">
               <div class="form-text">Mã lớp được hệ thống tự động tạo.</div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3 d-flex align-items-end">
               <button class="btn btn-outline-primary btn-sm w-100">Thêm lớp</button>
             </div>
+          </form>
+
+          <hr>
+          <form method="post" action="{{ url_for('delete_course', course_id=c.id) }}" onsubmit="return confirm('Xóa học phần này khỏi danh sách sử dụng? Dữ liệu lịch sử và các mã QR đã phát hành sẽ được giữ lại để không mất minh chứng nghiên cứu.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-outline-danger btn-sm">Xóa học phần khỏi danh sách</button>
           </form>
         </div>
       </div>

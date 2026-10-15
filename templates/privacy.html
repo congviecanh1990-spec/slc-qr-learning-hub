@@ -61,7 +61,7 @@
 
         <h2 class="h5 mt-4">10. Liên hệ</h2>
         <p class="mb-1"><strong>Đơn vị:</strong> {{ school_name }}</p>
-        <p class="mb-1"><strong>Nhóm tác giả:</strong> {{ authors|join(' – ') }}</p>
+        <p class="mb-1"><strong>Nhóm tác giả:</strong> {% for author in authors %}<strong>{{ author }}</strong>{% if not loop.last %} – {% endif %}{% endfor %}</p>
         {% if support_email %}<p class="mb-0"><strong>Email hỗ trợ:</strong> <a href="mailto:{{ support_email }}">{{ support_email }}</a></p>{% else %}<p class="mb-0"><strong>Liên hệ:</strong> Quản trị viên ứng dụng hoặc nhóm tác giả tại {{ school_name }}.</p>{% endif %}
 
         <div class="alert alert-light border mt-4 mb-0">

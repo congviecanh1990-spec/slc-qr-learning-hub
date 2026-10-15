@@ -1,9 +1,9 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.5
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.7
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
 ## Nhóm tác giả
-Nguyễn Thị Thúy Tươi; Hoàng Thị Nhất; Nguyễn Thu Huyền; Tường Thị Phương Thảo; Nguyễn Hữu Thọ.
+Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài); Hoàng Thị Nhất; Nguyễn Thu Huyền; Tường Thị Phương Thảo; Nguyễn Hữu Thọ.
 
 ## Các chức năng chính
 - Giao diện tiếng Việt, có logo Trường Cao đẳng Sơn La.
@@ -114,3 +114,20 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Học phần cũ thiếu bộ môn có cảnh báo và biểu mẫu cập nhật ngay tại thẻ học phần.
 - Chỉ tiêu **Số đơn vị/khoa/bộ môn** trong trang nghiệm thu tính theo tổ hợp **Khoa + Bộ môn**, vì vậy nhiều bộ môn trong cùng một khoa được ghi nhận riêng.
 - Thanh menu làm nổi bật chức năng đang mở bằng **chữ đậm, màu đỏ**; các chức năng khác giữ định dạng bình thường.
+
+## Hiệu chỉnh v2.6 — nhãn đậm, xóa dữ liệu an toàn và xử lý video YouTube bị xóa
+- Toàn bộ nhãn trường nhập/chọn (`form-label`) được hiển thị **chữ đậm** để giảng viên dễ nhận biết.
+- Form tạo học phần đổi thứ tự thành **Tên học phần → Bộ môn quản lý học phần → Tên khoa**; bỏ các dòng giải thích dài về gợi ý tên khoa/bộ môn.
+- Khi giảng viên bấm đồng bộ YouTube, hệ thống đồng thời **đối soát lại trạng thái toàn bộ video đã biết** để phát hiện video bị xóa, chuyển riêng tư hoặc tắt khả năng nhúng.
+- Nếu video đích của QR không còn sử dụng được, **QR không bị đổi**. Giao diện đánh dấu “QR cần đổi video”; giảng viên chọn video thay thế và QR cũ tiếp tục hoạt động mà không phải in lại.
+- Bổ sung nút **Xóa mã QR**. Việc xóa thực hiện theo kiểu ngừng sử dụng (soft delete), QR cũ không còn mở được nhưng lịch sử quét/xem vẫn được giữ để phục vụ nghiên cứu.
+- Bổ sung **Xóa học phần khỏi danh sách**. Học phần được ẩn khỏi nghiệp vụ thường ngày nhưng dữ liệu lịch sử và QR đã phát hành được bảo toàn.
+- Bổ sung xóa lớp theo kiểu ẩn khỏi danh sách; dữ liệu lịch sử vẫn giữ nguyên. Bảng `class_groups` được tự động bổ sung cột `active` khi deploy lên PostgreSQL hiện có.
+
+
+## Hiệu chỉnh v2.7 — hướng dẫn đăng nhập thử nghiệm và tinh gọn footer
+- Bổ sung khung **Lưu ý khi đăng nhập thử nghiệm** ngay dưới nút **Đăng nhập bằng Google**, hướng dẫn xử lý màn hình “Google chưa xác minh ứng dụng này” trong giai đoạn thử nghiệm.
+- Khung hướng dẫn nêu rõ ứng dụng chỉ dùng quyền đọc dữ liệu kênh/video YouTube, không đăng, sửa hoặc xóa video.
+- Footer bỏ hai dòng lặp lại **TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE** và **Trường Cao đẳng Sơn La**.
+- Nhóm tác giả hiển thị đậm; bổ sung **Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài)**.
+- Dòng **Sản phẩm nghiên cứu khoa học cấp trường phục vụ giảng dạy** được hiển thị chữ nghiêng.

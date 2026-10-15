@@ -1,15 +1,17 @@
-# Cập nhật v2.5 lên Render — hướng dẫn ngắn
+# CẬP NHẬT v2.7 TRÊN RENDER
 
-1. Giữ nguyên Web Service và PostgreSQL hiện tại trên Render.
-2. Giải nén bộ v2.5 và upload toàn bộ mã nguồn lên repository GitHub đang dùng.
-3. Không đưa `.env`, Client Secret hoặc token lên GitHub.
-4. Commit lên nhánh `main`.
-5. Render Auto-Deploy sẽ tự build lại; nếu không, chọn **Manual Deploy → Deploy latest commit**.
-6. Chờ trạng thái **Live**.
-7. Khi ứng dụng khởi động, hệ thống tự bổ sung hai cột `faculty_name` và `department_name` vào bảng `courses`; không xóa PostgreSQL hiện tại.
-8. Đăng nhập bằng tài khoản giảng viên: chỉ thấy/khai thác kênh YouTube, video, học phần, QR và thống kê thuộc dữ liệu của chính tài khoản đó.
-9. Đăng nhập bằng tài khoản có email trong `ADMIN_EMAILS`: có thêm **Đánh giá nghiệm thu**, **Nhật ký lỗi**, **Sao lưu dữ liệu**, **Khôi phục dữ liệu**.
-10. Mở **Học phần** để kiểm tra form gồm: **Tên học phần**, **Tên khoa**, **Bộ môn quản lý học phần**; mã học phần vẫn tự sinh. Học phần cũ có thể cập nhật khoa/bộ môn ngay trên thẻ học phần.
-11. Chức năng đang mở trên thanh menu phải hiển thị **chữ đậm và màu đỏ**.
+1. Giải nén bộ mã nguồn v2.7.
+2. Upload toàn bộ file/thư mục lên repository GitHub `slc-qr-learning-hub` hiện tại.
+3. Commit vào nhánh `main`.
+4. Render tự deploy lại Web Service.
+5. Chờ trạng thái `Deploy succeeded` / `Live`.
+6. Mở Web App và nhấn Ctrl+F5.
 
-Không cần tạo lại database hoặc OAuth client.
+Không xóa PostgreSQL. Bản v2.7 chỉ hiệu chỉnh giao diện/trình bày và kế thừa nguyên trạng dữ liệu v2.6.
+
+## Kiểm tra nhanh sau deploy
+- Trang đăng nhập có khung **Lưu ý khi đăng nhập thử nghiệm** ngay dưới nút Đăng nhập bằng Google.
+- Nhóm tác giả hiển thị đậm và có **Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài)**.
+- Footer không còn hai dòng tên Web App và tên trường bị lặp.
+- Dòng **Sản phẩm nghiên cứu khoa học cấp trường phục vụ giảng dạy** hiển thị chữ nghiêng.
+- Liên kết **Chính sách quyền riêng tư** vẫn hoạt động.

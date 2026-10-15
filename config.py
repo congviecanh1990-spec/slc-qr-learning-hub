@@ -15,7 +15,7 @@ class Config:
     APP_TAGLINE = "Công cụ hỗ trợ giảng viên tạo, quản lý và khai thác mã QR học liệu video"
     SCHOOL_NAME = "Trường Cao đẳng Sơn La"
     AUTHORS = [
-        "Nguyễn Thị Thúy Tươi",
+        "Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài)",
         "Hoàng Thị Nhất",
         "Nguyễn Thu Huyền",
         "Tường Thị Phương Thảo",
