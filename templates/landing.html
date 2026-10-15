@@ -1,12 +1,19 @@
 {% extends 'base.html' %}
-{% block title %}SLC QR Learning Hub{% endblock %}
+{% block title %}{{ app_name }}{% endblock %}
 {% block content %}
-<div class="row justify-content-center py-5">
-  <div class="col-lg-8 text-center">
-    <h1 class="display-5 fw-bold">SLC QR Learning Hub</h1>
-    <p class="lead mt-3">Web App quản lý học liệu video, QR động, Focus Viewer và thống kê khai thác học liệu.</p>
-    <a class="btn btn-primary btn-lg mt-3" href="{{ url_for('login') }}">Đăng nhập bằng Google/YouTube</a>
-    <div class="mt-4 text-muted small">Người học chỉ cần trình duyệt và kết nối Internet.</div>
+<div class="row justify-content-center py-4 py-lg-5">
+  <div class="col-xl-9 text-center">
+    <img class="landing-logo mb-3" src="{{ url_for('static', filename=brand_logo) }}" alt="Logo {{ school_name }}">
+    <div class="text-uppercase fw-semibold brand-school-lg">{{ school_name }}</div>
+    <h1 class="display-5 fw-bold mt-2 brand-heading">{{ app_name }}</h1>
+    <p class="lead mt-3">{{ app_tagline }}</p>
+    <a class="btn btn-primary btn-lg mt-3 px-4" href="{{ url_for('login') }}">Đăng nhập bằng Google</a>
+    <div class="authors-card card shadow-sm mt-5 mx-auto text-start">
+      <div class="card-body">
+        <div class="fw-bold mb-2">Nhóm tác giả</div>
+        <div>{{ authors|join(' · ') }}</div>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

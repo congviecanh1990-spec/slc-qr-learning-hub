@@ -1,16 +1,19 @@
 {% extends 'base.html' %}
 {% block content %}
-<h2 class="mb-4">Tổng quan</h2>
+<div class="mb-4">
+  <h2 class="mb-1">Tổng quan hệ thống</h2>
+  <div class="text-muted">{{ app_tagline }}</div>
+</div>
 <div class="row g-3 mb-4">
-  {% for label, value in [('Video', videos), ('QR động', qrs), ('Lượt quét', scans), ('Phiên xem', watch)] %}
-  <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted">{{ label }}</div><div class="display-6 fw-semibold">{{ value }}</div></div></div></div>
+  {% for label, value in [('Video học liệu', videos), ('Học phần', courses), ('Mã QR đã tạo', qrs), ('Lượt quét mã QR', scans), ('Phiên xem video', watch)] %}
+  <div class="col-6 col-lg"><div class="card shadow-sm h-100 metric-card"><div class="card-body"><div class="text-muted small">{{ label }}</div><div class="display-6 fw-semibold">{{ value }}</div></div></div></div>
   {% endfor %}
 </div>
 <div class="row g-3">
-  <div class="col-lg-4"><div class="card shadow-sm"><div class="card-body"><div class="text-muted">Tỷ lệ phiên hoàn thành</div><div class="display-6">{{ completion_rate }}%</div><div class="small text-muted">Chỉ là dữ liệu hành vi xem, không suy diễn mức độ hiểu bài.</div></div></div></div>
+  <div class="col-lg-4"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted">Tỷ lệ phiên xem hoàn thành</div><div class="display-6">{{ completion_rate }}%</div><div class="small text-muted mt-2">Chỉ là dữ liệu hành vi xem; không dùng để suy diễn mức độ hiểu bài hoặc kết quả học tập.</div></div></div></div>
   <div class="col-lg-8">
-    <div class="card shadow-sm"><div class="card-header fw-semibold">Lượt quét gần đây</div><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Thời gian</th><th>Mã</th><th>Vai trò</th><th>QR</th><th>Video</th><th>KQ</th></tr></thead><tbody>
-    {% for s in recent_scans %}<tr><td>{{ s.scanned_at }}</td><td>{{ s.participant_code }}</td><td>{{ s.role }}</td><td>{{ s.qr.slug if s.qr else '' }}</td><td>{{ s.video.title[:45] if s.video else '' }}</td><td>{{ '✓' if s.success else '✕' }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}
+    <div class="card shadow-sm"><div class="card-header fw-semibold">Lượt quét gần đây</div><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Thời gian</th><th>Mã GV/SV</th><th>Vai trò</th><th>Học phần</th><th>Mã QR</th><th>Video</th><th>Kết quả</th></tr></thead><tbody>
+    {% for s in recent_scans %}<tr><td>{{ s.scanned_at }}</td><td>{{ s.participant_code }}</td><td>{{ 'Giảng viên' if s.role == 'GV' else 'Sinh viên' }}</td><td>{{ s.course.code if s.course else '—' }}</td><td>{{ s.qr.slug if s.qr else '' }}</td><td>{{ s.video.title[:45] if s.video else '' }}</td><td>{{ '✓' if s.success else '✕' }}</td></tr>{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}
     </tbody></table></div></div>
   </div>
 </div>

@@ -112,6 +112,23 @@ class Course(db.Model):
     __table_args__ = (UniqueConstraint("owner_id", "code", name="uq_owner_course_code"),)
 
 
+class CourseVideo(db.Model):
+    __tablename__ = "course_videos"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
+    video_id = db.Column(db.Integer, db.ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
+    qr_id = db.Column(db.Integer, db.ForeignKey("qr_codes.id", ondelete="SET NULL"), nullable=True, unique=True)
+    added_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    source_playlist_id = db.Column(db.Integer, db.ForeignKey("playlists.id", ondelete="SET NULL"), nullable=True)
+    added_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    course = db.relationship("Course", backref=db.backref("video_links", cascade="all,delete", order_by="CourseVideo.added_at"))
+    video = db.relationship("Video", backref=db.backref("course_links", cascade="all,delete"))
+    qr = db.relationship("QrCode", foreign_keys=[qr_id])
+    adder = db.relationship("User", foreign_keys=[added_by])
+    source_playlist = db.relationship("Playlist")
+    __table_args__ = (UniqueConstraint("course_id", "video_id", name="uq_course_video"),)
+
+
 class ClassGroup(db.Model):
     __tablename__ = "class_groups"
     id = db.Column(db.Integer, primary_key=True)

@@ -4,7 +4,9 @@ import csv
 import io
 import json
 import os
+import re
 import secrets
+import unicodedata
 import zipfile
 import time
 from datetime import timedelta
@@ -13,6 +15,8 @@ from urllib.parse import urlparse
 
 import qrcode
 import requests
+from PIL import Image
+from qrcode.constants import ERROR_CORRECT_H
 from authlib.integrations.flask_client import OAuth
 from flask import (
     Flask, Response, abort, current_app, flash, jsonify, redirect,
@@ -24,7 +28,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 from models import (
-    db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, ClassGroup,
+    db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, ClassGroup,
     Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
     HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
     SurveyResult, utcnow
@@ -111,6 +115,135 @@ def owner_filter(model):
     return model.query
 
 
+def safe_filename(value: str, fallback: str = "ma_qr") -> str:
+    value = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii")
+    value = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")
+    value = re.sub(r"_+", "_", value)
+    return (value[:150] or fallback)
+
+
+def video_is_usable(video: Video | None) -> bool:
+    return bool(video and video.is_available and video.embeddable is not False and video.privacy_status != "private")
+
+
+def course_owned_by_user(course: Course, user: User) -> bool:
+    return bool(user.role == "admin" or course.owner_id == user.id)
+
+
+def visible_video_query(user: User):
+    q = Video.query.join(YouTubeChannel)
+    if user.role != "admin":
+        q = q.filter(YouTubeChannel.user_id == user.id)
+    return q
+
+
+def active_qr_for_course_video(course_id: int, video_id: int, owner_id: int):
+    return (QrCode.query
+            .join(QrTargetHistory, QrTargetHistory.qr_id == QrCode.id)
+            .filter(QrCode.course_id == course_id, QrCode.owner_id == owner_id, QrCode.active.is_(True),
+                    QrTargetHistory.video_id == video_id, QrTargetHistory.active_to.is_(None))
+            .order_by(QrCode.created_at.desc())
+            .first())
+
+
+def ensure_course_video_link(course: Course, video: Video, user: User, source_playlist_id=None):
+    link = CourseVideo.query.filter_by(course_id=course.id, video_id=video.id).first()
+    if link:
+        return link, False
+    link = CourseVideo(
+        course_id=course.id,
+        video_id=video.id,
+        added_by=user.id,
+        source_playlist_id=source_playlist_id,
+    )
+    db.session.add(link)
+    db.session.flush()
+    return link, True
+
+
+def create_qr_for_course_video(course: Course, video: Video, user: User, link: CourseVideo | None = None):
+    link = link or CourseVideo.query.filter_by(course_id=course.id, video_id=video.id).first()
+    if link and link.qr_id:
+        existing = db.session.get(QrCode, link.qr_id)
+        if existing and existing.active:
+            return existing, False
+    existing = active_qr_for_course_video(course.id, video.id, user.id)
+    if existing:
+        if link and link.qr_id != existing.id:
+            link.qr_id = existing.id
+        return existing, False
+    t0 = time.perf_counter()
+    slug = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:12]
+    qr = QrCode(owner_id=user.id, course_id=course.id, slug=slug, title=(video.title or "Video")[:255])
+    db.session.add(qr)
+    db.session.flush()
+    db.session.add(QrTargetHistory(qr_id=qr.id, video_id=video.id, changed_by=user.id))
+    if link:
+        link.qr_id = qr.id
+    db.session.flush()
+    qr.processing_seconds = round(time.perf_counter() - t0, 4)
+    return qr, True
+
+
+def generate_branded_qr(qr: QrCode):
+    """Tao QR thuong hieu theo mau chinh thuc cua nha truong.
+
+    Mau chot: ma den - nen trang, muc sua loi H, logo Truong Cao dang
+    Son La dat giua tren mot dia trang nho. URL van la URL QR dong,
+    vi vay co the doi video dich ma khong doi hinh QR da phat hanh.
+    """
+    builder = qrcode.QRCode(
+        version=None,
+        error_correction=ERROR_CORRECT_H,
+        box_size=int(current_app.config.get("QR_BOX_SIZE", 14)),
+        border=int(current_app.config.get("QR_BORDER", 4)),
+    )
+    builder.add_data(qr_public_url(qr))
+    builder.make(fit=True)
+    img = builder.make_image(
+        fill_color=current_app.config.get("QR_FILL_COLOR", "#000000"),
+        back_color=current_app.config.get("QR_BACKGROUND_COLOR", "#FFFFFF"),
+    ).convert("RGBA")
+
+    logo_path = os.path.join(
+        current_app.static_folder,
+        current_app.config.get("BRAND_LOGO", "branding/logo_truong.png"),
+    )
+    if os.path.exists(logo_path):
+        logo = Image.open(logo_path).convert("RGBA")
+        alpha_bbox = logo.getchannel("A").getbbox()
+        if alpha_bbox:
+            logo = logo.crop(alpha_bbox)
+
+        logo_ratio = float(current_app.config.get("QR_LOGO_RATIO", 0.23))
+        logo_side = max(48, int(img.size[0] * logo_ratio))
+        logo.thumbnail((logo_side, logo_side), Image.Resampling.LANCZOS)
+
+        # Vong trang bao quanh logo giup mau trung tam ro rang va tang do on dinh khi quet.
+        pad_ratio = float(current_app.config.get("QR_LOGO_WHITE_PAD_RATIO", 0.012))
+        pad = max(6, int(img.size[0] * pad_ratio))
+        badge_side = max(logo.width, logo.height) + pad * 2
+        badge = Image.new("RGBA", (badge_side, badge_side), (255, 255, 255, 0))
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(badge)
+        draw.ellipse((0, 0, badge_side - 1, badge_side - 1), fill=(255, 255, 255, 255))
+        lx = (badge_side - logo.width) // 2
+        ly = (badge_side - logo.height) // 2
+        badge.alpha_composite(logo, (lx, ly))
+
+        x = (img.width - badge.width) // 2
+        y = (img.height - badge.height) // 2
+        img.alpha_composite(badge, (x, y))
+
+    return img
+
+
+def qr_download_name(qr: QrCode) -> str:
+    course_code = safe_filename(qr.course.code if qr.course else "QR")
+    title = safe_filename(qr.title, qr.slug)
+    return f"{course_code}_{title}.png"
+
+
 def register_routes(app):
     @app.context_processor
     def inject_globals():
@@ -118,6 +251,11 @@ def register_routes(app):
             "me": current_user(),
             "heartbeat_seconds": current_app.config["HEARTBEAT_SECONDS"],
             "completion_threshold": current_app.config["COMPLETION_THRESHOLD"],
+            "app_name": current_app.config["APP_NAME"],
+            "app_tagline": current_app.config["APP_TAGLINE"],
+            "school_name": current_app.config["SCHOOL_NAME"],
+            "authors": current_app.config["AUTHORS"],
+            "brand_logo": current_app.config["BRAND_LOGO"],
         }
 
     @app.get("/health")
@@ -133,8 +271,9 @@ def register_routes(app):
         user = current_user()
         if not user:
             return render_template("landing.html")
-        videos = Video.query.join(YouTubeChannel).filter(YouTubeChannel.user_id == user.id).count() if user.role != "admin" else Video.query.count()
+        videos = visible_video_query(user).count()
         qrs = QrCode.query.filter_by(owner_id=user.id).count() if user.role != "admin" else QrCode.query.count()
+        courses = Course.query.filter_by(owner_id=user.id).count() if user.role != "admin" else Course.query.count()
         scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
         watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id)
         if user.role != "admin":
@@ -145,7 +284,7 @@ def register_routes(app):
         completed = watch_q.filter(WatchSession.completed.is_(True)).count()
         completion_rate = round(100 * completed / watch, 1) if watch else 0
         recent_scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(10).all()
-        return render_template("dashboard.html", videos=videos, qrs=qrs, scans=scans, watch=watch,
+        return render_template("dashboard.html", videos=videos, courses=courses, qrs=qrs, scans=scans, watch=watch,
                                completion_rate=completion_rate, recent_scans=recent_scans)
 
     @app.get("/auth/login")
@@ -211,7 +350,7 @@ def register_routes(app):
             db.session.commit()
             session["user_id"] = user.id
             session.permanent = True
-            flash("Đăng nhập Google/YouTube thành công.", "success")
+            flash("Đăng nhập bằng Google thành công.", "success")
             return redirect(session.pop("after_login", url_for("index")))
         except Exception as exc:
             db.session.rollback()
@@ -253,9 +392,9 @@ def register_routes(app):
             abort(403)
         try:
             subscribe_channel(channel)
-            flash("Đã gửi yêu cầu đăng ký Hub/WebSub. Chờ Hub xác minh callback.", "success")
+            flash("Đã kích hoạt cập nhật tự động cho kênh YouTube. Hệ thống đang chờ xác nhận kết nối.", "success")
         except Exception as exc:
-            flash(f"Đăng ký Hub/WebSub thất bại: {exc}", "danger")
+            flash("Không thể kích hoạt cập nhật tự động từ YouTube. Vui lòng kiểm tra nhật ký lỗi.", "danger")
         return redirect(url_for("youtube_page"))
 
     @app.route("/websub/callback/<channel_youtube_id>/<secret>", methods=["GET", "POST"])
@@ -278,7 +417,7 @@ def register_routes(app):
                 evt.processed = True
                 db.session.commit()
             except Exception as exc:
-                db.session.add(ErrorLog(module="websub", message="Nhận Hub nhưng đồng bộ video lỗi", details=str(exc)))
+                db.session.add(ErrorLog(module="websub", message="Nhận thông báo cập nhật nhưng đồng bộ video lỗi", details=str(exc)))
                 db.session.commit()
         return "", 204
 
@@ -286,18 +425,53 @@ def register_routes(app):
     @login_required
     def videos_page():
         user = current_user()
-        q = Video.query.join(YouTubeChannel)
-        if user.role != "admin":
-            q = q.filter(YouTubeChannel.user_id == user.id)
-        status = request.args.get("status")
+        q = visible_video_query(user)
+        status = request.args.get("status", "").strip()
+        assignment = request.args.get("assignment", "").strip()
+        search = request.args.get("q", "").strip()
         if status == "private":
             q = q.filter(Video.privacy_status == "private")
         elif status == "noembed":
             q = q.filter(Video.embeddable.is_(False))
         elif status == "unavailable":
             q = q.filter(Video.is_available.is_(False))
+        elif status == "usable":
+            q = q.filter(Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False))
+        if search:
+            q = q.filter(Video.title.ilike(f"%{search}%"))
+        if assignment == "unassigned":
+            q = q.outerjoin(CourseVideo, CourseVideo.video_id == Video.id).filter(CourseVideo.id.is_(None))
+        elif assignment == "assigned":
+            q = q.join(CourseVideo, CourseVideo.video_id == Video.id).distinct()
         videos = q.order_by(Video.published_at.desc().nullslast(), Video.id.desc()).all()
-        return render_template("videos.html", videos=videos, status=status)
+        courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
+        return render_template("videos.html", videos=videos, status=status, assignment=assignment, search=search, courses=courses)
+
+    @app.post("/videos/assign-course")
+    @login_required
+    def assign_videos_to_course():
+        user = current_user()
+        course_id = request.form.get("course_id", type=int)
+        video_ids = request.form.getlist("video_ids")
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course_owned_by_user(course, user):
+            abort(403)
+        if not video_ids:
+            flash("Vui lòng chọn ít nhất một video để gán vào học phần.", "warning")
+            return redirect(url_for("videos_page"))
+        allowed_ids = {v.id for v in visible_video_query(user).filter(Video.id.in_([int(x) for x in video_ids if str(x).isdigit()])).all()}
+        created = 0
+        skipped = 0
+        for video_id in allowed_ids:
+            video = db.session.get(Video, video_id)
+            _, was_created = ensure_course_video_link(course, video, user)
+            if was_created:
+                created += 1
+            else:
+                skipped += 1
+        db.session.commit()
+        flash(f"Đã gán {created} video vào học phần “{course.name}”. Bỏ qua {skipped} video đã được gán trước đó.", "success")
+        return redirect(url_for("videos_page", assignment=request.args.get("assignment", "")))
 
     @app.route("/courses", methods=["GET", "POST"])
     @login_required
@@ -340,35 +514,108 @@ def register_routes(app):
                 flash(f"Không thêm được lớp: {exc}", "danger")
         return redirect(url_for("courses_page"))
 
+    @app.post("/courses/<int:course_id>/qr/bulk")
+    @login_required
+    def create_course_qrs_bulk(course_id):
+        user = current_user()
+        course = db.session.get(Course, course_id) or abort(404)
+        if not course_owned_by_user(course, user):
+            abort(403)
+        links = CourseVideo.query.filter_by(course_id=course.id).order_by(CourseVideo.id).all()
+        created = 0
+        existing = 0
+        skipped = 0
+        total_processing = 0.0
+        for link in links:
+            video = link.video
+            if not video_is_usable(video):
+                skipped += 1
+                continue
+            qr, was_created = create_qr_for_course_video(course, video, user, link)
+            if was_created:
+                created += 1
+                total_processing += qr.processing_seconds or 0.0
+            else:
+                existing += 1
+        db.session.commit()
+        flash(
+            f"Tạo mã QR hoàn tất: {created} mã mới, {existing} video đã có mã, {skipped} video chưa đủ điều kiện sử dụng.",
+            "success" if created or existing else "warning",
+        )
+        return redirect(url_for("courses_page"))
+
+    @app.get("/courses/<int:course_id>/qr.zip")
+    @login_required
+    def download_course_qrs(course_id):
+        user = current_user()
+        course = db.session.get(Course, course_id) or abort(404)
+        if not course_owned_by_user(course, user):
+            abort(403)
+        links = CourseVideo.query.filter_by(course_id=course.id).filter(CourseVideo.qr_id.isnot(None)).all()
+        bio = io.BytesIO()
+        with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
+            for link in links:
+                qr = link.qr
+                if not qr or not qr.active:
+                    continue
+                img = generate_branded_qr(qr)
+                png = io.BytesIO()
+                img.save(png, format="PNG")
+                zf.writestr(qr_download_name(qr), png.getvalue())
+        bio.seek(0)
+        filename = f"Ma_QR_{safe_filename(course.code)}.zip"
+        return send_file(bio, mimetype="application/zip", as_attachment=True, download_name=filename)
+
     @app.route("/qr", methods=["GET", "POST"])
     @login_required
     def qr_page():
         user = current_user()
         if request.method == "POST":
-            title = request.form.get("title", "").strip()
             video_id = request.form.get("video_id", type=int)
             course_id = request.form.get("course_id", type=int)
             video = db.session.get(Video, video_id) if video_id else None
             course = db.session.get(Course, course_id) if course_id else None
-            if not title or not video:
-                flash("Cần nhập tên QR và chọn video.", "warning")
+            if not video or not video_is_usable(video):
+                flash("Vui lòng chọn một video có thể sử dụng.", "warning")
+                return redirect(url_for("qr_page"))
+            if course and not course_owned_by_user(course, user):
+                abort(403)
+            title = (request.form.get("title", "").strip() or video.title or "Video")[:255]
+            if course:
+                link, _ = ensure_course_video_link(course, video, user)
+                qr, was_created = create_qr_for_course_video(course, video, user, link)
+                if was_created:
+                    qr.title = title
+                    db.session.commit()
+                    flash("Đã tạo mã QR động thành công.", "success")
+                else:
+                    db.session.commit()
+                    flash("Video này đã có mã QR trong học phần; hệ thống không tạo trùng.", "info")
             else:
                 t0 = time.perf_counter()
                 slug = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:12]
-                qr = QrCode(owner_id=user.id, course_id=course.id if course else None, slug=slug, title=title)
+                qr = QrCode(owner_id=user.id, course_id=None, slug=slug, title=title)
                 db.session.add(qr)
                 db.session.flush()
                 db.session.add(QrTargetHistory(qr_id=qr.id, video_id=video.id, changed_by=user.id))
-                db.session.commit()
                 qr.processing_seconds = round(time.perf_counter() - t0, 4)
                 db.session.commit()
-                flash(f"Đã tạo QR động trong {qr.processing_seconds:.3f} giây.", "success")
+                flash("Đã tạo mã QR động thành công.", "success")
             return redirect(url_for("qr_page"))
 
         qrs = QrCode.query.filter_by(owner_id=user.id).order_by(QrCode.created_at.desc()).all()
-        videos = Video.query.join(YouTubeChannel).filter(YouTubeChannel.user_id == user.id, Video.is_available.is_(True)).order_by(Video.title).all()
+        videos = visible_video_query(user).filter(
+            Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False)
+        ).order_by(Video.title).all()
         courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
-        return render_template("qr.html", qrs=qrs, videos=videos, courses=courses)
+        course_stats = []
+        for course in courses:
+            links = CourseVideo.query.filter_by(course_id=course.id).all()
+            total = len(links)
+            has_qr = sum(1 for link in links if link.qr_id and link.qr and link.qr.active)
+            usable_missing = sum(1 for link in links if not link.qr_id and video_is_usable(link.video))
+            course_stats.append({"course": course, "total": total, "has_qr": has_qr, "missing": usable_missing})
+        return render_template("qr.html", qrs=qrs, videos=videos, courses=courses, course_stats=course_stats)
 
     @app.post("/qr/<int:qr_id>/retarget")
     @login_required
@@ -379,13 +626,27 @@ def register_routes(app):
             abort(403)
         video_id = request.form.get("video_id", type=int)
         video = db.session.get(Video, video_id) or abort(400)
+        if not video_is_usable(video):
+            flash("Video mới chưa đủ điều kiện sử dụng.", "warning")
+            return redirect(url_for("qr_page"))
+        linked = CourseVideo.query.filter_by(qr_id=qr.id).first()
+        if linked and linked.video_id != video.id:
+            duplicate = CourseVideo.query.filter_by(course_id=linked.course_id, video_id=video.id).first()
+            if duplicate and duplicate.id != linked.id:
+                if duplicate.qr_id and duplicate.qr_id != qr.id:
+                    flash("Video mới đã có một mã QR khác trong cùng học phần; không thể tạo liên kết trùng.", "warning")
+                    return redirect(url_for("qr_page"))
+                db.session.delete(duplicate)
+                db.session.flush()
+            linked.video_id = video.id
         now = utcnow()
         old = qr.current_target
         if old:
             old.active_to = now
         db.session.add(QrTargetHistory(qr_id=qr.id, video_id=video.id, active_from=now, changed_by=user.id))
+        qr.title = (video.title or qr.title)[:255]
         db.session.commit()
-        flash("Đã đổi video đích. Slug và mã QR không thay đổi.", "success")
+        flash("Đã đổi video đích. Mã QR và đường dẫn không thay đổi.", "success")
         return redirect(url_for("qr_page"))
 
     @app.get("/qr/<int:qr_id>/png")
@@ -395,11 +656,11 @@ def register_routes(app):
         user = current_user()
         if user.role != "admin" and qr.owner_id != user.id:
             abort(403)
-        img = qrcode.make(qr_public_url(qr))
+        img = generate_branded_qr(qr)
         bio = io.BytesIO()
         img.save(bio, format="PNG")
         bio.seek(0)
-        return send_file(bio, mimetype="image/png", as_attachment=True, download_name=f"QR_{qr.slug}.png")
+        return send_file(bio, mimetype="image/png", as_attachment=True, download_name=qr_download_name(qr))
 
     @app.get("/qr/download-all.zip")
     @login_required
@@ -407,14 +668,20 @@ def register_routes(app):
         user = current_user()
         qrs = QrCode.query.all() if user.role == "admin" else QrCode.query.filter_by(owner_id=user.id).all()
         bio = io.BytesIO()
+        used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
             for q in qrs:
-                img = qrcode.make(qr_public_url(q))
+                img = generate_branded_qr(q)
                 png = io.BytesIO()
                 img.save(png, format="PNG")
-                zf.writestr(f"QR_{q.slug}.png", png.getvalue())
+                name = qr_download_name(q)
+                if name in used_names:
+                    stem, ext = os.path.splitext(name)
+                    name = f"{stem}_{q.slug}{ext}"
+                used_names.add(name)
+                zf.writestr(name, png.getvalue())
         bio.seek(0)
-        return send_file(bio, mimetype="application/zip", as_attachment=True, download_name="SLC_QR_ALL.zip")
+        return send_file(bio, mimetype="application/zip", as_attachment=True, download_name="Ma_QR_hoc_lieu.zip")
 
     @app.get("/q/<slug>")
     def public_qr(slug):
@@ -677,7 +944,7 @@ def register_routes(app):
         if user.role != "admin":
             abort(403)
         bio = build_backup_zip()
-        return send_file(bio, mimetype="application/zip", as_attachment=True, download_name=f"slc_qr_backup_{utcnow().date().isoformat()}.zip")
+        return send_file(bio, mimetype="application/zip", as_attachment=True, download_name=f"sao_luu_ma_qr_{utcnow().date().isoformat()}.zip")
 
     @app.route("/admin/restore", methods=["GET", "POST"])
     @login_required
@@ -735,7 +1002,7 @@ def register_routes(app):
 
 
 
-BACKUP_VERSION = "1.0"
+BACKUP_VERSION = "2.0"
 
 def backup_table_specs():
     return [
@@ -749,6 +1016,7 @@ def backup_table_specs():
         ("class_groups", ClassGroup),
         ("participants", Participant),
         ("qr_codes", QrCode),
+        ("course_videos", CourseVideo),
         ("qr_target_history", QrTargetHistory),
         ("scan_logs", ScanLog),
         ("watch_sessions", WatchSession),
@@ -765,7 +1033,7 @@ def build_backup_zip():
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         manifest = {
-            "product": "SLC QR Learning Hub",
+            "product": current_app.config.get("APP_NAME", "TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE"),
             "backup_version": BACKUP_VERSION,
             "created_at": utcnow().isoformat(),
             "warning": "OAuth token được lưu ở dạng mã hóa; không chia sẻ tệp backup công khai."
