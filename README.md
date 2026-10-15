@@ -139,3 +139,10 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Thêm nút quản trị **Xóa toàn bộ dữ liệu đã lưu** ở trang Tổng quan để làm sạch dữ liệu thử nghiệm; thao tác xóa toàn bộ dữ liệu trong DB và yêu cầu đăng nhập lại, nhưng không xóa cấu hình Render/Google OAuth.
 - Trang chờ đăng nhập bỏ khối Nhóm tác giả ở giữa; thông tin tác giả chỉ còn ở cuối giao diện.
 - Khung lưu ý đăng nhập thử nghiệm chuyển sang nền xanh nhạt.
+
+## Hiệu chỉnh v2.8.2
+
+- Đưa **Tỷ lệ phiên xem hoàn thành** lên cùng hàng với các thẻ thống kê Video học liệu, Học phần, Mã QR, Lượt quét và Phiên xem video.
+- Bảng **Lượt quét gần đây** hiển thị toàn chiều rộng giao diện Tổng quan.
+- Bỏ dòng hướng dẫn “Giảng viên chỉ cần nhập...” ở giao diện Quản lý học phần.
+- Bỏ khối thông tin “Xử lý khi video YouTube bị xóa...” ở giao diện Quản lý mã QR động; chức năng kỹ thuật xử lý QR động vẫn giữ nguyên.
