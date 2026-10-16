@@ -75,28 +75,32 @@
     <div class="row g-4">
       <div class="col-lg-4">
         <h6 class="fw-bold">Nhập dữ liệu đối chứng thủ công</h6>
-        <p class="small text-muted">Chỉ nhập kết quả đo quy trình thủ công. Phía Web App được hệ thống ghi tự động khi sử dụng chức năng thật.</p>
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="form_type" value="manual_experiment">
           <div class="mb-2">
-            <label class="form-label">Mã nhiệm vụ</label>
-            <input class="form-control" name="task_key" placeholder="Ví dụ: TAO_QR_HANG_LOAT" required>
+            <label class="form-label fw-bold">Nhiệm vụ đối chứng</label>
+            <select class="form-select" name="task_key" required>
+              <option value="" selected disabled>— Chọn nhiệm vụ —</option>
+              {% for task in task_catalog %}
+              <option value="{{ task.key }}">{{ task.name }} ({{ task.key }})</option>
+              {% endfor %}
+            </select>
           </div>
           <div class="mb-2">
-            <label class="form-label">Số thao tác thủ công</label>
+            <label class="form-label fw-bold">Số thao tác thủ công</label>
             <input class="form-control" type="number" min="0" name="operations_count" required>
           </div>
           <div class="mb-2">
-            <label class="form-label">Tổng thời gian thủ công (giây)</label>
+            <label class="form-label fw-bold">Tổng thời gian thủ công (giây)</label>
             <input class="form-control" type="number" min="0" step="0.01" name="elapsed_seconds" required>
           </div>
           <div class="mb-2">
-            <label class="form-label">Kết quả</label>
+            <label class="form-label fw-bold">Kết quả</label>
             <select class="form-select" name="success"><option value="1">Thành công</option><option value="0">Không đạt</option></select>
           </div>
           <div class="mb-3">
-            <label class="form-label">Ghi chú</label>
+            <label class="form-label fw-bold">Ghi chú</label>
             <textarea class="form-control" name="note" rows="3" placeholder="Điều kiện đo, số video, thiết bị..."></textarea>
           </div>
           <button class="btn btn-primary w-100">Lưu dữ liệu đối chứng</button>
@@ -107,13 +111,13 @@
         <div class="table-responsive">
           <table class="table table-bordered table-sm align-middle">
             <thead>
-              <tr><th rowspan="2">Mã nhiệm vụ</th><th colspan="2" class="text-center">Số thao tác TB</th><th colspan="2" class="text-center">Thời gian TB (giây)</th><th rowspan="2">Giảm thao tác</th><th rowspan="2">Giảm thời gian</th></tr>
+              <tr><th rowspan="2">Nhiệm vụ</th><th colspan="2" class="text-center">Số thao tác TB</th><th colspan="2" class="text-center">Thời gian TB (giây)</th><th rowspan="2">Giảm thao tác</th><th rowspan="2">Giảm thời gian</th></tr>
               <tr><th>Thủ công</th><th>Web App</th><th>Thủ công</th><th>Web App</th></tr>
             </thead>
             <tbody>
               {% for r in comparison_rows %}
               <tr>
-                <td><code>{{ r.task_key }}</code></td>
+                <td><strong>{{ r.task_name }}</strong><br><code>{{ r.task_key }}</code></td>
                 <td>{{ '%.1f'|format(r.manual_ops) if r.manual_ops is not none else '—' }}</td>
                 <td>{{ '%.1f'|format(r.webapp_ops) if r.webapp_ops is not none else '—' }}</td>
                 <td>{{ '%.2f'|format(r.manual_time) if r.manual_time is not none else '—' }}</td>
@@ -127,7 +131,26 @@
             </tbody>
           </table>
         </div>
-        <div class="small text-muted">Mã nhiệm vụ phải trùng với nhiệm vụ Web App tương ứng. Các mã được hệ thống ghi tự động gồm ví dụ: <code>DONG_BO_YOUTUBE</code>, <code>GAN_VIDEO_HOC_PHAN</code>, <code>TAO_QR_HANG_LOAT</code>, <code>TAO_QR_RIENG</code>.</div>
+        <div class="mt-4">
+          <h6 class="fw-bold">Danh mục nhiệm vụ đối chứng cần thực hiện</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle mb-0">
+              <thead><tr><th>Nhiệm vụ Web App</th><th>Quy trình thủ công đối chứng</th><th class="text-center">Web App</th><th class="text-center">Thủ công</th><th>Trạng thái</th></tr></thead>
+              <tbody>
+                {% for task in task_catalog %}
+                <tr>
+                  <td><strong>{{ task.name }}</strong><br><code>{{ task.key }}</code></td>
+                  <td>{{ task.manual_task }}</td>
+                  <td class="text-center">{{ task.webapp_count }}</td>
+                  <td class="text-center">{{ task.manual_count }}</td>
+                  <td><span class="badge text-bg-{{ task.status_class }}">{{ task.status }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="small text-muted mt-2">Khi đo đối chứng, nên giữ cùng số lượng video, thiết bị và điều kiện mạng giữa hai quy trình để kết quả so sánh có ý nghĩa.</div>
+        </div>
       </div>
     </div>
   </div>

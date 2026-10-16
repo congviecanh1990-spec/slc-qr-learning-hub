@@ -41,6 +41,33 @@ csrf = CSRFProtect()
 oauth = OAuth()
 
 
+# Danh mục nhiệm vụ đối chứng được chuẩn hóa để dữ liệu thủ công luôn khớp
+# với mã mà Web App tự ghi. Không cho người dùng tự gõ mã nhiệm vụ.
+RESEARCH_COMPARISON_TASKS = [
+    {
+        "key": "DONG_BO_YOUTUBE",
+        "name": "Đồng bộ kênh/video YouTube",
+        "manual_task": "Cập nhật/tập hợp danh sách video YouTube theo quy trình thủ công",
+    },
+    {
+        "key": "GAN_VIDEO_HOC_PHAN",
+        "name": "Gán video vào học phần",
+        "manual_task": "Phân loại và ghi nhận video vào học phần theo quy trình thủ công",
+    },
+    {
+        "key": "TAO_QR_HANG_LOAT",
+        "name": "Tạo mã QR hàng loạt",
+        "manual_task": "Tạo mã QR cho nhiều video theo quy trình thủ công",
+    },
+    {
+        "key": "TAO_QR_RIENG",
+        "name": "Tạo một mã QR riêng",
+        "manual_task": "Tạo một mã QR cho một video theo quy trình thủ công",
+    },
+]
+RESEARCH_COMPARISON_TASK_MAP = {item["key"]: item for item in RESEARCH_COMPARISON_TASKS}
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -1289,7 +1316,9 @@ def register_routes(app):
                     task_key = (request.form.get("task_key") or "").strip()
                     operations_count = int(request.form.get("operations_count") or 0)
                     elapsed_seconds = float(request.form.get("elapsed_seconds") or 0)
-                    if not task_key or operations_count < 0 or elapsed_seconds < 0:
+                    if task_key not in RESEARCH_COMPARISON_TASK_MAP:
+                        raise ValueError("Vui lòng chọn một nhiệm vụ đối chứng trong danh mục chuẩn của hệ thống.")
+                    if operations_count < 0 or elapsed_seconds < 0:
                         raise ValueError("Vui lòng nhập đầy đủ dữ liệu đối chứng thủ công.")
                     db.session.add(ExperimentRun(
                         owner_id=user.id,
@@ -1326,10 +1355,12 @@ def register_routes(app):
         manual_runs = [x for x in experiments if x.mode == "manual"]
         webapp_runs = [x for x in experiments if x.mode == "webapp"]
 
-        # Tổng hợp theo cùng mã nhiệm vụ để so sánh đúng "cùng việc" giữa thủ công và Web App.
-        task_keys = sorted({x.task_key for x in experiments})
+        # Chỉ so sánh theo danh mục nhiệm vụ chuẩn. Nhờ vậy mã đối chứng thủ công
+        # luôn trùng chính xác với mã Web App tự ghi và không phát sinh mã nhập sai.
         comparison_rows = []
-        for key in task_keys:
+        task_catalog = []
+        for task in RESEARCH_COMPARISON_TASKS:
+            key = task["key"]
             m = [x for x in manual_runs if x.task_key == key and x.success]
             w = [x for x in webapp_runs if x.task_key == key and x.success]
             m_ops = (sum(x.operations_count for x in m) / len(m)) if m else None
@@ -1340,6 +1371,8 @@ def register_routes(app):
             reduction_time = round(100 * (m_time - w_time) / m_time, 1) if m_time and w_time is not None else None
             comparison_rows.append({
                 "task_key": key,
+                "task_name": task["name"],
+                "manual_task": task["manual_task"],
                 "manual_ops": m_ops,
                 "webapp_ops": w_ops,
                 "manual_time": m_time,
@@ -1348,6 +1381,25 @@ def register_routes(app):
                 "reduction_time": reduction_time,
                 "manual_count": len(m),
                 "webapp_count": len(w),
+            })
+            if m and w:
+                status = "Đủ dữ liệu để so sánh"
+                status_class = "success"
+            elif w and not m:
+                status = "Cần đo quy trình thủ công"
+                status_class = "warning"
+            elif m and not w:
+                status = "Cần thực hiện trên Web App"
+                status_class = "warning"
+            else:
+                status = "Chưa có dữ liệu"
+                status_class = "secondary"
+            task_catalog.append({
+                **task,
+                "manual_count": len(m),
+                "webapp_count": len(w),
+                "status": status,
+                "status_class": status_class,
             })
 
         survey_links = {
@@ -1367,6 +1419,7 @@ def register_routes(app):
             webapp_runs=webapp_runs,
             manual_runs=manual_runs,
             comparison_rows=comparison_rows,
+            task_catalog=task_catalog,
             survey_links=survey_links,
         )
 

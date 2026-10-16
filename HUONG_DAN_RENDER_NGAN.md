@@ -1,3 +1,5 @@
+# Cập nhật v3.1
+
 # Cập nhật v3.0 trên Render
 
 1. Giải nén bộ mã nguồn v3.0.
@@ -11,3 +13,11 @@
 9. Dán liên kết Google Form khảo sát GV, Google Form khảo sát SV và Google Sheets kết quả vào phần `Cấu hình liên kết khảo sát`.
 
 Không cần xóa PostgreSQL. `db.create_all()` sẽ tạo bảng mới `research_settings`; schema `functional_test_runs` được nâng cấp tự động trên PostgreSQL.
+
+
+## Kiểm tra riêng sau khi deploy v3.1
+1. Vào **Đánh giá nghiệm thu** → **Hiệu quả quy trình**.
+2. Trường **Nhiệm vụ đối chứng** phải là danh sách chọn, không còn ô tự gõ mã.
+3. Danh sách phải có 4 nhiệm vụ chuẩn: Đồng bộ YouTube, Gán video vào học phần, Tạo QR hàng loạt, Tạo một QR riêng.
+4. Bảng **Danh mục nhiệm vụ đối chứng cần thực hiện** phải hiển thị trạng thái dữ liệu của từng nhiệm vụ.
+5. Dữ liệu cũ có mã không chuẩn vẫn được giữ trong PostgreSQL nhưng không được dùng cho bảng so sánh chuẩn v3.1.

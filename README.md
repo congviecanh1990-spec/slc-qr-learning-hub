@@ -1,4 +1,4 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.9
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.1
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
@@ -165,3 +165,12 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - So sánh hiệu quả chỉ tính trên các nhiệm vụ có dữ liệu ở cả hai phía (thủ công và Web App).
 - Bỏ nhập từng phiếu khảo sát trong Web App. Khảo sát dùng Google Forms và Google Sheets; trang Đánh giá nghiệm thu chỉ lưu/liên kết các URL khảo sát và bảng kết quả.
 - Bổ sung bảng `research_settings`; backup cũ không có bảng này vẫn được hỗ trợ khôi phục.
+
+
+## Cập nhật v3.1 — nhiệm vụ đối chứng chuẩn hóa
+- Bỏ dòng giải thích dài dưới mục **Nhập dữ liệu đối chứng thủ công**.
+- Không cho quản trị viên tự gõ mã nhiệm vụ. Mục **Nhiệm vụ đối chứng** là danh sách chọn cố định, dùng đúng các mã mà Web App tự ghi.
+- Danh mục chuẩn gồm: `DONG_BO_YOUTUBE`, `GAN_VIDEO_HOC_PHAN`, `TAO_QR_HANG_LOAT`, `TAO_QR_RIENG`.
+- Web App từ chối lưu dữ liệu thủ công nếu mã nhiệm vụ không thuộc danh mục chuẩn.
+- Bổ sung bảng **Danh mục nhiệm vụ đối chứng cần thực hiện** cho biết số lần hệ thống đã ghi, số phép đo thủ công đã có và trạng thái dữ liệu của từng nhiệm vụ.
+- Bảng so sánh hiển thị cả tên nhiệm vụ và mã chuẩn, tránh nhầm mã khi nghiệm thu.
