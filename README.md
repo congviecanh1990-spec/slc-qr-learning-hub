@@ -1,4 +1,4 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.8
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v2.9
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
@@ -146,3 +146,14 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Bảng **Lượt quét gần đây** hiển thị toàn chiều rộng giao diện Tổng quan.
 - Bỏ dòng hướng dẫn “Giảng viên chỉ cần nhập...” ở giao diện Quản lý học phần.
 - Bỏ khối thông tin “Xử lý khi video YouTube bị xóa...” ở giao diện Quản lý mã QR động; chức năng kỹ thuật xử lý QR động vẫn giữ nguyên.
+
+## Hiệu chỉnh v2.9 — Gộp sao lưu và khôi phục dữ liệu
+
+- Gộp hai chức năng quản trị thành một menu **Sao lưu & khôi phục**.
+- Giao diện mới hiển thị song song khối **Sao lưu dữ liệu** và **Khôi phục dữ liệu**.
+- Khối sao lưu cho phép tạo/tải tệp ZIP và hiển thị nhanh số video, học phần, QR đang dùng và lượt quét đã lưu.
+- Khôi phục dùng cụm từ xác nhận tiếng Việt **KHÔI PHỤC** thay cho `RESTORE`.
+- Nút khôi phục chỉ được bật khi đã chọn tệp ZIP và nhập đúng cụm từ xác nhận.
+- Có hộp xác nhận cuối cùng trước khi thay thế dữ liệu hiện tại.
+- Liên kết `/admin/restore` cũ được giữ để chuyển hướng sang giao diện mới.
+- Chức năng chỉ hiển thị và hoạt động với tài khoản Quản trị viên.

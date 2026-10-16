@@ -40,8 +40,7 @@
           {% if me.role == 'admin' %}
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'research' else '' }}" href="{{ url_for('research_page') }}">Đánh giá nghiệm thu</a></li>
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'errors' else '' }}" href="{{ url_for('error_logs_page') }}">Nhật ký lỗi</a></li>
-          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'backup' else '' }}" href="{{ url_for('backup_zip') }}">Sao lưu dữ liệu</a></li>
-          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'restore' else '' }}" href="{{ url_for('restore_backup') }}">Khôi phục dữ liệu</a></li>
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'data_admin' else '' }}" href="{{ url_for('data_management') }}">Sao lưu &amp; khôi phục</a></li>
           {% endif %}
         </ul>
         <div class="d-lg-none small border-top pt-2 mt-2">

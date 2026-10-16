@@ -317,8 +317,9 @@ def register_routes(app):
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
             "research_page": "research",
             "error_logs_page": "errors",
-            "backup_zip": "backup",
-            "restore_backup": "restore",
+            "data_management": "data_admin",
+            "backup_zip": "data_admin",
+            "restore_backup": "data_admin",
         }
         return {
             "me": current_user(),
@@ -1221,6 +1222,42 @@ def register_routes(app):
             flash(f"Không thể xóa toàn bộ dữ liệu: {exc}", "danger")
             return redirect(url_for("index"))
 
+    @app.route("/admin/data", methods=["GET", "POST"])
+    @login_required
+    def data_management():
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+
+        if request.method == "POST":
+            upload = request.files.get("backup_file")
+            confirm = (request.form.get("confirm") or "").strip()
+            if not upload or not upload.filename:
+                flash("Vui lòng chọn tệp sao lưu ZIP do chính hệ thống tạo.", "warning")
+                return redirect(url_for("data_management"))
+            if confirm != "KHÔI PHỤC":
+                flash("Vui lòng nhập chính xác KHÔI PHỤC để xác nhận thao tác.", "warning")
+                return redirect(url_for("data_management"))
+            try:
+                restore_from_zip(upload.stream)
+                session.clear()
+                flash("Khôi phục dữ liệu thành công. Vui lòng đăng nhập lại.", "success")
+                return redirect(url_for("index"))
+            except Exception as exc:
+                db.session.rollback()
+                db.session.add(ErrorLog(module="restore", message="Khôi phục bản sao lưu thất bại", details=str(exc)))
+                db.session.commit()
+                flash(f"Khôi phục thất bại: {exc}", "danger")
+                return redirect(url_for("data_management"))
+
+        summary = {
+            "videos": Video.query.count(),
+            "courses": Course.query.filter_by(active=True).count(),
+            "qrs": QrCode.query.filter_by(active=True).count(),
+            "scans": ScanLog.query.count(),
+        }
+        return render_template("data_management.html", summary=summary)
+
     @app.get("/admin/backup.zip")
     @login_required
     def backup_zip():
@@ -1233,27 +1270,12 @@ def register_routes(app):
     @app.route("/admin/restore", methods=["GET", "POST"])
     @login_required
     def restore_backup():
-        user = current_user()
-        if user.role != "admin":
+        # Giữ tương thích với liên kết cũ; giao diện quản trị mới dùng /admin/data.
+        if current_user().role != "admin":
             abort(403)
         if request.method == "POST":
-            upload = request.files.get("backup_file")
-            confirm = request.form.get("confirm")
-            if not upload or confirm != "RESTORE":
-                flash("Chọn tệp backup ZIP và nhập RESTORE để xác nhận.", "warning")
-                return redirect(url_for("restore_backup"))
-            try:
-                restore_from_zip(upload.stream)
-                session.clear()
-                flash("Khôi phục dữ liệu thành công. Vui lòng đăng nhập lại.", "success")
-                return redirect(url_for("index"))
-            except Exception as exc:
-                db.session.rollback()
-                db.session.add(ErrorLog(module="restore", message="Khôi phục backup thất bại", details=str(exc)))
-                db.session.commit()
-                flash(f"Khôi phục thất bại: {exc}", "danger")
-                return redirect(url_for("restore_backup"))
-        return render_template("restore.html")
+            flash("Giao diện khôi phục đã được chuyển sang mục Sao lưu & khôi phục.", "info")
+        return redirect(url_for("data_management"))
 
     @app.get("/errors")
     @login_required

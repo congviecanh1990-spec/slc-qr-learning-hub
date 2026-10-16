@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% block title %}Sao lưu & khôi phục dữ liệu - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <h2 class="mb-1">Sao lưu &amp; khôi phục dữ liệu</h2>
+  <p class="text-muted mb-0">Quản lý bản sao dữ liệu của hệ thống để phục hồi khi xảy ra sự cố hoặc thao tác nhầm.</p>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-body p-4">
+        <h4 class="mb-3">Sao lưu dữ liệu</h4>
+        <p>Tạo một tệp ZIP chứa dữ liệu hiện tại của hệ thống để lưu trữ an toàn và sử dụng khi cần khôi phục.</p>
+        <div class="row g-2 mb-4 small">
+          <div class="col-6"><div class="border rounded p-2"><b>Video học liệu:</b> {{ summary.videos }}</div></div>
+          <div class="col-6"><div class="border rounded p-2"><b>Học phần:</b> {{ summary.courses }}</div></div>
+          <div class="col-6"><div class="border rounded p-2"><b>Mã QR đang dùng:</b> {{ summary.qrs }}</div></div>
+          <div class="col-6"><div class="border rounded p-2"><b>Lượt quét đã lưu:</b> {{ summary.scans }}</div></div>
+        </div>
+        <div class="alert alert-info mb-4">
+          Nên tạo bản sao lưu trước khi xóa dữ liệu, thay đổi lớn hoặc bắt đầu một đợt thử nghiệm mới.
+        </div>
+        <a class="btn btn-primary w-100" href="{{ url_for('backup_zip') }}">Tạo và tải bản sao lưu ZIP</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100 border-danger-subtle">
+      <div class="card-body p-4">
+        <h4 class="mb-3">Khôi phục dữ liệu</h4>
+        <div class="alert alert-warning">
+          <b>Cảnh báo:</b> Chỉ sử dụng khi cần phục hồi dữ liệu sau sự cố hoặc quay lại trạng thái đã sao lưu trước đó. Dữ liệu hiện tại sẽ bị thay thế bởi dữ liệu trong tệp sao lưu. Chỉ sử dụng tệp ZIP do chính hệ thống này tạo.
+        </div>
+        <form id="restoreForm" method="post" enctype="multipart/form-data" onsubmit="return confirmRestore();">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <label class="form-label fw-bold" for="backupFile">Tệp sao lưu ZIP</label>
+          <input id="backupFile" type="file" class="form-control mb-3" name="backup_file" accept=".zip,application/zip" required>
+
+          <label class="form-label fw-bold" for="restoreConfirm">Nhập <span class="text-danger">KHÔI PHỤC</span> để xác nhận</label>
+          <input id="restoreConfirm" class="form-control mb-2" name="confirm" autocomplete="off" placeholder="Nhập KHÔI PHỤC" required>
+          <div class="form-text mb-3">Nút khôi phục chỉ được bật khi đã chọn tệp ZIP và nhập đúng cụm từ xác nhận.</div>
+
+          <button id="restoreButton" type="submit" class="btn btn-danger w-100" disabled>Khôi phục dữ liệu</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const fileInput = document.getElementById('backupFile');
+  const confirmInput = document.getElementById('restoreConfirm');
+  const restoreButton = document.getElementById('restoreButton');
+
+  function updateRestoreButton() {
+    const hasFile = fileInput.files && fileInput.files.length > 0;
+    const phraseOk = confirmInput.value.trim() === 'KHÔI PHỤC';
+    restoreButton.disabled = !(hasFile && phraseOk);
+  }
+
+  fileInput.addEventListener('change', updateRestoreButton);
+  confirmInput.addEventListener('input', updateRestoreButton);
+  updateRestoreButton();
+})();
+
+function confirmRestore() {
+  return window.confirm('Bạn có chắc chắn muốn thay thế dữ liệu hiện tại bằng bản sao lưu này không? Hành động này không thể hoàn tác nếu bạn chưa có một bản sao lưu khác.');
+}
+</script>
+{% endblock %}
