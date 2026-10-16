@@ -31,7 +31,7 @@ from models import (
     db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, ClassGroup,
     Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
     HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
-    SurveyResult, utcnow
+    ResearchSetting, SurveyResult, utcnow
 )
 from security import encrypt_json
 from services.youtube import sync_my_channel, sync_video_ids, reconcile_user
@@ -96,6 +96,55 @@ def ensure_schema_upgrades():
             class_columns = {c["name"] for c in inspector.get_columns("class_groups")}
             if "active" not in class_columns:
                 conn.execute(text("ALTER TABLE class_groups ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE"))
+        if "functional_test_runs" in tables:
+            test_columns = {c["name"] for c in inspector.get_columns("functional_test_runs")}
+            if "source" not in test_columns:
+                conn.execute(text("ALTER TABLE functional_test_runs ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'manual'"))
+            # Cho phép ghi lỗi OAuth trước khi xác định được user. PostgreSQL hỗ trợ trực tiếp.
+            if db.engine.dialect.name == "postgresql":
+                conn.execute(text("ALTER TABLE functional_test_runs ALTER COLUMN owner_id DROP NOT NULL"))
+
+def record_functional_test(case_code, case_name, passed, owner_id=None, note="", source="automatic"):
+    """Ghi bằng chứng kiểm thử phát sinh từ hoạt động thật của hệ thống.
+
+    Hàm chỉ thêm bản ghi vào session hiện tại; caller chủ động commit cùng giao dịch nghiệp vụ.
+    """
+    db.session.add(FunctionalTestRun(
+        owner_id=owner_id,
+        case_code=(case_code or "AUTO")[:64],
+        case_name=(case_name or "Kiểm thử tự động")[:255],
+        passed=bool(passed),
+        source=(source or "automatic")[:16],
+        note=(note or "")[:4000],
+    ))
+
+
+def record_webapp_experiment(owner_id, task_key, elapsed_seconds, operations_count=1, success=True, note="", processing_seconds=None):
+    """Ghi phép đo Web App tự động; dữ liệu đối chứng thủ công vẫn do quản trị viên nhập."""
+    db.session.add(ExperimentRun(
+        owner_id=owner_id,
+        task_key=(task_key or "WEBAPP")[:128],
+        mode="webapp",
+        operations_count=max(0, int(operations_count or 0)),
+        elapsed_seconds=max(0.0, float(elapsed_seconds or 0)),
+        system_processing_seconds=(float(processing_seconds) if processing_seconds is not None else None),
+        success=bool(success),
+        note=(note or "")[:4000],
+    ))
+
+
+def research_setting(key, default=""):
+    row = ResearchSetting.query.filter_by(key=key).first()
+    return row.value if row and row.value else default
+
+
+def save_research_setting(key, value):
+    row = ResearchSetting.query.filter_by(key=key).first()
+    if not row:
+        row = ResearchSetting(key=key)
+        db.session.add(row)
+    row.value = (value or "").strip()
+
 
 def login_required(fn):
     @wraps(fn)
@@ -428,6 +477,10 @@ def register_routes(app):
             account.token_encrypted = encrypt_json(token)
             token_scope = token.get("scope") or current_app.config["GOOGLE_SCOPES"]
             account.scopes = " ".join(token_scope) if isinstance(token_scope, (list, tuple)) else str(token_scope)
+            record_functional_test(
+                "AUTH_LOGIN", "Đăng nhập Google", True, owner_id=user.id,
+                note=f"Đăng nhập thành công với vai trò {user.role}."
+            )
             db.session.commit()
             session["user_id"] = user.id
             session.permanent = True
@@ -436,6 +489,10 @@ def register_routes(app):
         except Exception as exc:
             db.session.rollback()
             db.session.add(ErrorLog(module="oauth", message="Đăng nhập Google thất bại", details=str(exc)))
+            record_functional_test(
+                "AUTH_LOGIN", "Đăng nhập Google", False, owner_id=None,
+                note=f"OAuth thất bại: {exc}"
+            )
             db.session.commit()
             flash(f"Đăng nhập thất bại: {exc}", "danger")
             return redirect(url_for("index"))
@@ -457,14 +514,34 @@ def register_routes(app):
     @app.post("/youtube/sync")
     @login_required
     def youtube_sync():
+        user = current_user()
+        t0 = time.perf_counter()
         try:
-            user = current_user()
             channels = sync_my_channel(user)
             # Đối soát lại toàn bộ video đã biết để phát hiện video bị xóa, chuyển
             # riêng tư hoặc thay đổi khả năng nhúng. Nhờ vậy QR cũ được cảnh báo sớm.
             checked = reconcile_user(user)
+            elapsed = time.perf_counter() - t0
+            record_functional_test(
+                "YT_SYNC", "Đồng bộ kênh/video YouTube", True, owner_id=user.id,
+                note=f"Đồng bộ {len(channels)} kênh; đối soát {checked} video."
+            )
+            record_webapp_experiment(
+                user.id, "DONG_BO_YOUTUBE", elapsed, operations_count=1, success=True,
+                note=f"{len(channels)} kênh; {checked} video"
+            )
+            db.session.commit()
             flash(f"Đã đồng bộ {len(channels)} kênh YouTube và kiểm tra trạng thái {checked} video.", "success")
         except Exception as exc:
+            db.session.rollback()
+            elapsed = time.perf_counter() - t0
+            record_functional_test(
+                "YT_SYNC", "Đồng bộ kênh/video YouTube", False, owner_id=user.id, note=str(exc)
+            )
+            record_webapp_experiment(
+                user.id, "DONG_BO_YOUTUBE", elapsed, operations_count=1, success=False, note=str(exc)
+            )
+            db.session.commit()
             flash(f"Đồng bộ thất bại: {exc}", "danger")
         return redirect(url_for("youtube_page"))
 
@@ -547,6 +624,7 @@ def register_routes(app):
             flash("Vui lòng chọn ít nhất một video để gán vào học phần.", "warning")
             return redirect(url_for("videos_page"))
         allowed_ids = {v.id for v in visible_video_query(user).filter(Video.id.in_([int(x) for x in video_ids if str(x).isdigit()])).all()}
+        t0 = time.perf_counter()
         created = 0
         skipped = 0
         for video_id in allowed_ids:
@@ -556,6 +634,15 @@ def register_routes(app):
                 created += 1
             else:
                 skipped += 1
+        elapsed = time.perf_counter() - t0
+        record_functional_test(
+            "ASSIGN_COURSE", "Gán video vào học phần", True, owner_id=user.id,
+            note=f"Học phần: {course.name}; gán mới {created}; bỏ qua {skipped}."
+        )
+        record_webapp_experiment(
+            user.id, "GAN_VIDEO_HOC_PHAN", elapsed, operations_count=1, success=True,
+            note=f"{created} video mới; {skipped} video đã có"
+        )
         db.session.commit()
         flash(f"Đã gán {created} video vào học phần “{course.name}”. Bỏ qua {skipped} video đã được gán trước đó.", "success")
         return redirect(url_for("videos_page", assignment=request.args.get("assignment", "")))
@@ -697,6 +784,7 @@ def register_routes(app):
         if not course.active or not course_owned_by_user(course, user):
             abort(403)
         links = CourseVideo.query.filter_by(course_id=course.id).order_by(CourseVideo.id).all()
+        t0 = time.perf_counter()
         created = 0
         existing = 0
         skipped = 0
@@ -712,6 +800,17 @@ def register_routes(app):
                 total_processing += qr.processing_seconds or 0.0
             else:
                 existing += 1
+        elapsed = time.perf_counter() - t0
+        passed = bool(created or existing or not links)
+        record_functional_test(
+            "QR_BULK", "Tạo mã QR hàng loạt", passed, owner_id=user.id,
+            note=f"Học phần: {course.name}; mới {created}; đã có {existing}; bỏ qua {skipped}."
+        )
+        record_webapp_experiment(
+            user.id, "TAO_QR_HANG_LOAT", elapsed, operations_count=1, success=passed,
+            note=f"{len(links)} video; mới {created}; đã có {existing}; bỏ qua {skipped}",
+            processing_seconds=(total_processing / created if created else None),
+        )
         db.session.commit()
         flash(
             f"Tạo mã QR hoàn tất: {created} mã mới, {existing} video đã có mã, {skipped} video chưa đủ điều kiện sử dụng.",
@@ -749,6 +848,7 @@ def register_routes(app):
     def qr_page():
         user = current_user()
         if request.method == "POST":
+            action_started = time.perf_counter()
             video_id = request.form.get("video_id", type=int)
             course_id = request.form.get("course_id", type=int)
             video = visible_video_query(user).filter(Video.id == video_id).first() if video_id else None
@@ -764,11 +864,20 @@ def register_routes(app):
                 link, _ = ensure_course_video_link(course, video, user)
                 qr, was_created = create_qr_for_course_video(course, video, user, link)
                 qr.title = title
+                elapsed = time.perf_counter() - action_started
+                record_functional_test(
+                    "QR_SINGLE", "Tạo một mã QR", True, owner_id=user.id,
+                    note=f"Video: {video.title}; học phần: {course.name}; tạo mới: {was_created}."
+                )
+                record_webapp_experiment(
+                    user.id, "TAO_QR_RIENG", elapsed, operations_count=1, success=True,
+                    note=f"Video: {video.title}; tạo mới: {was_created}",
+                    processing_seconds=(qr.processing_seconds if was_created else 0.0),
+                )
+                db.session.commit()
                 if was_created:
-                    db.session.commit()
                     flash("Đã tạo mã QR động thành công.", "success")
                 else:
-                    db.session.commit()
                     flash("Video này đã có mã QR trong học phần; hệ thống không tạo trùng.", "info")
             else:
                 t0 = time.perf_counter()
@@ -778,6 +887,14 @@ def register_routes(app):
                 db.session.flush()
                 db.session.add(QrTargetHistory(qr_id=qr.id, video_id=video.id, changed_by=user.id))
                 qr.processing_seconds = round(time.perf_counter() - t0, 4)
+                elapsed = time.perf_counter() - action_started
+                record_functional_test(
+                    "QR_SINGLE", "Tạo một mã QR", True, owner_id=user.id, note=f"Video: {video.title}; không gắn học phần."
+                )
+                record_webapp_experiment(
+                    user.id, "TAO_QR_RIENG", elapsed, operations_count=1, success=True,
+                    note=f"Video: {video.title}; không gắn học phần", processing_seconds=qr.processing_seconds
+                )
                 db.session.commit()
                 flash("Đã tạo mã QR động thành công.", "success")
             return redirect(url_for("qr_page"))
@@ -848,6 +965,10 @@ def register_routes(app):
             old.active_to = now
         db.session.add(QrTargetHistory(qr_id=qr.id, video_id=video.id, active_from=now, changed_by=user.id))
         qr.title = (video.title or qr.title)[:255]
+        record_functional_test(
+            "QR_RETARGET", "Đổi video đích của mã QR", True, owner_id=user.id,
+            note=f"QR {qr.slug}; video mới: {video.title}."
+        )
         db.session.commit()
         flash("Đã đổi video đích. Mã QR và đường dẫn không thay đổi.", "success")
         return redirect(url_for("qr_page"))
@@ -959,6 +1080,10 @@ def register_routes(app):
                 video_id=video.id if video else None,
                 success=success,
             ))
+            record_functional_test(
+                "QR_SCAN", "Quét mã QR và mở học liệu", success, owner_id=qr.owner_id,
+                note=f"QR {qr.slug}; vai trò {role}; trạng thái video: {video.status_label if video else 'không có video'}."
+            )
             db.session.commit()
 
         if not video:
@@ -1156,51 +1281,94 @@ def register_routes(app):
         user = current_user()
         if user.role != "admin":
             abort(403)
+
         if request.method == "POST":
             form_type = request.form.get("form_type")
             try:
-                if form_type == "experiment":
+                if form_type == "manual_experiment":
+                    task_key = (request.form.get("task_key") or "").strip()
+                    operations_count = int(request.form.get("operations_count") or 0)
+                    elapsed_seconds = float(request.form.get("elapsed_seconds") or 0)
+                    if not task_key or operations_count < 0 or elapsed_seconds < 0:
+                        raise ValueError("Vui lòng nhập đầy đủ dữ liệu đối chứng thủ công.")
                     db.session.add(ExperimentRun(
                         owner_id=user.id,
-                        task_key=request.form.get("task_key", "").strip(),
-                        mode=request.form.get("mode", "manual"),
-                        operations_count=int(request.form.get("operations_count") or 0),
-                        elapsed_seconds=float(request.form.get("elapsed_seconds") or 0),
-                        system_processing_seconds=float(request.form.get("system_processing_seconds") or 0) or None,
-                        success=request.form.get("success") == "1",
-                        note=request.form.get("note", "").strip(),
+                        task_key=task_key,
+                        mode="manual",
+                        operations_count=operations_count,
+                        elapsed_seconds=elapsed_seconds,
+                        system_processing_seconds=None,
+                        success=request.form.get("success", "1") == "1",
+                        note=(request.form.get("note") or "").strip(),
                     ))
-                elif form_type == "test":
-                    db.session.add(FunctionalTestRun(
-                        owner_id=user.id,
-                        case_code=request.form.get("case_code", "").strip(),
-                        case_name=request.form.get("case_name", "").strip(),
-                        passed=request.form.get("passed") == "1",
-                        note=request.form.get("note", "").strip(),
-                    ))
-                elif form_type == "survey":
-                    rating = int(request.form.get("rating") or 0)
-                    if rating < 1 or rating > 5:
-                        raise ValueError("Điểm khảo sát phải từ 1 đến 5")
-                    db.session.add(SurveyResult(
-                        owner_id=user.id,
-                        respondent_type=request.form.get("respondent_type", "SV"),
-                        respondent_code=request.form.get("respondent_code", "").strip(),
-                        rating=rating,
-                        note=request.form.get("note", "").strip(),
-                    ))
+                    flash("Đã lưu phép đo thủ công để làm dữ liệu đối chứng.", "success")
+                elif form_type == "survey_links":
+                    save_research_setting("lecturer_form_url", request.form.get("lecturer_form_url"))
+                    save_research_setting("student_form_url", request.form.get("student_form_url"))
+                    save_research_setting("survey_results_url", request.form.get("survey_results_url"))
+                    flash("Đã lưu liên kết Google Forms/Google Sheets.", "success")
+                else:
+                    raise ValueError("Biểu mẫu không hợp lệ.")
                 db.session.commit()
-                flash("Đã ghi nhận dữ liệu nghiên cứu.", "success")
             except Exception as exc:
                 db.session.rollback()
                 flash(f"Không lưu được dữ liệu: {exc}", "danger")
             return redirect(url_for("research_page"))
 
         metrics = acceptance_metrics(user)
-        experiments = ExperimentRun.query.order_by(ExperimentRun.created_at.desc()).limit(100).all()
-        tests = FunctionalTestRun.query.order_by(FunctionalTestRun.created_at.desc()).limit(100).all()
-        surveys = SurveyResult.query.order_by(SurveyResult.created_at.desc()).limit(100).all()
-        return render_template("research.html", metrics=metrics, experiments=experiments, tests=tests, surveys=surveys)
+        tests = FunctionalTestRun.query.filter_by(source="automatic").order_by(FunctionalTestRun.created_at.desc()).limit(200).all()
+        tests_total = FunctionalTestRun.query.filter_by(source="automatic").count()
+        tests_pass = FunctionalTestRun.query.filter_by(source="automatic", passed=True).count()
+        tests_fail = max(0, tests_total - tests_pass)
+        test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
+
+        experiments = ExperimentRun.query.order_by(ExperimentRun.created_at.desc()).limit(200).all()
+        manual_runs = [x for x in experiments if x.mode == "manual"]
+        webapp_runs = [x for x in experiments if x.mode == "webapp"]
+
+        # Tổng hợp theo cùng mã nhiệm vụ để so sánh đúng "cùng việc" giữa thủ công và Web App.
+        task_keys = sorted({x.task_key for x in experiments})
+        comparison_rows = []
+        for key in task_keys:
+            m = [x for x in manual_runs if x.task_key == key and x.success]
+            w = [x for x in webapp_runs if x.task_key == key and x.success]
+            m_ops = (sum(x.operations_count for x in m) / len(m)) if m else None
+            w_ops = (sum(x.operations_count for x in w) / len(w)) if w else None
+            m_time = (sum(x.elapsed_seconds for x in m) / len(m)) if m else None
+            w_time = (sum(x.elapsed_seconds for x in w) / len(w)) if w else None
+            reduction_ops = round(100 * (m_ops - w_ops) / m_ops, 1) if m_ops and w_ops is not None else None
+            reduction_time = round(100 * (m_time - w_time) / m_time, 1) if m_time and w_time is not None else None
+            comparison_rows.append({
+                "task_key": key,
+                "manual_ops": m_ops,
+                "webapp_ops": w_ops,
+                "manual_time": m_time,
+                "webapp_time": w_time,
+                "reduction_ops": reduction_ops,
+                "reduction_time": reduction_time,
+                "manual_count": len(m),
+                "webapp_count": len(w),
+            })
+
+        survey_links = {
+            "lecturer_form_url": research_setting("lecturer_form_url"),
+            "student_form_url": research_setting("student_form_url"),
+            "survey_results_url": research_setting("survey_results_url"),
+        }
+        return render_template(
+            "research.html",
+            metrics=metrics,
+            tests=tests,
+            tests_total=tests_total,
+            tests_pass=tests_pass,
+            tests_fail=tests_fail,
+            test_rate=test_rate,
+            experiments=experiments,
+            webapp_runs=webapp_runs,
+            manual_runs=manual_runs,
+            comparison_rows=comparison_rows,
+            survey_links=survey_links,
+        )
 
     @app.post("/admin/reset-all-data")
     @login_required
@@ -1239,13 +1407,22 @@ def register_routes(app):
                 flash("Vui lòng nhập chính xác KHÔI PHỤC để xác nhận thao tác.", "warning")
                 return redirect(url_for("data_management"))
             try:
+                admin_email = user.email
                 restore_from_zip(upload.stream)
+                # Sau restore, user hiện tại có thể đã đổi ID hoặc không còn trong bộ dữ liệu khôi phục.
+                restored_admin = User.query.filter_by(email=admin_email).first()
+                record_functional_test(
+                    "RESTORE", "Khôi phục dữ liệu từ bản sao lưu", True,
+                    owner_id=(restored_admin.id if restored_admin else None), note=upload.filename or ""
+                )
+                db.session.commit()
                 session.clear()
                 flash("Khôi phục dữ liệu thành công. Vui lòng đăng nhập lại.", "success")
                 return redirect(url_for("index"))
             except Exception as exc:
                 db.session.rollback()
                 db.session.add(ErrorLog(module="restore", message="Khôi phục bản sao lưu thất bại", details=str(exc)))
+                record_functional_test("RESTORE", "Khôi phục dữ liệu từ bản sao lưu", False, owner_id=user.id, note=str(exc))
                 db.session.commit()
                 flash(f"Khôi phục thất bại: {exc}", "danger")
                 return redirect(url_for("data_management"))
@@ -1264,8 +1441,16 @@ def register_routes(app):
         user = current_user()
         if user.role != "admin":
             abort(403)
-        bio = build_backup_zip()
-        return send_file(bio, mimetype="application/zip", as_attachment=True, download_name=f"sao_luu_ma_qr_{utcnow().date().isoformat()}.zip")
+        try:
+            bio = build_backup_zip()
+            record_functional_test("BACKUP", "Tạo bản sao lưu ZIP", True, owner_id=user.id)
+            db.session.commit()
+            return send_file(bio, mimetype="application/zip", as_attachment=True, download_name=f"sao_luu_ma_qr_{utcnow().date().isoformat()}.zip")
+        except Exception as exc:
+            db.session.rollback()
+            record_functional_test("BACKUP", "Tạo bản sao lưu ZIP", False, owner_id=user.id, note=str(exc))
+            db.session.commit()
+            raise
 
     @app.route("/admin/restore", methods=["GET", "POST"])
     @login_required
@@ -1332,6 +1517,7 @@ def backup_table_specs():
         ("error_logs", ErrorLog),
         ("experiment_runs", ExperimentRun),
         ("functional_test_runs", FunctionalTestRun),
+        ("research_settings", ResearchSetting),
         ("survey_results", SurveyResult),
     ]
 
@@ -1366,6 +1552,10 @@ def restore_from_zip(fileobj):
         for name, model in backup_table_specs():
             fn = f"{name}.json"
             if fn not in names:
+                # research_settings được bổ sung sau; backup cũ vẫn được phép khôi phục.
+                if name == "research_settings":
+                    payload[name] = []
+                    continue
                 raise ValueError(f"Thiếu {fn} trong backup.")
             rows = json.loads(zf.read(fn))
             columns = {c.name: c for c in model.__table__.columns}
@@ -1417,18 +1607,24 @@ def acceptance_metrics(user):
     scans_success = scan_q.filter(ScanLog.success.is_(True)).count()
     scan_rate = round(100 * scans_success / scans_total, 1) if scans_total else None
 
-    tests_q = FunctionalTestRun.query if user.role == "admin" else FunctionalTestRun.query.filter_by(owner_id=user.id)
+    tests_q = FunctionalTestRun.query.filter(FunctionalTestRun.source == "automatic")
+    if user.role != "admin":
+        tests_q = tests_q.filter(FunctionalTestRun.owner_id == user.id)
     tests_total = tests_q.count()
     tests_pass = tests_q.filter(FunctionalTestRun.passed.is_(True)).count()
     test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
 
     exp_q = ExperimentRun.query if user.role == "admin" else ExperimentRun.query.filter_by(owner_id=user.id)
-    manual = exp_q.filter(ExperimentRun.mode == "manual").all()
-    webapp = exp_q.filter(ExperimentRun.mode == "webapp").all()
-    manual_ops = sum(x.operations_count for x in manual) / len(manual) if manual else None
-    app_ops = sum(x.operations_count for x in webapp) / len(webapp) if webapp else None
-    manual_time = sum(x.elapsed_seconds for x in manual) / len(manual) if manual else None
-    app_time = sum(x.elapsed_seconds for x in webapp) / len(webapp) if webapp else None
+    manual = exp_q.filter(ExperimentRun.mode == "manual", ExperimentRun.success.is_(True)).all()
+    webapp = exp_q.filter(ExperimentRun.mode == "webapp", ExperimentRun.success.is_(True)).all()
+    # Chỉ so sánh các nhiệm vụ có dữ liệu ở CẢ hai phía để tránh trộn các công việc khác nhau.
+    matched_keys = {x.task_key for x in manual} & {x.task_key for x in webapp}
+    manual_matched = [x for x in manual if x.task_key in matched_keys]
+    webapp_matched = [x for x in webapp if x.task_key in matched_keys]
+    manual_ops = sum(x.operations_count for x in manual_matched) / len(manual_matched) if manual_matched else None
+    app_ops = sum(x.operations_count for x in webapp_matched) / len(webapp_matched) if webapp_matched else None
+    manual_time = sum(x.elapsed_seconds for x in manual_matched) / len(manual_matched) if manual_matched else None
+    app_time = sum(x.elapsed_seconds for x in webapp_matched) / len(webapp_matched) if webapp_matched else None
 
     qr_perf_q = QrCode.query.filter(QrCode.processing_seconds.isnot(None))
     if user.role != "admin":
@@ -1440,11 +1636,10 @@ def acceptance_metrics(user):
     reduction_ops = round(100 * (manual_ops - app_ops) / manual_ops, 1) if manual_ops and app_ops is not None else None
     reduction_time = round(100 * (manual_time - app_time) / manual_time, 1) if manual_time and app_time is not None else None
 
-    survey_q = SurveyResult.query if user.role == "admin" else SurveyResult.query.filter_by(owner_id=user.id)
-    lecturer_s = survey_q.filter(SurveyResult.respondent_type == "GV").all()
-    student_s = survey_q.filter(SurveyResult.respondent_type == "SV").all()
-    lecturer_sat = round(100 * len([x for x in lecturer_s if x.rating >= 4]) / len(lecturer_s), 1) if lecturer_s else None
-    student_sat = round(100 * len([x for x in student_s if x.rating >= 4]) / len(student_s), 1) if student_s else None
+    # Khảo sát được thu bằng Google Forms và thống kê trong Google Sheets để tránh nhập tay từng phiếu.
+    # Web App chỉ liên kết tới nguồn khảo sát; hai chỉ tiêu hài lòng được đánh giá từ Sheets khi nghiệm thu.
+    lecturer_sat = None
+    student_sat = None
 
     participant_base = db.session.query(ScanLog.participant_code).join(QrCode, ScanLog.qr_id == QrCode.id)
     if user.role != "admin":
@@ -1481,16 +1676,16 @@ def acceptance_metrics(user):
         metric("Số giảng viên tham gia", gv_count, ">=", 5, ""),
         metric("Số sinh viên tham gia", sv_count, ">=", 60, ""),
         metric("Số video/tình huống kiểm thử", video_q.count(), ">=", 100, ""),
-        metric("Mức hài lòng giảng viên", lecturer_sat, ">=", 80, "%"),
-        metric("Mức hài lòng sinh viên", student_sat, ">=", 80, "%"),
+        metric("Mức hài lòng giảng viên", lecturer_sat, ">=", 80, "%", external=True),
+        metric("Mức hài lòng sinh viên", student_sat, ">=", 80, "%", external=True),
     ]
 
 
-def metric(name, value, op, target, suffix):
+def metric(name, value, op, target, suffix, external=False):
     passed = None
     if value is not None:
         passed = value >= target if op == ">=" else value <= target
-    return {"name": name, "value": value, "op": op, "target": target, "suffix": suffix, "passed": passed}
+    return {"name": name, "value": value, "op": op, "target": target, "suffix": suffix, "passed": passed, "external": external}
 
 
 def serialize_model(obj):

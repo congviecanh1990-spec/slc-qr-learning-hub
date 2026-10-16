@@ -157,3 +157,11 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Có hộp xác nhận cuối cùng trước khi thay thế dữ liệu hiện tại.
 - Liên kết `/admin/restore` cũ được giữ để chuyển hướng sang giao diện mới.
 - Chức năng chỉ hiển thị và hoạt động với tài khoản Quản trị viên.
+
+## v3.0 - Đánh giá nghiệm thu theo dữ liệu thật
+
+- Bỏ nhập thủ công từng ca kiểm thử. Hệ thống tự ghi bằng chứng từ các hoạt động thật: đăng nhập Google, đồng bộ YouTube, gán video vào học phần, tạo QR, quét QR, đổi video đích, sao lưu và khôi phục.
+- Phép đo phía Web App được ghi tự động; quản trị viên chỉ nhập số liệu quy trình thủ công để làm đối chứng cùng mã nhiệm vụ.
+- So sánh hiệu quả chỉ tính trên các nhiệm vụ có dữ liệu ở cả hai phía (thủ công và Web App).
+- Bỏ nhập từng phiếu khảo sát trong Web App. Khảo sát dùng Google Forms và Google Sheets; trang Đánh giá nghiệm thu chỉ lưu/liên kết các URL khảo sát và bảng kết quả.
+- Bổ sung bảng `research_settings`; backup cũ không có bảng này vẫn được hỗ trợ khôi phục.

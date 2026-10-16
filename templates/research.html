@@ -1,9 +1,158 @@
 {% extends 'base.html' %}
 {% block content %}
-<h2 class="mb-1">Theo dõi chỉ tiêu và kết quả nghiệm thu</h2><p class="text-muted">Theo dõi các chỉ tiêu thử nghiệm, kiểm thử chức năng và kết quả thực nghiệm của đề tài.</p>
-<div class="table-responsive mb-4"><table class="table table-bordered align-middle"><thead><tr><th>Chỉ tiêu</th><th>Mục tiêu</th><th>Thực tế</th><th>Kết quả</th></tr></thead><tbody>{% for m in metrics %}<tr><td>{{ m.name }}</td><td>{{ m.op }} {{ m.target }}{{ m.suffix }}</td><td>{{ (m.value|string + m.suffix) if m.value is not none else 'Chưa đủ dữ liệu' }}</td><td>{% if m.passed is none %}<span class="badge text-bg-secondary">Chưa đánh giá</span>{% elif m.passed %}<span class="badge text-bg-success">Đạt</span>{% else %}<span class="badge text-bg-danger">Chưa đạt</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
-<div class="row g-3 mb-4"><div class="col-lg-4"><div class="card h-100 shadow-sm"><div class="card-header fw-semibold">Ghi phép đo so sánh</div><div class="card-body"><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="form_type" value="experiment"><input class="form-control mb-2" name="task_key" placeholder="Mã nhiệm vụ" required><select class="form-select mb-2" name="mode"><option value="manual">Thủ công</option><option value="webapp">Ứng dụng web</option></select><input class="form-control mb-2" type="number" name="operations_count" placeholder="Số thao tác" required><input class="form-control mb-2" type="number" step="0.01" name="elapsed_seconds" placeholder="Tổng thời gian (giây)" required><input class="form-control mb-2" type="number" step="0.01" name="system_processing_seconds" placeholder="Xử lý hệ thống (giây/video)"><select class="form-select mb-2" name="success"><option value="1">Thành công</option><option value="0">Không đạt</option></select><textarea class="form-control mb-2" name="note" placeholder="Ghi chú"></textarea><button class="btn btn-primary w-100">Lưu phép đo</button></form></div></div></div>
-<div class="col-lg-4"><div class="card h-100 shadow-sm"><div class="card-header fw-semibold">Ghi ca kiểm thử</div><div class="card-body"><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="form_type" value="test"><input class="form-control mb-2" name="case_code" placeholder="Mã ca: TC-001" required><input class="form-control mb-2" name="case_name" placeholder="Tên ca kiểm thử" required><select class="form-select mb-2" name="passed"><option value="1">Đạt</option><option value="0">Không đạt</option></select><textarea class="form-control mb-2" name="note" placeholder="Ghi chú"></textarea><button class="btn btn-primary w-100">Lưu ca kiểm thử</button></form></div></div></div>
-<div class="col-lg-4"><div class="card h-100 shadow-sm"><div class="card-header fw-semibold">Ghi khảo sát</div><div class="card-body"><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="form_type" value="survey"><select class="form-select mb-2" name="respondent_type"><option value="GV">Giảng viên</option><option value="SV">Sinh viên</option></select><input class="form-control mb-2" name="respondent_code" placeholder="Mã người trả lời" required><select class="form-select mb-2" name="rating">{% for i in range(1,6) %}<option value="{{ i }}">{{ i }}/5</option>{% endfor %}</select><textarea class="form-control mb-2" name="note" placeholder="Ghi chú"></textarea><button class="btn btn-primary w-100">Lưu khảo sát</button></form></div></div></div></div>
-<div class="alert alert-light border small">Các chỉ số lịch sử quét và quá trình xem dùng để mô tả hành vi khai thác học liệu và minh chứng chức năng; không được diễn giải trực tiếp thành mức độ hiểu bài hay kết quả học tập.</div>
+<h2 class="mb-1">Theo dõi chỉ tiêu và kết quả nghiệm thu</h2>
+<p class="text-muted mb-4">Trang này tổng hợp minh chứng phát sinh từ hoạt động thực tế của hệ thống. Ca kiểm thử và số liệu phía Web App được ghi tự động; chỉ dữ liệu quy trình thủ công được nhập để làm đối chứng.</p>
+
+<div class="table-responsive mb-4">
+  <table class="table table-bordered align-middle bg-white">
+    <thead>
+      <tr><th>Chỉ tiêu</th><th>Mục tiêu</th><th>Thực tế</th><th>Kết quả</th></tr>
+    </thead>
+    <tbody>
+      {% for m in metrics %}
+      <tr>
+        <td>{{ m.name }}</td>
+        <td>{{ m.op }} {{ m.target }}{{ m.suffix }}</td>
+        <td>
+          {% if m.external %}
+            <span class="text-muted">Theo Google Sheets</span>
+          {% else %}
+            {{ (m.value|string + m.suffix) if m.value is not none else 'Chưa đủ dữ liệu' }}
+          {% endif %}
+        </td>
+        <td>
+          {% if m.external %}
+            <span class="badge text-bg-info">Đối chiếu khảo sát</span>
+          {% elif m.passed is none %}
+            <span class="badge text-bg-secondary">Chưa đánh giá</span>
+          {% elif m.passed %}
+            <span class="badge text-bg-success">Đạt</span>
+          {% else %}
+            <span class="badge text-bg-danger">Chưa đạt</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-header fw-bold">1. Kết quả kiểm thử tự động</div>
+  <div class="card-body">
+    <div class="row g-3 mb-3">
+      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Tổng lượt kiểm thử</div><div class="fs-3 fw-bold">{{ tests_total }}</div></div></div>
+      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Đạt</div><div class="fs-3 fw-bold text-success">{{ tests_pass }}</div></div></div>
+      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Không đạt</div><div class="fs-3 fw-bold text-danger">{{ tests_fail }}</div></div></div>
+      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Tỷ lệ đạt</div><div class="fs-3 fw-bold">{{ (test_rate|string + '%') if test_rate is not none else '—' }}</div></div></div>
+    </div>
+    <p class="small text-muted">Hệ thống tự ghi nhận từ các hoạt động thật như đăng nhập Google, đồng bộ YouTube, gán video vào học phần, tạo QR, quét QR, đổi video đích, sao lưu và khôi phục dữ liệu.</p>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle">
+        <thead><tr><th>Thời gian</th><th>Mã ca</th><th>Chức năng</th><th>Kết quả</th><th>Người dùng</th><th>Minh chứng / ghi chú</th></tr></thead>
+        <tbody>
+          {% for t in tests %}
+          <tr>
+            <td class="text-nowrap">{{ t.created_at.strftime('%d/%m/%Y %H:%M:%S') if t.created_at else '' }}</td>
+            <td><code>{{ t.case_code }}</code></td>
+            <td>{{ t.case_name }}</td>
+            <td>{% if t.passed %}<span class="badge text-bg-success">Đạt</span>{% else %}<span class="badge text-bg-danger">Không đạt</span>{% endif %}</td>
+            <td>{{ t.owner.email if t.owner else 'Chưa xác định' }}</td>
+            <td class="small">{{ t.note or '—' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-center text-muted py-4">Chưa có dữ liệu kiểm thử tự động. Hãy sử dụng các chức năng của Web App để hệ thống tự ghi nhận.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-header fw-bold">2. Hiệu quả quy trình</div>
+  <div class="card-body">
+    <div class="row g-4">
+      <div class="col-lg-4">
+        <h6 class="fw-bold">Nhập dữ liệu đối chứng thủ công</h6>
+        <p class="small text-muted">Chỉ nhập kết quả đo quy trình thủ công. Phía Web App được hệ thống ghi tự động khi sử dụng chức năng thật.</p>
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="form_type" value="manual_experiment">
+          <div class="mb-2">
+            <label class="form-label">Mã nhiệm vụ</label>
+            <input class="form-control" name="task_key" placeholder="Ví dụ: TAO_QR_HANG_LOAT" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Số thao tác thủ công</label>
+            <input class="form-control" type="number" min="0" name="operations_count" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Tổng thời gian thủ công (giây)</label>
+            <input class="form-control" type="number" min="0" step="0.01" name="elapsed_seconds" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Kết quả</label>
+            <select class="form-select" name="success"><option value="1">Thành công</option><option value="0">Không đạt</option></select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Ghi chú</label>
+            <textarea class="form-control" name="note" rows="3" placeholder="Điều kiện đo, số video, thiết bị..."></textarea>
+          </div>
+          <button class="btn btn-primary w-100">Lưu dữ liệu đối chứng</button>
+        </form>
+      </div>
+      <div class="col-lg-8">
+        <h6 class="fw-bold">So sánh cùng nhiệm vụ</h6>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm align-middle">
+            <thead>
+              <tr><th rowspan="2">Mã nhiệm vụ</th><th colspan="2" class="text-center">Số thao tác TB</th><th colspan="2" class="text-center">Thời gian TB (giây)</th><th rowspan="2">Giảm thao tác</th><th rowspan="2">Giảm thời gian</th></tr>
+              <tr><th>Thủ công</th><th>Web App</th><th>Thủ công</th><th>Web App</th></tr>
+            </thead>
+            <tbody>
+              {% for r in comparison_rows %}
+              <tr>
+                <td><code>{{ r.task_key }}</code></td>
+                <td>{{ '%.1f'|format(r.manual_ops) if r.manual_ops is not none else '—' }}</td>
+                <td>{{ '%.1f'|format(r.webapp_ops) if r.webapp_ops is not none else '—' }}</td>
+                <td>{{ '%.2f'|format(r.manual_time) if r.manual_time is not none else '—' }}</td>
+                <td>{{ '%.2f'|format(r.webapp_time) if r.webapp_time is not none else '—' }}</td>
+                <td>{{ (r.reduction_ops|string + '%') if r.reduction_ops is not none else '—' }}</td>
+                <td>{{ (r.reduction_time|string + '%') if r.reduction_time is not none else '—' }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="7" class="text-center text-muted py-4">Chưa có cặp dữ liệu cùng nhiệm vụ để so sánh.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="small text-muted">Mã nhiệm vụ phải trùng với nhiệm vụ Web App tương ứng. Các mã được hệ thống ghi tự động gồm ví dụ: <code>DONG_BO_YOUTUBE</code>, <code>GAN_VIDEO_HOC_PHAN</code>, <code>TAO_QR_HANG_LOAT</code>, <code>TAO_QR_RIENG</code>.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-header fw-bold">3. Khảo sát người dùng</div>
+  <div class="card-body">
+    <p>Khảo sát được thực hiện bằng <strong>Google Forms</strong> và tổng hợp bằng <strong>Google Sheets</strong>. Web App không nhập từng phiếu khảo sát để tránh mất thời gian và giảm sai lệch do nhập lại dữ liệu.</p>
+    <div class="d-flex flex-wrap gap-2 mb-4">
+      {% if survey_links.lecturer_form_url %}<a class="btn btn-outline-primary" target="_blank" rel="noopener" href="{{ survey_links.lecturer_form_url }}">Mở khảo sát giảng viên</a>{% else %}<button class="btn btn-outline-secondary" disabled>Chưa có khảo sát giảng viên</button>{% endif %}
+      {% if survey_links.student_form_url %}<a class="btn btn-outline-primary" target="_blank" rel="noopener" href="{{ survey_links.student_form_url }}">Mở khảo sát sinh viên</a>{% else %}<button class="btn btn-outline-secondary" disabled>Chưa có khảo sát sinh viên</button>{% endif %}
+      {% if survey_links.survey_results_url %}<a class="btn btn-primary" target="_blank" rel="noopener" href="{{ survey_links.survey_results_url }}">Xem kết quả Google Sheets</a>{% else %}<button class="btn btn-secondary" disabled>Chưa có Google Sheets kết quả</button>{% endif %}
+    </div>
+    <details>
+      <summary class="fw-bold">Cấu hình liên kết khảo sát</summary>
+      <form method="post" class="mt-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="form_type" value="survey_links">
+        <div class="mb-2"><label class="form-label">Google Form khảo sát giảng viên</label><input class="form-control" type="url" name="lecturer_form_url" value="{{ survey_links.lecturer_form_url }}" placeholder="https://docs.google.com/forms/..."></div>
+        <div class="mb-2"><label class="form-label">Google Form khảo sát sinh viên</label><input class="form-control" type="url" name="student_form_url" value="{{ survey_links.student_form_url }}" placeholder="https://docs.google.com/forms/..."></div>
+        <div class="mb-3"><label class="form-label">Google Sheets xem kết quả</label><input class="form-control" type="url" name="survey_results_url" value="{{ survey_links.survey_results_url }}" placeholder="https://docs.google.com/spreadsheets/..."></div>
+        <button class="btn btn-primary">Lưu liên kết khảo sát</button>
+      </form>
+    </details>
+  </div>
+</div>
 {% endblock %}

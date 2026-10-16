@@ -298,13 +298,25 @@ class ExperimentRun(db.Model):
 class FunctionalTestRun(db.Model):
     __tablename__ = "functional_test_runs"
     id = db.Column(db.Integer, primary_key=True)
-    owner_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # owner_id có thể rỗng để ghi nhận cả lỗi OAuth xảy ra trước khi hệ thống xác định được người dùng.
+    owner_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     case_code = db.Column(db.String(64), nullable=False)
     case_name = db.Column(db.String(255), nullable=False)
     passed = db.Column(db.Boolean, nullable=False)
+    source = db.Column(db.String(16), nullable=False, default="automatic")
     note = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     owner = db.relationship("User")
+
+
+
+
+class ResearchSetting(db.Model):
+    __tablename__ = "research_settings"
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    value = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class SurveyResult(db.Model):
