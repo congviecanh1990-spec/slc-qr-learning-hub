@@ -125,6 +125,8 @@ class CourseVideo(db.Model):
     qr_id = db.Column(db.Integer, db.ForeignKey("qr_codes.id", ondelete="SET NULL"), nullable=True, unique=True)
     added_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     source_playlist_id = db.Column(db.Integer, db.ForeignKey("playlists.id", ondelete="SET NULL"), nullable=True)
+    # True nếu GV đã gán video trực tiếp; False nếu video được tự động kế thừa từ playlist.
+    manual_added = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
     added_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     course = db.relationship("Course", backref=db.backref("video_links", cascade="all,delete", order_by="CourseVideo.added_at"))
     video = db.relationship("Video", backref=db.backref("course_links", cascade="all,delete"))

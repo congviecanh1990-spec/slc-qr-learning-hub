@@ -124,6 +124,11 @@ def ensure_schema_upgrades():
             cp_columns = {c["name"] for c in inspector.get_columns("course_playlists")}
             if "active" not in cp_columns:
                 conn.execute(text("ALTER TABLE course_playlists ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE"))
+        if "course_videos" in tables:
+            cv_columns = {c["name"] for c in inspector.get_columns("course_videos")}
+            if "manual_added" not in cv_columns:
+                # Dữ liệu cũ được coi là gán thủ công để không vô tình bị loại bỏ khi nâng cấp.
+                conn.execute(text("ALTER TABLE course_videos ADD COLUMN manual_added BOOLEAN NOT NULL DEFAULT TRUE"))
         if "class_groups" in tables:
             class_columns = {c["name"] for c in inspector.get_columns("class_groups")}
             if "active" not in class_columns:
@@ -343,19 +348,108 @@ def active_qr_for_course_video(course_id: int, video_id: int, owner_id: int):
             .first())
 
 
-def ensure_course_video_link(course: Course, video: Video, user: User, source_playlist_id=None):
+def ensure_course_video_link(course: Course, video: Video, user: User, source_playlist_id=None, manual=True):
+    """Bảo đảm video thuộc học phần.
+
+    manual=True khi GV chọn video trực tiếp; manual=False khi video được kế thừa
+    tự động từ một playlist đã gán cho học phần. Cờ này giúp bỏ playlist mà không
+    làm mất những video GV vẫn muốn giữ riêng trong học phần.
+    """
     link = CourseVideo.query.filter_by(course_id=course.id, video_id=video.id).first()
     if link:
+        if manual:
+            link.manual_added = True
+        elif not link.source_playlist_id and source_playlist_id:
+            link.source_playlist_id = source_playlist_id
         return link, False
     link = CourseVideo(
         course_id=course.id,
         video_id=video.id,
         added_by=user.id,
         source_playlist_id=source_playlist_id,
+        manual_added=bool(manual),
     )
     db.session.add(link)
     db.session.flush()
     return link, True
+
+
+def reconcile_course_videos_from_playlists(course: Course, user: User):
+    """Đồng bộ danh sách video của học phần theo các playlist đang được gán.
+
+    - Video mới xuất hiện trong bất kỳ playlist đã gán nào sẽ tự động được thêm.
+    - Khi bỏ playlist hoặc video bị gỡ khỏi playlist, liên kết tự động sẽ bị bỏ nếu
+      video không còn thuộc playlist nào khác của học phần và chưa từng được GV gán riêng.
+    - QR video đã phát hành không bị xóa; chỉ liên kết video-học phần được điều chỉnh.
+    """
+    active_links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).all()
+    playlist_ids = [x.playlist_id for x in active_links if x.playlist_id]
+    desired = {}  # video_id -> một playlist nguồn đại diện
+    if playlist_ids:
+        rows = (db.session.query(PlaylistVideo.video_id, PlaylistVideo.playlist_id)
+                .filter(PlaylistVideo.playlist_id.in_(playlist_ids)).all())
+        for video_id, playlist_id in rows:
+            desired.setdefault(video_id, playlist_id)
+
+    existing = {x.video_id: x for x in CourseVideo.query.filter_by(course_id=course.id).all()}
+    added = removed = 0
+    for video_id, playlist_id in desired.items():
+        if video_id not in existing:
+            video = db.session.get(Video, video_id)
+            if video:
+                ensure_course_video_link(course, video, user, source_playlist_id=playlist_id, manual=False)
+                added += 1
+        else:
+            link = existing[video_id]
+            if not link.source_playlist_id:
+                link.source_playlist_id = playlist_id
+
+    for video_id, link in list(existing.items()):
+        if video_id not in desired and not bool(getattr(link, "manual_added", True)):
+            db.session.delete(link)
+            removed += 1
+
+    db.session.flush()
+    return added, removed
+
+
+def set_playlist_courses(playlist: Playlist, selected_course_ids: set[int], user: User):
+    """Đặt lại toàn bộ các học phần áp dụng cho một playlist theo lựa chọn hiện tại."""
+    owned_courses = Course.query.filter_by(owner_id=user.id, active=True).all()
+    owned_by_id = {c.id: c for c in owned_courses}
+    selected_course_ids = {cid for cid in selected_course_ids if cid in owned_by_id}
+    existing = {x.course_id: x for x in CoursePlaylist.query.filter_by(playlist_id=playlist.id).all()
+                if x.course and x.course.owner_id == user.id}
+    affected = set()
+    activated = deactivated = 0
+
+    for course_id, course in owned_by_id.items():
+        link = existing.get(course_id)
+        should_be_active = course_id in selected_course_ids
+        if should_be_active:
+            if link:
+                if not link.active:
+                    link.active = True
+                    activated += 1
+                if not link.added_by:
+                    link.added_by = user.id
+            else:
+                db.session.add(CoursePlaylist(course_id=course_id, playlist_id=playlist.id, added_by=user.id, active=True))
+                activated += 1
+            affected.add(course_id)
+        elif link and link.active:
+            link.active = False
+            deactivated += 1
+            affected.add(course_id)
+
+    db.session.flush()
+    auto_added = auto_removed = 0
+    for course_id in affected:
+        course = owned_by_id[course_id]
+        a, r = reconcile_course_videos_from_playlists(course, user)
+        auto_added += a
+        auto_removed += r
+    return activated, deactivated, auto_added, auto_removed
 
 
 def create_qr_for_course_video(course: Course, video: Video, user: User, link: CourseVideo | None = None):
@@ -803,13 +897,44 @@ def register_routes(app):
                 created += 1
             else:
                 skipped += 1
+        auto_added, auto_removed = reconcile_course_videos_from_playlists(course, user)
         record_functional_test(
             "ASSIGN_PLAYLIST", "Gán playlist vào học phần", bool(created or skipped), owner_id=user.id,
-            note=f"Kho học liệu → {course.name}; gán mới/khôi phục {created}; đã có {skipped}."
+            note=f"Kho học liệu → {course.name}; playlist mới/khôi phục {created}; đã có {skipped}; video tự gán {auto_added}; video tự bỏ {auto_removed}."
         )
         db.session.commit()
-        flash(f"Đã gán {created} playlist vào học phần “{course.name}”. Bỏ qua {skipped} playlist đã được gán trước đó.", "success")
-        return redirect(url_for("videos_page"))
+        flash(
+            f"Đã cập nhật playlist cho học phần “{course.name}”. Hệ thống tự gán thêm {auto_added} video thuộc playlist; không cần chọn lại từng video.",
+            "success",
+        )
+        return redirect(url_for("videos_page") + "#playlists")
+
+    @app.post("/playlists/<int:playlist_id>/set-courses")
+    @login_required
+    def set_playlist_course_assignments(playlist_id):
+        """Lưu toàn bộ học phần áp dụng cho một playlist trong một thao tác.
+
+        Danh sách học phần gửi lên là trạng thái cuối cùng: học phần được chọn sẽ
+        nhận playlist và toàn bộ video của playlist; học phần bỏ chọn sẽ bỏ playlist
+        và các video chỉ được kế thừa từ playlist đó.
+        """
+        user = current_user()
+        playlist = db.session.get(Playlist, playlist_id) or abort(404)
+        if playlist.channel.user_id != user.id:
+            abort(403)
+        selected_course_ids = {int(x) for x in request.form.getlist("course_ids") if str(x).isdigit()}
+        activated, deactivated, auto_added, auto_removed = set_playlist_courses(playlist, selected_course_ids, user)
+        record_functional_test(
+            "SET_PLAYLIST_COURSES", "Thiết lập học phần cho playlist", True, owner_id=user.id,
+            note=(f"Playlist: {playlist.title}; thêm/khôi phục học phần {activated}; bỏ học phần {deactivated}; "
+                  f"video tự gán {auto_added}; video tự bỏ {auto_removed}."),
+        )
+        db.session.commit()
+        flash(
+            f"Đã lưu học phần cho playlist “{playlist.title}”. Video trong playlist được tự động đồng bộ vào các học phần đã chọn.",
+            "success",
+        )
+        return redirect(url_for("videos_page") + "#playlists")
 
     @app.route("/courses", methods=["GET", "POST"])
     @login_required
@@ -898,12 +1023,13 @@ def register_routes(app):
                 created += 1
             else:
                 skipped += 1
+        auto_added, auto_removed = reconcile_course_videos_from_playlists(course, user)
         record_functional_test(
             "ASSIGN_PLAYLIST", "Gán playlist vào học phần", bool(created or skipped), owner_id=user.id,
-            note=f"Học phần: {course.name}; gán mới/khôi phục {created}; đã có {skipped}."
+            note=f"Học phần: {course.name}; playlist mới/khôi phục {created}; đã có {skipped}; video tự gán {auto_added}; video tự bỏ {auto_removed}."
         )
         db.session.commit()
-        flash(f"Đã gán {created} playlist vào học phần “{course.name}”. Bỏ qua {skipped} playlist đã được gán trước đó.", "success")
+        flash(f"Đã gán playlist vào học phần “{course.name}” và tự động cập nhật các video thuộc playlist.", "success")
         return redirect(url_for("courses_page"))
 
     @app.post("/course-playlists/<int:link_id>/delete")
@@ -914,9 +1040,10 @@ def register_routes(app):
         if not course_owned_by_user(link.course, user):
             abort(403)
         link.active = False
+        auto_added, auto_removed = reconcile_course_videos_from_playlists(link.course, user)
         db.session.commit()
         flash(
-            f"Đã bỏ playlist “{link.playlist.title}” khỏi học phần. Mã QR playlist đã phát hành (nếu có) vẫn được giữ; có thể xóa riêng trong mục Mã QR động.",
+            f"Đã bỏ playlist “{link.playlist.title}” khỏi học phần và tự động bỏ {auto_removed} video chỉ được kế thừa từ playlist này. Video đã gán riêng hoặc còn thuộc playlist khác vẫn được giữ.",
             "success",
         )
         return redirect(url_for("courses_page"))

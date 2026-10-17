@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import requests
 from flask import current_app
 
-from models import db, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, ErrorLog, utcnow
+from models import db, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ErrorLog, utcnow
 from security import decrypt_json, encrypt_json
 
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
@@ -112,8 +112,41 @@ def sync_my_channel(user):
         if uploads:
             sync_playlist_items(user, channel, uploads, uploads_playlist=True)
         synced.append(channel)
+    # Sau khi đồng bộ YouTube, mọi playlist đã gán cho học phần được xem như
+    # nguồn dữ liệu động: video mới tự vào học phần, video đã gỡ khỏi playlist
+    # tự rời học phần nếu không được gán riêng hoặc không còn ở playlist khác.
+    _reconcile_course_playlist_assignments(user)
     db.session.commit()
     return synced
+
+
+def _reconcile_course_playlist_assignments(user):
+    courses = Course.query.filter_by(owner_id=user.id, active=True).all()
+    for course in courses:
+        active_links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).all()
+        playlist_ids = [x.playlist_id for x in active_links if x.playlist_id]
+        desired = {}
+        if playlist_ids:
+            for video_id, playlist_id in (db.session.query(PlaylistVideo.video_id, PlaylistVideo.playlist_id)
+                                          .filter(PlaylistVideo.playlist_id.in_(playlist_ids)).all()):
+                desired.setdefault(video_id, playlist_id)
+
+        existing = {x.video_id: x for x in CourseVideo.query.filter_by(course_id=course.id).all()}
+        for video_id, playlist_id in desired.items():
+            link = existing.get(video_id)
+            if link:
+                if not link.source_playlist_id:
+                    link.source_playlist_id = playlist_id
+                continue
+            db.session.add(CourseVideo(
+                course_id=course.id, video_id=video_id, added_by=user.id,
+                source_playlist_id=playlist_id, manual_added=False,
+            ))
+
+        for video_id, link in list(existing.items()):
+            if video_id not in desired and not bool(getattr(link, "manual_added", True)):
+                db.session.delete(link)
+        db.session.flush()
 
 
 def sync_playlists(user, channel):
