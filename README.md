@@ -1,9 +1,19 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.5.1
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.6
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
 ## Nhóm tác giả
 Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài); Hoàng Thị Nhất; Nguyễn Thu Huyền; Tường Thị Phương Thảo; Nguyễn Hữu Thọ.
+
+## Điểm mới v3.6
+- **Kho video học liệu:** bỏ mã kỹ thuật YouTube (dạng `PL...`) hiển thị dưới tên playlist; giảng viên chỉ thấy tên playlist cần dùng.
+- **Mã QR động:** mỗi học phần hiển thị rõ số video, số QR video đã có/chưa có; dòng playlist hiển thị số lượng kèm tên playlist và số QR playlist đã có/chưa có.
+- Nút **Mở thử** chuyển sang chế độ xem thử dành cho giảng viên: không yêu cầu nhập mã GV/SV và không ghi lượt quét/thời lượng xem vào thống kê.
+- Bổ sung **Mã GV thực nghiệm** cho tài khoản giảng viên. Quản trị viên cấp mã tại trang **Đánh giá nghiệm thu**; sau khi cấp, mã hiển thị trên giao diện khi giảng viên đăng nhập.
+- Khi giảng viên đã đăng nhập và thực sự quét QR, hệ thống tự dùng Mã GV đã cấp, không yêu cầu nhập lại.
+- Sinh viên **không cần đăng nhập Web App**. Khi quét QR do giảng viên cung cấp, sinh viên được đưa tới trang nhận diện công khai, chỉ nhập **Mã sinh viên** và chọn **Lớp**, sau đó xem học liệu.
+- Trang nhận diện công khai bỏ lựa chọn vai trò GV/SV để tránh nhầm lẫn; luồng công khai mặc định là sinh viên.
+- PostgreSQL được nâng cấp nhẹ bằng cột `users.lecturer_code`; dữ liệu hiện có được giữ nguyên.
 
 ## Các chức năng chính
 - Giao diện tiếng Việt, có logo Trường Cao đẳng Sơn La.

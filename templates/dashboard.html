@@ -4,6 +4,12 @@
   <h2 class="mb-1">Tổng quan hệ thống</h2>
   <div class="text-muted">{{ app_tagline }}</div>
 </div>
+{% if me and me.role == 'lecturer' %}
+<div class="alert {{ 'alert-info' if me.lecturer_code else 'alert-warning' }} border mb-4">
+  <strong>Mã GV thực nghiệm:</strong> {{ me.lecturer_code or 'Chưa được quản trị viên cấp' }}.
+  {% if me.lecturer_code %}Mã này được hệ thống dùng để nhận diện giảng viên khi giảng viên thực sự quét mã QR; không cần nhập lại khi đã đăng nhập.{% else %}Vui lòng liên hệ quản trị viên để được cấp mã trước khi tham gia các lượt quét phục vụ thực nghiệm.{% endif %}
+</div>
+{% endif %}
 <div class="row g-3 mb-4">
   {% for label, value in [
     ('Video học liệu', videos),

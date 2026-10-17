@@ -19,6 +19,9 @@ class User(db.Model):
     name = db.Column(db.String(255), nullable=False, default="")
     google_sub = db.Column(db.String(255), unique=True, nullable=True)
     role = db.Column(db.String(32), nullable=False, default="lecturer")
+    # Mã GV dùng cho nhận diện trong thực nghiệm/ghi log. Mã do quản trị viên cấp,
+    # không thay thế tài khoản Google và không chứa họ tên.
+    lecturer_code = db.Column(db.String(32), unique=True, nullable=True, index=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 

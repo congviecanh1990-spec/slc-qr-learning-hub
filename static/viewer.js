@@ -17,13 +17,14 @@ window.onYouTubeIframeAPIReady=function(){
 };
 
 async function onReady(){
+  if(cfg.trackingEnabled===false)return;
   try{const data=await api('/api/watch/start',{slug:cfg.slug,duration:player.getDuration()||0});watchKey=data.session_key;}catch(e){console.error(e);}
 }
 
 function stateName(n){if(n===YT.PlayerState.PLAYING)return 'playing';if(n===YT.PlayerState.PAUSED)return 'paused';if(n===YT.PlayerState.ENDED)return 'ended';if(n===YT.PlayerState.BUFFERING)return 'buffering';if(n===YT.PlayerState.CUED)return 'cued';return 'unstarted';}
 
 async function sendEvent(type,state){
-  if(!watchKey||!player)return;
+  if(cfg.trackingEnabled===false||!watchKey||!player)return;
   try{await api('/api/watch/event',{session_key:watchKey,event_type:type,state:state,position:player.getCurrentTime()||0,duration:player.getDuration()||0});}catch(e){console.error(e);}
 }
 

@@ -97,6 +97,14 @@ def ensure_schema_upgrades():
     inspector = inspect(db.engine)
     tables = set(inspector.get_table_names())
     with db.engine.begin() as conn:
+        if "users" in tables:
+            user_columns = {c["name"] for c in inspector.get_columns("users")}
+            if "lecturer_code" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN lecturer_code VARCHAR(32)"))
+                try:
+                    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_lecturer_code ON users (lecturer_code)"))
+                except Exception:
+                    pass
         if "courses" in tables:
             columns = {c["name"] for c in inspector.get_columns("courses")}
             if "faculty_name" not in columns:
@@ -195,6 +203,22 @@ def login_required(fn):
 def current_user():
     uid = session.get("user_id")
     return db.session.get(User, uid) if uid else None
+
+
+def allocate_lecturer_code(user: User) -> str:
+    """Cấp mã GV ổn định, không chứa họ tên, do quản trị viên chủ động cấp."""
+    if user.lecturer_code:
+        return user.lecturer_code
+    if user.role != "lecturer":
+        raise ValueError("Chỉ cấp mã GV cho tài khoản giảng viên.")
+    base = f"GV{user.id:04d}"
+    code = base
+    n = 1
+    while User.query.filter(User.lecturer_code == code, User.id != user.id).first():
+        n += 1
+        code = f"{base}-{n}"
+    user.lecturer_code = code
+    return code
 
 
 def safe_next(value):
@@ -1342,6 +1366,7 @@ def register_routes(app):
             playlist_stats.append({
                 "course": course, "total": p_total, "has_qr": p_has_qr,
                 "missing": p_missing, "unavailable": p_unavailable,
+                "names": [link.playlist.title for link in plinks if link.playlist],
             })
             for link in plinks:
                 if link.playlist and link.playlist.is_available:
@@ -1498,15 +1523,58 @@ def register_routes(app):
     @app.get("/q/<slug>")
     def public_qr(slug):
         qr = QrCode.query.filter_by(slug=slug, active=True).first_or_404()
-        if not session.get("participant_code"):
-            session["identify_next"] = url_for("public_qr", slug=slug)
-            course = qr.course
-            classes = [c for c in course.classes if getattr(c, "active", True)] if course else []
-            return render_template("identify.html", qr=qr, classes=classes)
+        signed_in_user = current_user()
 
-        pcode = session.get("participant_code")
-        role = session.get("participant_role", "SV")
-        class_code = session.get("participant_class_code")
+        # "Mở thử" dành cho GV/Quản trị viên đã đăng nhập: bỏ qua màn hình nhận diện
+        # và không ghi lượt quét/thời lượng xem vào dữ liệu thực nghiệm.
+        preview_mode = bool(
+            request.args.get("preview") == "1"
+            and signed_in_user
+            and (signed_in_user.role == "admin" or qr.owner_id == signed_in_user.id)
+        )
+        tracking_enabled = not preview_mode
+
+        if preview_mode:
+            pcode = signed_in_user.lecturer_code or "XEM-THU"
+            role = "GV"
+            class_code = None
+            viewer_identity = "Chế độ xem thử"
+        elif signed_in_user and signed_in_user.role == "lecturer":
+            # GV đăng nhập không phải nhập lại mã. Mã GV do quản trị viên cấp và
+            # được dùng thống nhất trong dữ liệu thực nghiệm khi GV thực sự quét QR.
+            if not signed_in_user.lecturer_code:
+                return render_template(
+                    "viewer_error.html", qr=qr,
+                    message=("Tài khoản giảng viên chưa được quản trị viên cấp Mã GV. "
+                             "Hãy liên hệ quản trị viên để được cấp mã. Nếu chỉ cần kiểm tra học liệu, "
+                             "hãy dùng nút “Mở thử” trong giao diện Mã QR động."),
+                ), 403
+            pcode = signed_in_user.lecturer_code
+            role = "GV"
+            class_code = None
+            viewer_identity = pcode
+            session["participant_code"] = pcode
+            session["participant_role"] = "GV"
+            session["participant_class_code"] = ""
+        elif signed_in_user and signed_in_user.role == "admin":
+            # Quản trị viên kiểm tra QR nhưng không tạo dữ liệu người học giả.
+            pcode = "QUAN-TRI"
+            role = "GV"
+            class_code = None
+            viewer_identity = "Quản trị viên"
+            tracking_enabled = False
+        else:
+            # Sinh viên không cần tài khoản Web App. Màn hình này xuất hiện ngay sau
+            # khi quét QR lần đầu trên trình duyệt và chỉ yêu cầu mã SV + lớp.
+            if not session.get("participant_code") or session.get("participant_role") != "SV":
+                session["identify_next"] = url_for("public_qr", slug=slug)
+                course = qr.course
+                classes = [c for c in course.classes if getattr(c, "active", True)] if course else []
+                return render_template("identify.html", qr=qr, classes=classes)
+            pcode = session.get("participant_code")
+            role = "SV"
+            class_code = session.get("participant_class_code")
+            viewer_identity = pcode
 
         if qr.is_playlist:
             playlist = qr.playlist
@@ -1514,6 +1582,38 @@ def register_routes(app):
             videos = [link.video for link in links if video_is_usable(link.video)]
             unavailable_count = max(0, len(links) - len(videos))
             success = bool(playlist and playlist.is_available and videos)
+            if tracking_enabled:
+                cutoff = utcnow() - timedelta(seconds=30)
+                existing = ScanLog.query.filter(
+                    ScanLog.participant_code == pcode,
+                    ScanLog.qr_id == qr.id,
+                    ScanLog.scanned_at >= cutoff,
+                ).first()
+                if not existing:
+                    db.session.add(ScanLog(
+                        participant_code=pcode, role=role, class_code=class_code,
+                        course_id=qr.course_id, qr_id=qr.id, video_id=None, success=success,
+                    ))
+                    record_functional_test(
+                        "QR_PLAYLIST_SCAN", "Quét mã QR playlist và mở học liệu", success, owner_id=qr.owner_id,
+                        note=f"QR {qr.slug}; playlist: {playlist.title if playlist else 'không có'}; vai trò {role}."
+                    )
+                    db.session.commit()
+            if not playlist:
+                return render_template("viewer_error.html", qr=qr, message="Mã QR playlist chưa có playlist đích. Vui lòng liên hệ giảng viên phụ trách."), 404
+            if not playlist.is_available:
+                return render_template("viewer_error.html", qr=qr, message="Playlist đích đã bị xóa hoặc không còn khả dụng trên YouTube. Mã QR vẫn được giữ nguyên để giảng viên xử lý trong hệ thống."), 409
+            if not videos:
+                return render_template("viewer_error.html", qr=qr, message="Playlist hiện chưa có video nào đủ điều kiện phát trong trang học liệu. Vui lòng liên hệ giảng viên phụ trách."), 409
+            return render_template(
+                "playlist_viewer.html", qr=qr, playlist=playlist, videos=videos,
+                unavailable_count=unavailable_count, preview_mode=preview_mode,
+                tracking_enabled=tracking_enabled, viewer_identity=viewer_identity,
+            )
+
+        video = active_video_for_qr(qr)
+        success = bool(video and video.is_available and video.embeddable is not False and video.privacy_status != "private")
+        if tracking_enabled:
             cutoff = utcnow() - timedelta(seconds=30)
             existing = ScanLog.query.filter(
                 ScanLog.participant_code == pcode,
@@ -1523,46 +1623,16 @@ def register_routes(app):
             if not existing:
                 db.session.add(ScanLog(
                     participant_code=pcode, role=role, class_code=class_code,
-                    course_id=qr.course_id, qr_id=qr.id, video_id=None, success=success,
+                    course_id=qr.course_id,
+                    qr_id=qr.id,
+                    video_id=video.id if video else None,
+                    success=success,
                 ))
                 record_functional_test(
-                    "QR_PLAYLIST_SCAN", "Quét mã QR playlist và mở học liệu", success, owner_id=qr.owner_id,
-                    note=f"QR {qr.slug}; playlist: {playlist.title if playlist else 'không có'}; vai trò {role}."
+                    "QR_SCAN", "Quét mã QR và mở học liệu", success, owner_id=qr.owner_id,
+                    note=f"QR {qr.slug}; vai trò {role}; trạng thái video: {video.status_label if video else 'không có video'}."
                 )
                 db.session.commit()
-            if not playlist:
-                return render_template("viewer_error.html", qr=qr, message="Mã QR playlist chưa có playlist đích. Vui lòng liên hệ giảng viên phụ trách."), 404
-            if not playlist.is_available:
-                return render_template("viewer_error.html", qr=qr, message="Playlist đích đã bị xóa hoặc không còn khả dụng trên YouTube. Mã QR vẫn được giữ nguyên để giảng viên xử lý trong hệ thống."), 409
-            if not videos:
-                return render_template("viewer_error.html", qr=qr, message="Playlist hiện chưa có video nào đủ điều kiện phát trong trang học liệu. Vui lòng liên hệ giảng viên phụ trách."), 409
-            return render_template(
-                "playlist_viewer.html", qr=qr, playlist=playlist, videos=videos, unavailable_count=unavailable_count
-            )
-
-        video = active_video_for_qr(qr)
-        success = bool(video and video.is_available and video.embeddable is not False and video.privacy_status != "private")
-        cutoff = utcnow() - timedelta(seconds=30)
-        existing = ScanLog.query.filter(
-            ScanLog.participant_code == pcode,
-            ScanLog.qr_id == qr.id,
-            ScanLog.scanned_at >= cutoff,
-        ).first()
-        if not existing:
-            db.session.add(ScanLog(
-                participant_code=pcode,
-                role=role,
-                class_code=class_code,
-                course_id=qr.course_id,
-                qr_id=qr.id,
-                video_id=video.id if video else None,
-                success=success,
-            ))
-            record_functional_test(
-                "QR_SCAN", "Quét mã QR và mở học liệu", success, owner_id=qr.owner_id,
-                note=f"QR {qr.slug}; vai trò {role}; trạng thái video: {video.status_label if video else 'không có video'}."
-            )
-            db.session.commit()
 
         if not video:
             return render_template("viewer_error.html", qr=qr, message="Mã QR chưa được gán video đích. Vui lòng liên hệ giảng viên phụ trách."), 404
@@ -1576,21 +1646,23 @@ def register_routes(app):
             else:
                 message = f"Video hiện không thể phát trong trang học liệu ({video.status_label}). Mã QR vẫn được giữ nguyên để có thể cập nhật video đích."
             return render_template("viewer_error.html", qr=qr, message=message), 409
-        return render_template("viewer.html", qr=qr, video=video)
+        return render_template(
+            "viewer.html", qr=qr, video=video, preview_mode=preview_mode,
+            tracking_enabled=tracking_enabled, viewer_identity=viewer_identity,
+        )
 
 
     @app.post("/identify")
     def identify():
+        # Trang nhận diện công khai chỉ dành cho sinh viên quét QR. Giảng viên đã
+        # đăng nhập được nhận diện bằng tài khoản Google và mã GV do quản trị cấp.
         code = request.form.get("participant_code", "").strip()
-        role = request.form.get("role", "SV").strip().upper()
         class_code = request.form.get("class_code", "").strip()
         if not code:
-            flash("Vui lòng nhập mã GV/SV.", "warning")
+            flash("Vui lòng nhập mã sinh viên.", "warning")
             return redirect(session.get("identify_next") or url_for("index"))
-        if role not in {"GV", "SV"}:
-            role = "SV"
         session["participant_code"] = code[:128]
-        session["participant_role"] = role
+        session["participant_role"] = "SV"
         session["participant_class_code"] = class_code[:64]
         nxt = session.pop("identify_next", None) or url_for("index")
         return redirect(nxt)
@@ -1801,6 +1873,17 @@ def register_routes(app):
                         note=(request.form.get("note") or "").strip(),
                     ))
                     flash("Đã lưu phép đo thủ công để làm dữ liệu đối chứng.", "success")
+                elif form_type == "assign_lecturer_code":
+                    lecturer_id = request.form.get("lecturer_id", type=int)
+                    lecturer = db.session.get(User, lecturer_id) if lecturer_id else None
+                    if not lecturer or lecturer.role != "lecturer":
+                        raise ValueError("Không tìm thấy tài khoản giảng viên cần cấp mã.")
+                    before = lecturer.lecturer_code
+                    code = allocate_lecturer_code(lecturer)
+                    if before:
+                        flash(f"Giảng viên đã có mã {code}; hệ thống giữ nguyên mã để bảo toàn lịch sử thực nghiệm.", "info")
+                    else:
+                        flash(f"Đã cấp mã {code} cho giảng viên {lecturer.name or lecturer.email}.", "success")
                 elif form_type == "survey_links":
                     save_research_setting("lecturer_form_url", request.form.get("lecturer_form_url"))
                     save_research_setting("student_form_url", request.form.get("student_form_url"))
@@ -1877,6 +1960,7 @@ def register_routes(app):
             "student_form_url": research_setting("student_form_url"),
             "survey_results_url": research_setting("survey_results_url"),
         }
+        lecturers = User.query.filter_by(role="lecturer").order_by(User.name, User.email).all()
         return render_template(
             "research.html",
             metrics=metrics,
@@ -1891,6 +1975,7 @@ def register_routes(app):
             comparison_rows=comparison_rows,
             task_catalog=task_catalog,
             survey_links=survey_links,
+            lecturers=lecturers,
         )
 
     @app.post("/admin/reset-all-data")

@@ -11,7 +11,7 @@ function currentVideo(){return cfg.videos[currentIndex];}
 function stateName(n){if(n===YT.PlayerState.PLAYING)return 'playing';if(n===YT.PlayerState.PAUSED)return 'paused';if(n===YT.PlayerState.ENDED)return 'ended';if(n===YT.PlayerState.BUFFERING)return 'buffering';if(n===YT.PlayerState.CUED)return 'cued';return 'unstarted';}
 
 async function startWatch(){
-  if(!player||watchKey)return;
+  if(cfg.trackingEnabled===false||!player||watchKey)return;
   const v=currentVideo();
   try{
     const data=await api('/api/watch/start',{slug:cfg.slug,video_id:v.id,duration:player.getDuration()||0});
@@ -20,7 +20,7 @@ async function startWatch(){
 }
 
 async function sendEvent(type,state){
-  if(!watchKey||!player)return;
+  if(cfg.trackingEnabled===false||!watchKey||!player)return;
   try{await api('/api/watch/event',{session_key:watchKey,event_type:type,state:state,position:player.getCurrentTime()||0,duration:player.getDuration()||0});}catch(e){console.error(e);}
 }
 

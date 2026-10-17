@@ -20,7 +20,13 @@
       </div>
       {% if me %}
       <div class="d-none d-lg-flex align-items-center gap-2 small text-end">
-        <div><div class="fw-semibold">{{ me.name }}</div><span class="badge text-bg-secondary">{{ 'Quản trị viên' if me.role == 'admin' else 'Giảng viên' }}</span></div>
+        <div>
+          <div class="fw-semibold">{{ me.name }}</div>
+          <span class="badge text-bg-secondary">{{ 'Quản trị viên' if me.role == 'admin' else 'Giảng viên' }}</span>
+          {% if me.role == 'lecturer' %}
+            <div class="mt-1 text-muted">Mã GV: <strong>{{ me.lecturer_code or 'Chưa được cấp' }}</strong></div>
+          {% endif %}
+        </div>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('logout') }}">Đăng xuất</a>
       </div>
       {% endif %}
@@ -45,6 +51,7 @@
         </ul>
         <div class="d-lg-none small border-top pt-2 mt-2">
           <span class="fw-semibold">{{ me.name }}</span> · {{ 'Quản trị viên' if me.role == 'admin' else 'Giảng viên' }}
+          {% if me.role == 'lecturer' %}<span class="ms-2">Mã GV: <strong>{{ me.lecturer_code or 'Chưa được cấp' }}</strong></span>{% endif %}
           <a class="btn btn-outline-secondary btn-sm ms-2" href="{{ url_for('logout') }}">Đăng xuất</a>
         </div>
       </div>
