@@ -699,11 +699,12 @@ def register_routes(app):
             "qr_page": "qr", "create_playlist_qr": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr", "delete_all_qrs": "qr",
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
             "classes_page": "classes", "create_school_class": "classes", "assign_homeroom_teacher": "classes",
-            "upload_class_students": "classes", "add_class_student": "classes", "change_student_status": "classes",
+            "upload_class_students": "classes", "add_class_student": "classes", "change_student_status": "classes", "delete_class_student": "classes",
+            "lecturers_page": "lecturers", "assign_lecturer_code_admin": "lecturers", "delete_lecturer_account": "lecturers",
             "research_page": "research",
             "error_logs_page": "errors",
             "data_management": "data_admin",
-            "update_display_name": "", "reset_lecturer_data": "",
+            "update_display_name": "", "reset_lecturer_data": "lecturers",
             "backup_zip": "data_admin",
             "restore_backup": "data_admin",
         }
@@ -755,11 +756,10 @@ def register_routes(app):
         recent_scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(10).all()
         lecturer_count = User.query.filter_by(role="lecturer").count()
         class_count = SchoolClass.query.filter_by(active=True).count()
-        lecturers_for_reset = User.query.filter_by(role="lecturer").order_by(User.name, User.email).all() if user.role == "admin" else []
         return render_template(
             "dashboard.html", videos=videos, courses=courses, qrs=qrs, scans=scans, watch=watch,
             completion_rate=completion_rate, recent_scans=recent_scans, lecturer_count=lecturer_count,
-            class_count=class_count, lecturers_for_reset=lecturers_for_reset,
+            class_count=class_count,
         )
 
     @app.get("/auth/login")
@@ -2046,36 +2046,48 @@ def register_routes(app):
     @login_required
     def classes_page():
         user = current_user()
+        today = utcnow().date()
+        class_rows = []
+
         if user.role == "admin":
+            # Quản trị viên chỉ quản lý danh mục lớp và phân công GVCN.
+            # Không tải/hiển thị chi tiết danh sách sinh viên như giao diện GVCN.
             classes = SchoolClass.query.order_by(SchoolClass.name).all()
+            for school_class in classes:
+                class_rows.append({
+                    "class": school_class,
+                    # Sĩ số hiện tại chỉ tính SV đang có quan hệ lớp còn hiệu lực,
+                    # tương ứng trạng thái Đang học tại ngày hiện tại.
+                    "current_size": class_size_at(school_class, today),
+                })
+            lecturers = User.query.filter_by(role="lecturer").order_by(User.name, User.email).all()
         else:
             classes = SchoolClass.query.filter_by(homeroom_teacher_id=user.id, active=True).order_by(SchoolClass.name).all()
             if not classes:
                 flash("Tài khoản của bạn hiện chưa được giao chủ nhiệm lớp nào.", "info")
                 return redirect(url_for("index"))
-        today = utcnow().date()
-        class_rows = []
-        for school_class in classes:
-            latest_by_student = {}
-            for e in sorted(school_class.enrollments, key=lambda x: (x.started_on, x.id)):
-                latest_by_student[e.student_id] = e
-            student_rows = []
-            for student_id, latest in latest_by_student.items():
-                student = latest.student
-                status_key, ref = student_current_status_in_class(student, school_class, today)
-                student_rows.append({
-                    "student": student,
-                    "status_key": status_key,
-                    "status_label": STUDENT_STATUS_LABELS.get(status_key, "Khác"),
-                    "reference": ref,
+            for school_class in classes:
+                latest_by_student = {}
+                for e in sorted(school_class.enrollments, key=lambda x: (x.started_on, x.id)):
+                    latest_by_student[e.student_id] = e
+                student_rows = []
+                for student_id, latest in latest_by_student.items():
+                    student = latest.student
+                    status_key, ref = student_current_status_in_class(student, school_class, today)
+                    student_rows.append({
+                        "student": student,
+                        "status_key": status_key,
+                        "status_label": STUDENT_STATUS_LABELS.get(status_key, "Khác"),
+                        "reference": ref,
+                    })
+                student_rows.sort(key=lambda x: ((x["student"].full_name or "").casefold(), x["student"].student_code))
+                class_rows.append({
+                    "class": school_class,
+                    "current_size": class_size_at(school_class, today),
+                    "student_rows": student_rows,
                 })
-            student_rows.sort(key=lambda x: ((x["student"].full_name or "").casefold(), x["student"].student_code))
-            class_rows.append({
-                "class": school_class,
-                "current_size": class_size_at(school_class, today),
-                "student_rows": student_rows,
-            })
-        lecturers = User.query.filter_by(role="lecturer").order_by(User.name, User.email).all() if user.role == "admin" else []
+            lecturers = []
+
         return render_template(
             "classes.html", class_rows=class_rows, lecturers=lecturers,
             status_labels=STUDENT_STATUS_LABELS, today=today,
@@ -2283,6 +2295,95 @@ def register_routes(app):
             flash(f"Không cập nhật được trạng thái: {exc}", "danger")
         return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
 
+    @app.post("/classes/<int:class_id>/students/<int:student_id>/delete")
+    @login_required
+    def delete_class_student(class_id, student_id):
+        """Xóa một SV được nhập nhầm/thừa khỏi lớp và loại bỏ số liệu thống kê phát sinh từ SV đó trong lớp.
+
+        Đây là thao tác xóa dữ liệu sai, không dùng cho các trường hợp bảo lưu/nghỉ học/chuyển lớp.
+        Với biến động thật của sĩ số phải dùng chức năng Thay đổi trạng thái để giữ lịch sử theo thời gian.
+        """
+        user = current_user()
+        school_class = db.session.get(SchoolClass, class_id) or abort(404)
+        student = db.session.get(Student, student_id) or abort(404)
+
+        # Chỉ GVCN của chính lớp được xóa SV khỏi danh sách. Quản trị viên không thao tác
+        # danh sách chi tiết SV trên giao diện quản trị lớp.
+        if user.role == "admin" or school_class.homeroom_teacher_id != user.id:
+            flash("Bạn chỉ được xóa sinh viên khỏi lớp mình đang chủ nhiệm.", "warning")
+            return redirect(url_for("classes_page"))
+
+        enrollments = ClassEnrollment.query.filter_by(
+            school_class_id=school_class.id, student_id=student.id
+        ).all()
+        if not enrollments:
+            flash("Sinh viên không có trong danh sách của lớp này.", "warning")
+            return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+
+        code = student.student_code
+        try:
+            # Xóa toàn bộ dữ liệu quét/xem phát sinh dưới mã SV này trong chính lớp đang xóa.
+            # Nhờ đó các chỉ số ở Tổng quan/Thống kê khai thác được tính lại ngay từ dữ liệu còn lại.
+            watch_sessions = WatchSession.query.filter_by(
+                participant_code=code, class_code=school_class.code
+            ).all()
+            watch_session_ids = [row.id for row in watch_sessions]
+            watch_event_count = 0
+            if watch_session_ids:
+                watch_event_count = WatchEvent.query.filter(
+                    WatchEvent.watch_session_id.in_(watch_session_ids)
+                ).count()
+                WatchEvent.query.filter(
+                    WatchEvent.watch_session_id.in_(watch_session_ids)
+                ).delete(synchronize_session=False)
+
+            watch_count = len(watch_sessions)
+            if watch_session_ids:
+                WatchSession.query.filter(
+                    WatchSession.id.in_(watch_session_ids)
+                ).delete(synchronize_session=False)
+
+            scan_count = ScanLog.query.filter_by(
+                participant_code=code, class_code=school_class.code
+            ).count()
+            ScanLog.query.filter_by(
+                participant_code=code, class_code=school_class.code
+            ).delete(synchronize_session=False)
+
+            # Xóa lịch sử SV thuộc lớp bị nhập nhầm.
+            ClassEnrollment.query.filter_by(
+                school_class_id=school_class.id, student_id=student.id
+            ).delete(synchronize_session=False)
+
+            # Nếu SV không còn thuộc bất kỳ lớp nào trong hệ thống thì xóa luôn hồ sơ SV và
+            # dữ liệu nhận diện cũ còn sót lại. Nếu SV còn lịch sử ở lớp khác thì giữ hồ sơ đó.
+            remaining_enrollment_count = ClassEnrollment.query.filter_by(student_id=student.id).count()
+            removed_master = False
+            if remaining_enrollment_count == 0:
+                # Phòng trường hợp dữ liệu rất cũ chưa có class_code, xóa sạch log theo mã SV
+                # vì hồ sơ SV này không còn được sử dụng ở bất kỳ lớp nào.
+                remaining_watch_ids = [row.id for row in WatchSession.query.filter_by(participant_code=code).all()]
+                if remaining_watch_ids:
+                    WatchEvent.query.filter(WatchEvent.watch_session_id.in_(remaining_watch_ids)).delete(synchronize_session=False)
+                    WatchSession.query.filter(WatchSession.id.in_(remaining_watch_ids)).delete(synchronize_session=False)
+                ScanLog.query.filter_by(participant_code=code).delete(synchronize_session=False)
+                Participant.query.filter_by(participant_code=code).delete(synchronize_session=False)
+                db.session.delete(student)
+                removed_master = True
+
+            db.session.commit()
+            extra = " Hồ sơ sinh viên cũng đã được xóa khỏi hệ thống vì không còn thuộc lớp nào khác." if removed_master else ""
+            flash(
+                f"Đã xóa sinh viên {code} khỏi lớp “{school_class.name}” và loại bỏ {scan_count} lượt quét, "
+                f"{watch_count} phiên xem cùng dữ liệu sự kiện xem liên quan khỏi thống kê.{extra}",
+                "success",
+            )
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không xóa được sinh viên: {exc}", "danger")
+
+        return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+
     @app.route("/research", methods=["GET", "POST"])
     @login_required
     def research_page():
@@ -2313,17 +2414,6 @@ def register_routes(app):
                         note=(request.form.get("note") or "").strip(),
                     ))
                     flash("Đã lưu phép đo thủ công để làm dữ liệu đối chứng.", "success")
-                elif form_type == "assign_lecturer_code":
-                    lecturer_id = request.form.get("lecturer_id", type=int)
-                    lecturer = db.session.get(User, lecturer_id) if lecturer_id else None
-                    if not lecturer or lecturer.role != "lecturer":
-                        raise ValueError("Không tìm thấy tài khoản giảng viên cần cấp mã.")
-                    before = lecturer.lecturer_code
-                    code = allocate_lecturer_code(lecturer)
-                    if before:
-                        flash(f"Giảng viên đã có mã {code}; hệ thống giữ nguyên mã để bảo toàn lịch sử thực nghiệm.", "info")
-                    else:
-                        flash(f"Đã cấp mã {code} cho giảng viên {lecturer.name or lecturer.email}.", "success")
                 elif form_type == "survey_links":
                     save_research_setting("lecturer_form_url", request.form.get("lecturer_form_url"))
                     save_research_setting("student_form_url", request.form.get("student_form_url"))
@@ -2400,7 +2490,6 @@ def register_routes(app):
             "student_form_url": research_setting("student_form_url"),
             "survey_results_url": research_setting("survey_results_url"),
         }
-        lecturers = User.query.filter_by(role="lecturer").order_by(User.name, User.email).all()
         return render_template(
             "research.html",
             metrics=metrics,
@@ -2415,8 +2504,91 @@ def register_routes(app):
             comparison_rows=comparison_rows,
             task_catalog=task_catalog,
             survey_links=survey_links,
-            lecturers=lecturers,
         )
+
+    @app.get("/admin/lecturers")
+    @login_required
+    def lecturers_page():
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+
+        users = User.query.order_by(User.role.desc(), User.name.asc(), User.email.asc()).all()
+        rows = []
+        for account in users:
+            channels = YouTubeChannel.query.filter_by(user_id=account.id).order_by(YouTubeChannel.created_at.asc()).all()
+            channel_names = [c.title.strip() for c in channels if (c.title or "").strip()]
+            if account.role == "admin":
+                position = "Quản trị viên"
+            elif SchoolClass.query.filter_by(homeroom_teacher_id=account.id, active=True).first():
+                position = "Giảng viên kiêm GVCN"
+            else:
+                position = "Giảng viên"
+            rows.append({
+                "user": account,
+                "channel_name": " / ".join(channel_names) if channel_names else "Chưa đồng bộ kênh",
+                "position": position,
+            })
+
+        return render_template("lecturers.html", rows=rows)
+
+    @app.post("/admin/lecturers/<int:lecturer_id>/assign-code")
+    @login_required
+    def assign_lecturer_code_admin(lecturer_id):
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        lecturer = db.session.get(User, lecturer_id) or abort(404)
+        if lecturer.role != "lecturer":
+            flash("Chỉ cấp mã định danh giảng viên cho tài khoản Giảng viên.", "warning")
+            return redirect(url_for("lecturers_page"))
+        try:
+            before = lecturer.lecturer_code
+            code = allocate_lecturer_code(lecturer)
+            db.session.commit()
+            if before:
+                flash(f"Giảng viên {lecturer.name or lecturer.email} đã có mã {code}; hệ thống giữ nguyên mã để bảo toàn dữ liệu.", "info")
+            else:
+                flash(f"Đã cấp mã {code} cho giảng viên {lecturer.name or lecturer.email}.", "success")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thể cấp mã giảng viên: {exc}", "danger")
+        return redirect(url_for("lecturers_page"))
+
+    @app.post("/admin/lecturers/<int:lecturer_id>/delete")
+    @login_required
+    def delete_lecturer_account(lecturer_id):
+        admin = current_user()
+        if admin.role != "admin":
+            abort(403)
+        lecturer = db.session.get(User, lecturer_id) or abort(404)
+        if lecturer.role != "lecturer":
+            flash("Chỉ có thể xóa tài khoản Giảng viên tại chức năng này. Tài khoản Quản trị viên được bảo vệ.", "warning")
+            return redirect(url_for("lecturers_page"))
+        try:
+            display = lecturer.name or lecturer.email
+            email = lecturer.email
+
+            # Lớp và sinh viên là dữ liệu dùng chung của Nhà trường nên không xóa theo GV.
+            # Khi xóa một GVCN, lớp được giữ lại nhưng chuyển về trạng thái chưa giao GVCN.
+            SchoolClass.query.filter_by(homeroom_teacher_id=lecturer.id).update(
+                {SchoolClass.homeroom_teacher_id: None}, synchronize_session=False
+            )
+
+            # Xóa toàn bộ dữ liệu nghiệp vụ/thử nghiệm thuộc GV trước khi xóa tài khoản.
+            delete_lecturer_business_data(lecturer)
+            OAuthAccount.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
+            db.session.delete(lecturer)
+            db.session.commit()
+            flash(
+                f"Đã xóa giảng viên {display} ({email}) khỏi Web App cùng toàn bộ dữ liệu thuộc giảng viên này. "
+                "Các lớp và danh sách sinh viên dùng chung được giữ lại; lớp từng do giảng viên chủ nhiệm hiện ở trạng thái chưa giao GVCN.",
+                "success",
+            )
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thể xóa giảng viên: {exc}", "danger")
+        return redirect(url_for("lecturers_page"))
 
     def delete_lecturer_business_data(lecturer: User):
         """Xóa dữ liệu nghiệp vụ/thử nghiệm của một GV nhưng giữ tài khoản, họ tên, email, mã GV và quyền GVCN."""
@@ -2454,22 +2626,11 @@ def register_routes(app):
     @app.post("/admin/lecturers/<int:lecturer_id>/reset-data")
     @login_required
     def reset_lecturer_data(lecturer_id):
-        user = current_user()
-        if user.role != "admin":
+        # Giữ tương thích với liên kết cũ. Từ v3.9, quản lý/xóa GV thực hiện tại trang Giảng viên.
+        if current_user().role != "admin":
             abort(403)
-        lecturer = db.session.get(User, lecturer_id) or abort(404)
-        if lecturer.role != "lecturer":
-            flash("Chỉ có thể xóa dữ liệu của tài khoản giảng viên.", "warning")
-            return redirect(url_for("index"))
-        try:
-            display = lecturer.name or lecturer.email
-            delete_lecturer_business_data(lecturer)
-            db.session.commit()
-            flash(f"Đã xóa dữ liệu nghiệp vụ và thử nghiệm của giảng viên {display}. Tài khoản, mã GV và quyền GVCN được giữ lại.", "success")
-        except Exception as exc:
-            db.session.rollback()
-            flash(f"Không thể xóa dữ liệu của giảng viên: {exc}", "danger")
-        return redirect(url_for("index"))
+        flash("Chức năng quản lý giảng viên đã được chuyển sang giao diện Giảng viên.", "info")
+        return redirect(url_for("lecturers_page"))
 
     @app.post("/admin/reset-all-data")
     @login_required

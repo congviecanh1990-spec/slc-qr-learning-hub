@@ -1,3 +1,10 @@
+
+## Bổ sung v3.9.2
+- GVCN có thể xóa một sinh viên bị nhập nhầm/nhập thừa khỏi chính lớp mình chủ nhiệm.
+- Khi xóa, hệ thống đồng thời xóa lượt quét, phiên xem và sự kiện xem phát sinh của sinh viên đó trong lớp, nên các thống kê được tính lại theo dữ liệu còn lại.
+- Nếu sinh viên không còn thuộc lớp nào khác, hồ sơ sinh viên và dữ liệu nhận diện cũ còn sót lại cũng được xóa.
+- Nút Xóa được tách rõ khỏi chức năng Thay đổi trạng thái; bảo lưu/nghỉ học/chuyển lớp phải dùng thay đổi trạng thái để bảo toàn lịch sử.
+
 # TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.7
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
@@ -242,6 +249,13 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Vùng gán video riêng trong Kho video chỉ dùng cho video lẻ hoặc trường hợp đặc biệt.
 
 
+## Cập nhật v3.9
+
+- Bổ sung giao diện **Giảng viên** dành cho Quản trị viên: cấp mã định danh GV, xem họ tên, kênh YouTube, email, chức vụ và xóa giảng viên khỏi Web App.
+- Chuyển chức năng cấp mã GV khỏi **Đánh giá nghiệm thu** sang giao diện **Giảng viên**.
+- Xóa giảng viên sẽ xóa tài khoản/OAuth và toàn bộ dữ liệu nghiệp vụ, học phần, QR, lượt quét/xem, kiểm thử/thực nghiệm thuộc GV; lớp và sinh viên dùng chung được giữ lại và bỏ gán GVCN.
+- Bỏ khối xóa dữ liệu riêng từng GV ở Tổng quan để tránh trùng chức năng.
+
 ## Cập nhật v3.8
 - Giảng viên tự hiệu chỉnh họ tên hiển thị; tên đã sửa không bị ghi đè bởi tên Google ở lần đăng nhập sau.
 - Mã lớp dùng chung được sinh tự động; quản trị viên chỉ nhập tên lớp và chọn GVCN theo họ tên + email.
@@ -249,3 +263,10 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Thống kê khai thác và tệp CSV tập trung vào dữ liệu sinh viên, bỏ cột vai trò và dữ liệu quét GV khỏi báo cáo giao diện.
 - Quản trị viên có thể xóa dữ liệu nghiệp vụ/thử nghiệm của từng giảng viên.
 - Xóa toàn bộ dữ liệu làm mới cả mã GV nhưng giữ phiên quản trị đang thao tác, không yêu cầu đăng nhập lại.
+
+## Cập nhật v3.9.1
+- Giao diện **Lớp & sinh viên** của Quản trị viên được tách khỏi giao diện **Lớp chủ nhiệm**.
+- Quản trị viên chỉ tạo lớp, giao/hiệu chỉnh GVCN và xem danh sách lớp đã tạo.
+- Không hiển thị danh sách sinh viên, tải Excel, thêm sinh viên hoặc thay đổi trạng thái sinh viên trên giao diện Quản trị viên.
+- Cột **Sĩ số đang học** chỉ tính sinh viên có quan hệ lớp còn hiệu lực tại ngày hiện tại, tương ứng trạng thái **Đang học**.
+- GVCN tiếp tục quản lý đầy đủ danh sách sinh viên và biến động lớp tại giao diện **Lớp chủ nhiệm**.

@@ -2,10 +2,16 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
   <div>
-    <h2 class="mb-1">{{ 'Quản lý lớp và sinh viên' if me.role == 'admin' else 'Lớp chủ nhiệm' }}</h2>
-    <div class="text-muted">Danh sách lớp dùng chung toàn hệ thống. Mã sinh viên sử dụng đúng mã do Nhà trường cấp; dữ liệu biến động được lưu theo ngày có hiệu lực để bảo toàn lịch sử.</div>
+    <h2 class="mb-1">{{ 'Quản lý lớp & sinh viên' if me.role == 'admin' else 'Lớp chủ nhiệm' }}</h2>
+    {% if me.role == 'admin' %}
+      <div class="text-muted">Quản trị viên tạo lớp, giao giảng viên chủ nhiệm và theo dõi sĩ số hiện tại. Danh sách sinh viên và biến động lớp do giảng viên chủ nhiệm quản lý.</div>
+    {% else %}
+      <div class="text-muted">Quản lý danh sách sinh viên của lớp chủ nhiệm. Mã sinh viên sử dụng đúng mã do Nhà trường cấp; biến động được lưu theo ngày có hiệu lực để bảo toàn lịch sử.</div>
+    {% endif %}
   </div>
-  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('student_excel_template') }}">Tải tệp Excel mẫu</a>
+  {% if me.role != 'admin' %}
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('student_excel_template') }}">Tải tệp Excel mẫu</a>
+  {% endif %}
 </div>
 
 {% if me.role == 'admin' %}
@@ -14,89 +20,145 @@
   <div class="card-body">
     <form method="post" action="{{ url_for('create_school_class') }}" class="row g-3">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-md-5"><label class="form-label fw-bold">Tên lớp</label><input class="form-control" name="class_name" required placeholder="Ví dụ: Cao đẳng CNTT K66"></div>
-      <div class="col-md-5"><label class="form-label fw-bold">Giảng viên chủ nhiệm</label><select class="form-select" name="homeroom_teacher_id"><option value="">— Chưa giao —</option>{% for u in lecturers %}<option value="{{ u.id }}">{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}</select><div class="form-text">Mã lớp được hệ thống tự động tạo.</div></div>
+      <div class="col-md-5">
+        <label class="form-label fw-bold">Tên lớp</label>
+        <input class="form-control" name="class_name" required placeholder="Ví dụ: Cao đẳng CNTT K66">
+      </div>
+      <div class="col-md-5">
+        <label class="form-label fw-bold">Giảng viên chủ nhiệm</label>
+        <select class="form-select" name="homeroom_teacher_id">
+          <option value="">— Chưa giao —</option>
+          {% for u in lecturers %}<option value="{{ u.id }}">{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}
+        </select>
+        <div class="form-text">Mã lớp được hệ thống tự động tạo.</div>
+      </div>
       <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100">Tạo lớp</button></div>
     </form>
   </div>
 </div>
-{% endif %}
 
-{% for item in class_rows %}
-{% set cls = item.class %}
-<div class="card shadow-sm mb-4" id="lop-{{ cls.id }}">
-  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-    <div><strong>{{ cls.name }}</strong> <span class="text-muted">({{ cls.code }})</span></div>
-    <div class="d-flex flex-wrap gap-2 align-items-center small">
-      <span class="badge text-bg-primary">Sĩ số hiện tại: {{ item.current_size }}</span>
-      <span>GVCN: <strong>{% if cls.homeroom_teacher %}{{ cls.homeroom_teacher.name or cls.homeroom_teacher.email }} — {{ cls.homeroom_teacher.email }}{% else %}Chưa giao{% endif %}</strong></span>
-    </div>
-  </div>
-  <div class="card-body">
-    {% if me.role == 'admin' %}
-    <form method="post" action="{{ url_for('assign_homeroom_teacher', class_id=cls.id) }}" class="row g-2 mb-4">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-md-9"><label class="form-label fw-bold">Giảng viên chủ nhiệm</label><select class="form-select form-select-sm" name="homeroom_teacher_id"><option value="">— Chưa giao —</option>{% for u in lecturers %}<option value="{{ u.id }}" {{ 'selected' if cls.homeroom_teacher_id == u.id else '' }}>{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}</select></div>
-      <div class="col-md-3 d-flex align-items-end"><button class="btn btn-outline-primary btn-sm w-100">Lưu GVCN</button></div>
-    </form>
-    {% endif %}
-
-    <div class="row g-3 mb-4">
-      <div class="col-lg-7">
-        <div class="border rounded p-3 h-100">
-          <div class="fw-bold mb-2">Tải danh sách sinh viên từ Excel</div>
-          <div class="small text-muted mb-3">Lần đầu dùng để nhập danh sách lớp; các đợt tuyển sinh sau dùng để bổ sung sinh viên mới. Hệ thống không xóa sinh viên cũ chỉ vì không có trong tệp mới. Trong Excel nên đặt cột Mã sinh viên ở định dạng Văn bản để giữ nguyên các số 0 ở đầu mã.</div>
-          <form method="post" enctype="multipart/form-data" action="{{ url_for('upload_class_students', class_id=cls.id) }}" class="row g-2">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="col-md-7"><label class="form-label fw-bold">Tệp Excel</label><input class="form-control form-control-sm" type="file" name="student_file" accept=".xlsx" required></div>
-            <div class="col-md-5"><label class="form-label fw-bold">Ngày bắt đầu có hiệu lực</label><input class="form-control form-control-sm" type="date" name="effective_date" value="{{ today.isoformat() }}" required></div>
-            <div class="col-12"><button class="btn btn-primary btn-sm">Tải lên và bổ sung danh sách</button></div>
-          </form>
-        </div>
-      </div>
-      <div class="col-lg-5">
-        <div class="border rounded p-3 h-100">
-          <div class="fw-bold mb-2">Thêm một sinh viên</div>
-          <form method="post" action="{{ url_for('add_class_student', class_id=cls.id) }}" class="row g-2">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="col-12"><input class="form-control form-control-sm" name="student_code" required placeholder="Mã sinh viên của Nhà trường"></div>
-            <div class="col-12"><input class="form-control form-control-sm" name="full_name" required placeholder="Họ và tên"></div>
-            <div class="col-12"><label class="form-label small fw-bold mb-1">Ngày bắt đầu vào lớp</label><input class="form-control form-control-sm" type="date" name="effective_date" value="{{ today.isoformat() }}" required></div>
-            <div class="col-12"><button class="btn btn-outline-primary btn-sm">Thêm sinh viên</button></div>
-          </form>
-        </div>
-      </div>
-    </div>
-
+<div class="card shadow-sm">
+  <div class="card-header fw-bold">Danh sách lớp đã tạo</div>
+  <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Mã sinh viên</th><th>Họ và tên</th><th>Trạng thái hiện tại</th><th>Khoảng thời gian gần nhất</th><th style="min-width:310px">Thay đổi trạng thái</th></tr></thead>
-        <tbody>
-          {% for row in item.student_rows %}
+      <table class="table table-hover align-middle mb-0">
+        <thead>
           <tr>
-            <td><strong>{{ row.student.student_code }}</strong></td>
-            <td>{{ row.student.full_name }}</td>
-            <td><span class="badge {{ 'text-bg-success' if row.status_key == 'dang_hoc' else 'text-bg-secondary' }}">{{ row.status_label }}</span></td>
-            <td class="small">{% if row.reference %}Từ {{ row.reference.started_on.strftime('%d/%m/%Y') }}{% if row.reference.ended_on %} đến trước {{ row.reference.ended_on.strftime('%d/%m/%Y') }}{% endif %}{% else %}—{% endif %}</td>
+            <th>Mã lớp</th>
+            <th>Tên lớp</th>
+            <th>Giảng viên chủ nhiệm</th>
+            <th>Địa chỉ email</th>
+            <th class="text-center">Sĩ số đang học</th>
+            <th style="min-width:280px">Hiệu chỉnh GVCN</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in class_rows %}
+          {% set cls = item.class %}
+          <tr>
+            <td><strong>{{ cls.code }}</strong></td>
+            <td>{{ cls.name }}</td>
+            <td>{% if cls.homeroom_teacher %}{{ cls.homeroom_teacher.name or cls.homeroom_teacher.email }}{% else %}<span class="text-muted">Chưa giao</span>{% endif %}</td>
+            <td>{% if cls.homeroom_teacher %}{{ cls.homeroom_teacher.email }}{% else %}—{% endif %}</td>
+            <td class="text-center"><span class="badge text-bg-primary">{{ item.current_size }}</span></td>
             <td>
-              <form method="post" action="{{ url_for('change_student_status', class_id=cls.id, student_id=row.student.id) }}" class="row g-1">
+              <form method="post" action="{{ url_for('assign_homeroom_teacher', class_id=cls.id) }}" class="d-flex gap-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="col-4"><select class="form-select form-select-sm" name="status" required>{% for key,label in status_labels.items() %}<option value="{{ key }}" {{ 'selected' if key == row.status_key else '' }}>{{ label }}</option>{% endfor %}</select></div>
-                <div class="col-4"><input class="form-control form-control-sm" type="date" name="effective_date" value="{{ today.isoformat() }}" required></div>
-                <div class="col-3"><input class="form-control form-control-sm" name="note" placeholder="Ghi chú"></div>
-                <div class="col-1"><button class="btn btn-outline-primary btn-sm w-100" title="Lưu thay đổi">Lưu</button></div>
+                <select class="form-select form-select-sm" name="homeroom_teacher_id">
+                  <option value="">— Chưa giao —</option>
+                  {% for u in lecturers %}<option value="{{ u.id }}" {{ 'selected' if cls.homeroom_teacher_id == u.id else '' }}>{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}
+                </select>
+                <button class="btn btn-outline-primary btn-sm text-nowrap">Lưu</button>
               </form>
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="5" class="text-center text-muted py-4">Chưa có sinh viên trong lớp.</td></tr>
+          <tr><td colspan="6" class="text-center text-muted py-4">Chưa có lớp nào được tạo.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
 </div>
+
 {% else %}
-<div class="text-muted">Chưa có lớp phù hợp với quyền của tài khoản này.</div>
-{% endfor %}
+  {% for item in class_rows %}
+  {% set cls = item.class %}
+  <div class="card shadow-sm mb-4" id="lop-{{ cls.id }}">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div><strong>{{ cls.name }}</strong> <span class="text-muted">({{ cls.code }})</span></div>
+      <div class="d-flex flex-wrap gap-2 align-items-center small">
+        <span class="badge text-bg-primary">Sĩ số đang học: {{ item.current_size }}</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-4">
+        <div class="col-lg-7">
+          <div class="border rounded p-3 h-100">
+            <div class="fw-bold mb-2">Tải danh sách sinh viên từ Excel</div>
+            <div class="small text-muted mb-3">Lần đầu dùng để nhập danh sách lớp; các đợt tuyển sinh sau dùng để bổ sung sinh viên mới. Hệ thống không xóa sinh viên cũ chỉ vì không có trong tệp mới. Trong Excel nên đặt cột Mã sinh viên ở định dạng Văn bản để giữ nguyên các số 0 ở đầu mã.</div>
+            <form method="post" enctype="multipart/form-data" action="{{ url_for('upload_class_students', class_id=cls.id) }}" class="row g-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="col-md-7"><label class="form-label fw-bold">Tệp Excel</label><input class="form-control form-control-sm" type="file" name="student_file" accept=".xlsx" required></div>
+              <div class="col-md-5"><label class="form-label fw-bold">Ngày bắt đầu có hiệu lực</label><input class="form-control form-control-sm" type="date" name="effective_date" value="{{ today.isoformat() }}" required></div>
+              <div class="col-12"><button class="btn btn-primary btn-sm">Tải lên và bổ sung danh sách</button></div>
+            </form>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="border rounded p-3 h-100">
+            <div class="fw-bold mb-2">Thêm một sinh viên</div>
+            <form method="post" action="{{ url_for('add_class_student', class_id=cls.id) }}" class="row g-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="col-12"><input class="form-control form-control-sm" name="student_code" required placeholder="Mã sinh viên của Nhà trường"></div>
+              <div class="col-12"><input class="form-control form-control-sm" name="full_name" required placeholder="Họ và tên"></div>
+              <div class="col-12"><label class="form-label small fw-bold mb-1">Ngày bắt đầu vào lớp</label><input class="form-control form-control-sm" type="date" name="effective_date" value="{{ today.isoformat() }}" required></div>
+              <div class="col-12"><button class="btn btn-outline-primary btn-sm">Thêm sinh viên</button></div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert alert-light border small py-2 mb-3">
+        <strong>Lưu ý:</strong> Nút <strong>Xóa</strong> chỉ dùng khi nhập nhầm hoặc nhập thừa sinh viên. Nếu sinh viên bảo lưu, nghỉ học, chuyển trường hoặc chuyển lớp, hãy dùng <strong>Thay đổi trạng thái</strong> để giữ đúng lịch sử sĩ số theo thời gian.
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Mã sinh viên</th><th>Họ và tên</th><th>Trạng thái hiện tại</th><th>Khoảng thời gian gần nhất</th><th style="min-width:310px">Thay đổi trạng thái</th><th class="text-center">Xóa nhập nhầm</th></tr></thead>
+          <tbody>
+            {% for row in item.student_rows %}
+            <tr>
+              <td><strong>{{ row.student.student_code }}</strong></td>
+              <td>{{ row.student.full_name }}</td>
+              <td><span class="badge {{ 'text-bg-success' if row.status_key == 'dang_hoc' else 'text-bg-secondary' }}">{{ row.status_label }}</span></td>
+              <td class="small">{% if row.reference %}Từ {{ row.reference.started_on.strftime('%d/%m/%Y') }}{% if row.reference.ended_on %} đến trước {{ row.reference.ended_on.strftime('%d/%m/%Y') }}{% endif %}{% else %}—{% endif %}</td>
+              <td>
+                <form method="post" action="{{ url_for('change_student_status', class_id=cls.id, student_id=row.student.id) }}" class="row g-1">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <div class="col-4"><select class="form-select form-select-sm" name="status" required>{% for key,label in status_labels.items() %}<option value="{{ key }}" {{ 'selected' if key == row.status_key else '' }}>{{ label }}</option>{% endfor %}</select></div>
+                  <div class="col-4"><input class="form-control form-control-sm" type="date" name="effective_date" value="{{ today.isoformat() }}" required></div>
+                  <div class="col-3"><input class="form-control form-control-sm" name="note" placeholder="Ghi chú"></div>
+                  <div class="col-1"><button class="btn btn-outline-primary btn-sm w-100" title="Lưu thay đổi">Lưu</button></div>
+                </form>
+              </td>
+              <td class="text-center">
+                <form method="post" action="{{ url_for('delete_class_student', class_id=cls.id, student_id=row.student.id) }}"
+                      onsubmit="return confirm('Chỉ dùng chức năng này khi sinh viên bị nhập nhầm hoặc nhập thừa. Toàn bộ lượt quét và dữ liệu xem của sinh viên này trong lớp sẽ bị xóa khỏi thống kê. Bạn có chắc chắn muốn tiếp tục?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-outline-danger btn-sm text-nowrap" type="submit" title="Xóa sinh viên bị nhập nhầm khỏi lớp">Xóa</button>
+                </form>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted py-4">Chưa có sinh viên trong lớp.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="text-muted">Chưa có lớp phù hợp với quyền của tài khoản này.</div>
+  {% endfor %}
+{% endif %}
 {% endblock %}

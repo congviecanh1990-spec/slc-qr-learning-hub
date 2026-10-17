@@ -1,3 +1,7 @@
+# Cập nhật v3.9.2
+
+Bản này bổ sung chức năng cho GVCN xóa sinh viên bị nhập nhầm/nhập thừa khỏi lớp. Khi xóa, các lượt quét và dữ liệu xem liên quan của sinh viên trong lớp cũng bị loại khỏi thống kê. Không cần xóa PostgreSQL.
+
 # Cập nhật Web App v3.7 trên Render
 
 Bản v3.7 kế thừa trực tiếp v3.6 và **không cần tạo lại PostgreSQL**.
@@ -19,4 +23,6 @@ Sau khi cập nhật, kiểm tra lần lượt:
 Bản v3.7 bổ sung các bảng dùng chung cho lớp/sinh viên và tự giữ nguyên dữ liệu cũ. Tệp Excel mẫu có thể tải ngay trong giao diện Lớp & sinh viên/Lớp chủ nhiệm.
 
 
-Phiên bản v3.8: cập nhật họ tên GV, mã lớp tự sinh, xóa dữ liệu theo GV/toàn hệ thống và thống kê tập trung vào SV.
+Phiên bản v3.9: bổ sung giao diện Giảng viên, chuyển cấp mã GV khỏi trang nghiệm thu và bổ sung xóa toàn bộ tài khoản/dữ liệu của một giảng viên.
+
+Phiên bản v3.9.1: tách giao diện Lớp & sinh viên của Quản trị viên thành danh mục lớp gọn; chi tiết sinh viên chỉ hiển thị cho GVCN. Sĩ số trên danh sách lớp là số sinh viên đang học tại thời điểm hiện tại.

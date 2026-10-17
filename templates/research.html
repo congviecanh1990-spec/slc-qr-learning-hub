@@ -38,37 +38,6 @@
 </div>
 
 <div class="card shadow-sm mb-4">
-  <div class="card-header fw-bold">Mã định danh giảng viên</div>
-  <div class="card-body">
-    <p class="text-muted small">Quản trị viên cấp một mã GV ổn định cho từng giảng viên. Mã này không thay thế tài khoản Google; chỉ dùng để nhận diện giảng viên trong dữ liệu thực nghiệm khi giảng viên thực sự quét mã QR. Sau khi được cấp, mã GV sẽ hiển thị trên giao diện khi giảng viên đăng nhập.</p>
-    <div class="table-responsive">
-      <table class="table table-sm table-bordered align-middle mb-0">
-        <thead><tr><th>Giảng viên</th><th>Email</th><th>Mã GV</th><th style="width:170px">Thao tác</th></tr></thead>
-        <tbody>
-          {% for u in lecturers %}
-          <tr>
-            <td>{{ u.name }}</td>
-            <td>{{ u.email }}</td>
-            <td>{% if u.lecturer_code %}<code class="fs-6">{{ u.lecturer_code }}</code>{% else %}<span class="text-muted">Chưa được cấp</span>{% endif %}</td>
-            <td>
-              <form method="post">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="form_type" value="assign_lecturer_code">
-                <input type="hidden" name="lecturer_id" value="{{ u.id }}">
-                <button class="btn btn-sm btn-outline-primary" {{ 'disabled' if u.lecturer_code else '' }}>{{ 'Đã cấp mã' if u.lecturer_code else 'Cấp mã GV' }}</button>
-              </form>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4" class="text-center text-muted py-3">Chưa có tài khoản giảng viên nào đăng nhập hệ thống.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-<div class="card shadow-sm mb-4">
   <div class="card-header fw-bold">1. Kết quả kiểm thử tự động</div>
   <div class="card-body">
     <div class="row g-3 mb-3">

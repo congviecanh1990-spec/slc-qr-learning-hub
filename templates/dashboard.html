@@ -76,24 +76,6 @@
 </div>
 
 {% if me and me.role == 'admin' %}
-<div class="card border-warning shadow-sm mb-4">
-  <div class="card-header fw-bold">Xóa dữ liệu của một giảng viên</div>
-  <div class="card-body">
-    <p class="mb-3">Dùng khi cần làm sạch dữ liệu thử nghiệm của một giảng viên. Hệ thống xóa kênh/video đã đồng bộ, học phần, QR, lượt quét/xem và dữ liệu thực nghiệm do giảng viên đó tạo; vẫn giữ tài khoản, họ tên, email, mã GV và quyền GVCN.</p>
-    <form id="resetLecturerForm" method="post" class="row g-2 align-items-end" onsubmit="return prepareLecturerReset(this);">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-md-9">
-        <label class="form-label fw-bold">Giảng viên cần xóa dữ liệu</label>
-        <select class="form-select" id="resetLecturerSelect" required>
-          <option value="">— Chọn giảng viên —</option>
-          {% for u in lecturers_for_reset %}<option value="{{ u.id }}">{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-md-3"><button class="btn btn-outline-danger w-100">Xóa dữ liệu của GV</button></div>
-    </form>
-  </div>
-</div>
-
 <div class="card border-danger shadow-sm mt-4">
   <div class="card-header fw-bold text-danger">Xóa toàn bộ dữ liệu đã lưu</div>
   <div class="card-body">
@@ -105,15 +87,5 @@
     </form>
   </div>
 </div>
-<script>
-function prepareLecturerReset(form){
-  const select=document.getElementById('resetLecturerSelect');
-  if(!select.value){return false;}
-  const label=select.options[select.selectedIndex].text;
-  if(!confirm('Xóa toàn bộ dữ liệu nghiệp vụ và thử nghiệm của ' + label + '?')){return false;}
-  form.action='{{ url_for("reset_lecturer_data", lecturer_id=0) }}'.replace('/0/', '/' + select.value + '/');
-  return true;
-}
-</script>
 {% endif %}
 {% endblock %}

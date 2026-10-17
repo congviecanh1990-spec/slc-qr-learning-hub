@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+  <div>
+    <h2 class="mb-1">Giảng viên</h2>
+    <p class="text-muted mb-0">Quản lý mã định danh giảng viên và thông tin tài khoản đã đăng nhập Web App.</p>
+  </div>
+  <div class="text-end small text-muted">
+    <div>Tổng tài khoản: <strong>{{ rows|length }}</strong></div>
+    <div>Mã GV chỉ cấp cho tài khoản Giảng viên.</div>
+  </div>
+</div>
+
+<div class="alert alert-info">
+  <strong>Nguyên tắc quản lý:</strong> Họ tên hiển thị do giảng viên tự hiệu chỉnh trên giao diện Tổng quan. Chức vụ được hệ thống xác định theo quyền hiện tại: Giảng viên, Giảng viên kiêm GVCN hoặc Quản trị viên.
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-header fw-bold">Danh sách giảng viên và tài khoản quản trị</div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th class="text-nowrap">Mã định danh GV</th>
+          <th>Họ và tên giảng viên</th>
+          <th>Tên kênh YouTube</th>
+          <th>Địa chỉ email</th>
+          <th class="text-nowrap">Chức vụ</th>
+          <th style="min-width:220px">Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set u = row.user %}
+        <tr>
+          <td>
+            {% if u.role == 'admin' %}
+              <span class="text-muted">Không áp dụng</span>
+            {% elif u.lecturer_code %}
+              <strong>{{ u.lecturer_code }}</strong>
+            {% else %}
+              <span class="text-muted">Chưa được cấp</span>
+            {% endif %}
+          </td>
+          <td><strong>{{ u.name or 'Chưa cập nhật họ tên' }}</strong></td>
+          <td>{{ row.channel_name }}</td>
+          <td class="text-nowrap">{{ u.email }}</td>
+          <td><span class="badge {{ 'text-bg-danger' if u.role == 'admin' else ('text-bg-primary' if row.position == 'Giảng viên kiêm GVCN' else 'text-bg-secondary') }}">{{ row.position }}</span></td>
+          <td>
+            <div class="d-flex flex-wrap gap-2">
+              {% if u.role == 'lecturer' %}
+                <form method="post" action="{{ url_for('assign_lecturer_code_admin', lecturer_id=u.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-primary" {{ 'disabled' if u.lecturer_code else '' }}>{{ 'Đã cấp mã' if u.lecturer_code else 'Cấp mã GV' }}</button>
+                </form>
+                <form method="post" action="{{ url_for('delete_lecturer_account', lecturer_id=u.id) }}" onsubmit="return confirm('Bạn có chắc chắn muốn xóa giảng viên {{ (u.name or u.email)|e }} khỏi Web App?') && confirm('Xác nhận lần cuối: toàn bộ dữ liệu thuộc giảng viên này như kết nối YouTube, học phần, QR, lượt quét/xem và dữ liệu thử nghiệm sẽ bị xóa. Thao tác này không thể hoàn tác nếu chưa có bản sao lưu.');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-danger">Xóa giảng viên</button>
+                </form>
+              {% else %}
+                <button class="btn btn-sm btn-outline-secondary" disabled>Tài khoản được bảo vệ</button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-4">Chưa có tài khoản nào trong hệ thống.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="small text-muted mt-3">
+  Khi xóa một giảng viên, tài khoản Google/OAuth và toàn bộ dữ liệu nghiệp vụ, học phần, kênh/video đã đồng bộ, mã QR, lượt quét/xem và dữ liệu thử nghiệm thuộc giảng viên đó sẽ bị xóa. Danh mục lớp và sinh viên dùng chung của Nhà trường được giữ lại; nếu người bị xóa là GVCN, lớp sẽ chuyển về trạng thái chưa giao GVCN.
+</div>
+{% endblock %}
