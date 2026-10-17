@@ -1,4 +1,4 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.2
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.3
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
@@ -9,7 +9,7 @@ Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài); Hoàng Thị Nhất; Ngu
 - Giao diện tiếng Việt, có logo Trường Cao đẳng Sơn La.
 - Bỏ tên hiển thị “SLC QR Learning Hub”.
 - “YouTube & Hub/WebSub” được đổi thành giao diện dễ hiểu: **Kết nối và đồng bộ kênh YouTube**.
-- Có **Kho video học liệu**; giảng viên tích chọn nhiều video và gán hàng loạt vào học phần.
+- Có **Kho video học liệu**; giảng viên có thể lọc video theo playlist, xem playlist của từng video, chọn nhiều video hoặc nhiều playlist và gán trực tiếp vào học phần.
 - Quan hệ Video ↔ Học phần là nhiều–nhiều thông qua bảng `course_videos`.
 - Tạo mã QR động hàng loạt theo học phần: chỉ tạo cho video chưa có mã, chống tạo trùng.
 - Tên mã QR tự lấy theo tên video YouTube.
@@ -20,10 +20,20 @@ Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài); Hoàng Thị Nhất; Ngu
 
 ## Luồng sử dụng chính
 1. Đăng nhập bằng Google.
-2. Vào **Kênh YouTube** → **Đồng bộ dữ liệu từ YouTube**.
-3. Vào **Kho video học liệu** → chọn nhiều video → chọn học phần → **Gán video đã chọn vào học phần**.
-4. Vào **Học phần** hoặc **Mã QR động** → bấm **Tạo mã QR cho tất cả video chưa có mã**.
-5. Tải PNG/ZIP. QR đã tạo là QR động nên có thể đổi video đích mà không phải phát hành lại mã.
+2. Vào **Học phần** để tạo/kiểm tra học phần cần sử dụng.
+3. Vào **Kênh YouTube** → **Đồng bộ dữ liệu từ YouTube** khi cần cập nhật học liệu.
+4. Vào **Kho video học liệu** → lọc theo playlist nếu cần → chọn video hoặc playlist → chọn học phần → gán vào học phần.
+5. Vào **Học phần** hoặc **Mã QR động** → tạo QR cho video/playlist chưa có mã.
+6. Tải PNG/ZIP. QR đã tạo là QR động nên có thể cập nhật đích mà không phải phát hành lại mã.
+
+
+## Điểm mới v3.3
+- **Học phần** được đưa lên vị trí thứ 2 trên menu, ngay sau **Kênh YouTube**.
+- **Kho video học liệu** bổ sung bộ lọc **Playlist** cho danh sách video.
+- Mỗi video hiển thị các playlist đang chứa video đó.
+- Bổ sung khu vực **Danh sách playlist** ngay trong Kho video học liệu.
+- Có thể tìm kiếm playlist, lọc playlist đã/chưa gán học phần, chọn nhiều playlist và gán trực tiếp vào học phần.
+- Không thay đổi schema PostgreSQL.
 
 ## Nâng cấp từ v1.0 trên Render
 Bản v2.1 kế thừa cấu trúc dữ liệu của v2.0; các bảng dữ liệu cũ được giữ nguyên. Khi Web Service khởi động, `db.create_all()` sẽ tự tạo bảng mới nếu `AUTO_CREATE_DB=1`.

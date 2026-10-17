@@ -454,7 +454,7 @@ def register_routes(app):
         endpoint = request.endpoint or ""
         section_map = {
             "youtube_page": "youtube", "youtube_sync": "youtube", "youtube_websub_subscribe": "youtube",
-            "videos_page": "videos", "assign_videos_to_course": "videos",
+            "videos_page": "videos", "assign_videos_to_course": "videos", "assign_playlists_from_library": "videos",
             "courses_page": "courses", "add_class": "courses", "update_course_info": "courses",
             "assign_playlists_to_course": "courses", "delete_course_playlist": "courses",
             "create_course_qrs_bulk": "courses", "create_course_playlist_qrs_bulk": "courses", "download_course_qrs": "courses",
@@ -676,10 +676,14 @@ def register_routes(app):
     @login_required
     def videos_page():
         user = current_user()
+
+        # --- Bộ lọc video ---
         q = visible_video_query(user)
         status = request.args.get("status", "").strip()
         assignment = request.args.get("assignment", "").strip()
         search = request.args.get("q", "").strip()
+        playlist_filter_id = request.args.get("playlist_id", type=int)
+
         if status == "private":
             q = q.filter(Video.privacy_status == "private")
         elif status == "noembed":
@@ -690,6 +694,18 @@ def register_routes(app):
             q = q.filter(Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False))
         if search:
             q = q.filter(Video.title.ilike(f"%{search}%"))
+
+        # Danh sách playlist của chính giảng viên để lọc video và gán học phần.
+        available_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
+        allowed_playlist_ids = {p.id for p in available_playlists}
+        if playlist_filter_id:
+            if playlist_filter_id in allowed_playlist_ids:
+                playlist_video_ids = db.session.query(PlaylistVideo.video_id).filter(PlaylistVideo.playlist_id == playlist_filter_id)
+                q = q.filter(Video.id.in_(playlist_video_ids))
+            else:
+                # Không cho dùng ID playlist ngoài phạm vi tài khoản để lọc dữ liệu.
+                q = q.filter(Video.id == -1)
+
         owned_course_ids = db.session.query(Course.id).filter(Course.owner_id == user.id, Course.active.is_(True))
         assigned_video_ids = db.session.query(CourseVideo.video_id).filter(CourseVideo.course_id.in_(owned_course_ids))
         if assignment == "unassigned":
@@ -697,8 +713,37 @@ def register_routes(app):
         elif assignment == "assigned":
             q = q.filter(Video.id.in_(assigned_video_ids))
         videos = q.order_by(Video.published_at.desc().nullslast(), Video.id.desc()).all()
+
+        # --- Bộ lọc playlist ---
+        playlist_search = request.args.get("p_q", "").strip()
+        playlist_assignment = request.args.get("p_assignment", "").strip()
+        pq = visible_playlist_query(user)
+        if playlist_search:
+            pq = pq.filter(Playlist.title.ilike(f"%{playlist_search}%"))
+        assigned_playlist_ids = (
+            db.session.query(CoursePlaylist.playlist_id)
+            .filter(CoursePlaylist.course_id.in_(owned_course_ids), CoursePlaylist.active.is_(True))
+        )
+        if playlist_assignment == "unassigned":
+            pq = pq.filter(~Playlist.id.in_(assigned_playlist_ids))
+        elif playlist_assignment == "assigned":
+            pq = pq.filter(Playlist.id.in_(assigned_playlist_ids))
+        playlists = pq.order_by(Playlist.title).all()
+
         courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
-        return render_template("videos.html", videos=videos, status=status, assignment=assignment, search=search, courses=courses)
+        return render_template(
+            "videos.html",
+            videos=videos,
+            status=status,
+            assignment=assignment,
+            search=search,
+            playlist_filter_id=playlist_filter_id,
+            playlists=playlists,
+            available_playlists=available_playlists,
+            playlist_search=playlist_search,
+            playlist_assignment=playlist_assignment,
+            courses=courses,
+        )
 
     @app.post("/videos/assign-course")
     @login_required
@@ -730,7 +775,41 @@ def register_routes(app):
         )
         db.session.commit()
         flash(f"Đã gán {created} video vào học phần “{course.name}”. Bỏ qua {skipped} video đã được gán trước đó.", "success")
-        return redirect(url_for("videos_page", assignment=request.args.get("assignment", "")))
+        return redirect(url_for("videos_page"))
+
+    @app.post("/playlists/assign-course")
+    @login_required
+    def assign_playlists_from_library():
+        """Gán playlist ngay tại Kho video học liệu để giảm thao tác cho giảng viên."""
+        user = current_user()
+        course_id = request.form.get("course_id", type=int)
+        playlist_ids = [int(x) for x in request.form.getlist("playlist_ids") if str(x).isdigit()]
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        if not playlist_ids:
+            flash("Vui lòng chọn ít nhất một playlist để gán vào học phần.", "warning")
+            return redirect(url_for("videos_page"))
+
+        allowed = {p.id: p for p in visible_playlist_query(user).filter(Playlist.id.in_(playlist_ids)).all()}
+        created = 0
+        skipped = 0
+        for playlist_id in playlist_ids:
+            playlist = allowed.get(playlist_id)
+            if not playlist:
+                continue
+            _, was_created = ensure_course_playlist_link(course, playlist, user)
+            if was_created:
+                created += 1
+            else:
+                skipped += 1
+        record_functional_test(
+            "ASSIGN_PLAYLIST", "Gán playlist vào học phần", bool(created or skipped), owner_id=user.id,
+            note=f"Kho học liệu → {course.name}; gán mới/khôi phục {created}; đã có {skipped}."
+        )
+        db.session.commit()
+        flash(f"Đã gán {created} playlist vào học phần “{course.name}”. Bỏ qua {skipped} playlist đã được gán trước đó.", "success")
+        return redirect(url_for("videos_page"))
 
     @app.route("/courses", methods=["GET", "POST"])
     @login_required
