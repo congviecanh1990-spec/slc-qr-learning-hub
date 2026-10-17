@@ -16,3 +16,6 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 
 /* v2.7: hướng dẫn đăng nhập thử nghiệm hiển thị ngay tại trang đăng nhập. */
 .login-trial-note{max-width:850px;line-height:1.55}
+
+/* v3.2: trang xem playlist trong Web App. */
+.playlist-video-list{max-height:520px;overflow:auto}.playlist-video-item.active{background:var(--brand);border-color:var(--brand);color:#fff}.playlist-video-item.active .badge{color:#212529!important}

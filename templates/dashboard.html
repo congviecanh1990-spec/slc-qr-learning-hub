@@ -39,7 +39,7 @@
           <td>{{ 'Giảng viên' if s.role == 'GV' else 'Sinh viên' }}</td>
           <td>{{ s.course.name if s.course else '—' }}</td>
           <td>{{ s.qr.slug if s.qr else '' }}</td>
-          <td>{{ s.video.title[:45] if s.video else '' }}</td>
+          <td>{{ s.video.title[:45] if s.video else ((s.qr.title[:45] ~ ' (playlist)') if s.qr and s.qr.is_playlist else '') }}</td>
           <td>{{ '✓' if s.success else '✕' }}</td>
         </tr>
         {% else %}

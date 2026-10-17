@@ -1,4 +1,4 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.1
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.2
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
@@ -168,9 +168,16 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 
 
 ## Cập nhật v3.1 — nhiệm vụ đối chứng chuẩn hóa
-- Bỏ dòng giải thích dài dưới mục **Nhập dữ liệu đối chứng thủ công**.
-- Không cho quản trị viên tự gõ mã nhiệm vụ. Mục **Nhiệm vụ đối chứng** là danh sách chọn cố định, dùng đúng các mã mà Web App tự ghi.
-- Danh mục chuẩn gồm: `DONG_BO_YOUTUBE`, `GAN_VIDEO_HOC_PHAN`, `TAO_QR_HANG_LOAT`, `TAO_QR_RIENG`.
-- Web App từ chối lưu dữ liệu thủ công nếu mã nhiệm vụ không thuộc danh mục chuẩn.
-- Bổ sung bảng **Danh mục nhiệm vụ đối chứng cần thực hiện** cho biết số lần hệ thống đã ghi, số phép đo thủ công đã có và trạng thái dữ liệu của từng nhiệm vụ.
-- Bảng so sánh hiển thị cả tên nhiệm vụ và mã chuẩn, tránh nhầm mã khi nghiệm thu.
+- Trường nhiệm vụ đối chứng chuyển sang danh sách chọn thay vì tự gõ mã để tránh sai mã.
+- Từ v3.2, thiết kế nghiên cứu được chốt chỉ dùng **2 nhiệm vụ đối chứng**: tạo QR riêng và tạo QR hàng loạt; các hoạt động đồng bộ/gán học liệu thuộc nhóm kiểm thử tự động.
+
+## Cập nhật v3.2 — Playlist theo học phần và QR playlist động
+- Đồng bộ cả **playlist do giảng viên tạo** và danh sách video thuộc từng playlist từ YouTube; sau mỗi lần đồng bộ, video mới/gỡ khỏi playlist được cập nhật trong Web App.
+- Bổ sung quan hệ **Học phần ↔ Playlist ↔ Video** bằng bảng `course_playlists`; cùng một playlist có thể được gán cho nhiều học phần và mỗi học phần có QR playlist riêng để thống kê đúng ngữ cảnh.
+- Trong **Quản lý học phần**, giảng viên có thể gán/bỏ gán playlist, xem số video trong playlist và trạng thái QR playlist.
+- Trong **Mã QR động**, bổ sung **Tạo một mã QR playlist** và **Tạo QR cho tất cả playlist của học phần**. Tên QR/tệp PNG giữ đúng tên playlist tiếng Việt có dấu.
+- QR playlist dẫn tới trang xem riêng của Web App, không dẫn thẳng sang YouTube. Trang xem hiển thị danh sách video và phát bằng `youtube-nocookie`; video không còn khả dụng được tự bỏ qua.
+- Khi playlist thêm/gỡ video, sau đồng bộ YouTube **QR playlist cũ tự phản ánh nội dung mới, không phải in lại QR**. Nếu playlist bị xóa/không còn khả dụng, QR được giữ và hiển thị thông báo phù hợp.
+- Lịch sử quét QR playlist và quá trình xem từng video trong playlist tiếp tục được ghi nhận vào thống kê của học phần.
+- Phần **Đánh giá nghiệm thu** chỉ còn **2 nhiệm vụ đối chứng chuẩn**: `TAO_QR_RIENG` và `TAO_QR_HANG_LOAT`. Đồng bộ YouTube, gán video/playlist và các chức năng khác vẫn được ghi ở **Kết quả kiểm thử tự động**, không dùng làm nhiệm vụ đối chứng thủ công.
+- Backup/khôi phục bổ sung bảng `course_playlists` và các trường QR playlist; backup cũ chưa có bảng này vẫn được phép khôi phục.

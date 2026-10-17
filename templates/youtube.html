@@ -19,6 +19,13 @@
       <form class="mt-2" method="post" action="{{ url_for('youtube_websub_subscribe', channel_pk=c.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-primary btn-sm">Kích hoạt / gia hạn cập nhật tự động</button></form>
     </div>
   </div>
+  <hr>
+  <div class="small fw-semibold mb-2">Playlist đã đồng bộ</div>
+  <div class="d-flex flex-wrap gap-2">
+    {% for p in c.playlists if p.youtube_playlist_id != c.uploads_playlist_id %}
+      <span class="badge text-bg-light border {{ 'opacity-50' if not p.is_available else '' }}">{{ p.title }} · {{ p.video_links|length }} video{% if not p.is_available %} · không còn khả dụng{% endif %}</span>
+    {% else %}<span class="text-muted small">Chưa có playlist do giảng viên tạo.</span>{% endfor %}
+  </div>
 </div></div>
 {% else %}<div class="card"><div class="card-body text-muted">Chưa có dữ liệu kênh. Nhấn “Đồng bộ dữ liệu từ YouTube”.</div></div>{% endfor %}
 

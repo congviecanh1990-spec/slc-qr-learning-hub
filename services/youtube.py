@@ -104,7 +104,11 @@ def sync_my_channel(user):
         channel.thumbnail_url = _thumb(snippet)
         channel.last_synced_at = utcnow()
         db.session.flush()
-        sync_playlists(user, channel)
+        playlists = sync_playlists(user, channel)
+        # Đồng bộ nội dung của từng playlist do giảng viên tạo để Web App có thể
+        # gán playlist vào học phần và tạo QR playlist động.
+        for playlist in playlists:
+            sync_playlist_items(user, channel, playlist.youtube_playlist_id)
         if uploads:
             sync_playlist_items(user, channel, uploads, uploads_playlist=True)
         synced.append(channel)
@@ -113,6 +117,8 @@ def sync_my_channel(user):
 
 
 def sync_playlists(user, channel):
+    seen_ids = set()
+    synced_playlists = []
     page = None
     while True:
         params = {"part": "snippet,status", "mine": "true", "maxResults": 50}
@@ -121,6 +127,7 @@ def sync_playlists(user, channel):
         data = _get(user, "playlists", params)
         for item in data.get("items", []):
             pid = item["id"]
+            seen_ids.add(pid)
             snippet = item.get("snippet", {})
             p = Playlist.query.filter_by(youtube_playlist_id=pid).first()
             if not p:
@@ -130,11 +137,24 @@ def sync_playlists(user, channel):
             p.title = snippet.get("title", pid)
             p.description = snippet.get("description")
             p.privacy_status = item.get("status", {}).get("privacyStatus")
+            p.is_available = True
             p.last_synced_at = utcnow()
+            synced_playlists.append(p)
         db.session.flush()
         page = data.get("nextPageToken")
         if not page:
             break
+
+    # Playlist do người dùng tạo nhưng không còn được API trả về được đánh dấu
+    # không khả dụng; QR đã phát hành vẫn được giữ để thông báo/khắc phục.
+    for p in Playlist.query.filter_by(channel_id=channel.id).all():
+        if p.youtube_playlist_id == channel.uploads_playlist_id:
+            continue
+        if p.youtube_playlist_id not in seen_ids:
+            p.is_available = False
+            p.last_synced_at = utcnow()
+    db.session.flush()
+    return synced_playlists
 
 
 def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=False):
@@ -170,20 +190,32 @@ def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=Fal
             title="Uploads",
             description="Danh sách video tải lên của kênh",
             privacy_status="public",
+            is_available=True,
             last_synced_at=utcnow(),
         )
         db.session.add(playlist)
         db.session.flush()
 
     if playlist:
+        playlist.is_available = True
+        playlist.last_synced_at = utcnow()
+        current_video_ids = set()
         for vid in video_ids:
             video = Video.query.filter_by(youtube_video_id=vid).first()
             if not video:
                 continue
+            current_video_ids.add(video.id)
             link = PlaylistVideo.query.filter_by(playlist_id=playlist.id, video_id=video.id).first()
+            position = item_meta.get(vid, {}).get("snippet", {}).get("position")
             if not link:
-                position = item_meta.get(vid, {}).get("snippet", {}).get("position")
                 db.session.add(PlaylistVideo(playlist_id=playlist.id, video_id=video.id, position=position))
+            else:
+                link.position = position
+        # Xóa liên kết đã bị gỡ khỏi playlist YouTube. Video vẫn được giữ trong kho
+        # video nếu còn tồn tại trên kênh.
+        for link in PlaylistVideo.query.filter_by(playlist_id=playlist.id).all():
+            if link.video_id not in current_video_ids:
+                db.session.delete(link)
     db.session.commit()
 
 
@@ -235,10 +267,14 @@ def reconcile_user(user):
     channels = YouTubeChannel.query.filter_by(user_id=user.id).all()
     total = 0
     for channel in channels:
-        ids = [v.youtube_video_id for v in channel.videos]
-        for i in range(0, len(ids), 50):
-            sync_video_ids(user, channel, ids[i:i + 50])
-            total += len(ids[i:i + 50])
+        # Đối soát cả cấu trúc playlist để QR playlist phản ánh đúng video vừa thêm/gỡ.
+        playlists = sync_playlists(user, channel)
+        for playlist in playlists:
+            sync_playlist_items(user, channel, playlist.youtube_playlist_id)
+        if channel.uploads_playlist_id:
+            sync_playlist_items(user, channel, channel.uploads_playlist_id, uploads_playlist=True)
+
+        total += len(channel.videos)
         channel.last_synced_at = utcnow()
     db.session.commit()
     return total

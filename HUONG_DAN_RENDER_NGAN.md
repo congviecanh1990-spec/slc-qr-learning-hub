@@ -1,23 +1,21 @@
-# Cập nhật v3.1
+# Cập nhật Web App v3.2 trên Render
 
-# Cập nhật v3.0 trên Render
+1. Giải nén bộ mã nguồn v3.2.
+2. Upload toàn bộ file/thư mục bên trong vào repository GitHub hiện tại `slc-qr-learning-hub` và Commit.
+3. Render đang bật Auto-Deploy sẽ tự build/deploy. Chờ `Live` / `Deploy succeeded`.
+4. Mở Web App và nhấn `Ctrl + F5`.
+5. Vào **Kênh YouTube** → **Đồng bộ dữ liệu từ YouTube**. Kiểm tra danh sách playlist đã xuất hiện.
+6. Vào **Học phần** → chọn một hoặc nhiều playlist → **Gán playlist**.
+7. Vào **Mã QR động**:
+   - thử **Tạo một mã QR playlist**;
+   - thử **Tạo QR playlist còn thiếu** theo học phần;
+   - mở thử QR và kiểm tra trang xem hiển thị danh sách video trong playlist.
+8. Thêm/gỡ một video trong playlist trên YouTube → đồng bộ lại → mở chính QR playlist cũ để kiểm tra nội dung thay đổi mà không tạo QR mới.
+9. Vào **Đánh giá nghiệm thu** → **Hiệu quả quy trình**. Danh sách nhiệm vụ đối chứng phải chỉ có:
+   - `TAO_QR_RIENG` — Tạo và lưu mã QR riêng;
+   - `TAO_QR_HANG_LOAT` — Tạo và lưu mã QR hàng loạt.
 
-1. Giải nén bộ mã nguồn v3.0.
-2. Upload toàn bộ nội dung vào repository GitHub hiện tại `slc-qr-learning-hub` và Commit.
-3. Render đang bật Auto-Deploy sẽ tự build/deploy lại. Chờ trạng thái `Live` / `Deploy succeeded`.
-4. Mở Web App, nhấn Ctrl+F5.
-5. Đăng nhập tài khoản Quản trị viên -> `Đánh giá nghiệm thu`.
-6. Kiểm tra 3 khối mới: `Kết quả kiểm thử tự động`, `Hiệu quả quy trình`, `Khảo sát người dùng`.
-7. Sử dụng thử các chức năng thật (đăng nhập, đồng bộ YouTube, gán video, tạo QR...) rồi quay lại Đánh giá nghiệm thu để xem log tự động.
-8. Nhập dữ liệu đối chứng thủ công với mã nhiệm vụ trùng mã Web App, ví dụ `TAO_QR_HANG_LOAT`.
-9. Dán liên kết Google Form khảo sát GV, Google Form khảo sát SV và Google Sheets kết quả vào phần `Cấu hình liên kết khảo sát`.
-
-Không cần xóa PostgreSQL. `db.create_all()` sẽ tạo bảng mới `research_settings`; schema `functional_test_runs` được nâng cấp tự động trên PostgreSQL.
-
-
-## Kiểm tra riêng sau khi deploy v3.1
-1. Vào **Đánh giá nghiệm thu** → **Hiệu quả quy trình**.
-2. Trường **Nhiệm vụ đối chứng** phải là danh sách chọn, không còn ô tự gõ mã.
-3. Danh sách phải có 4 nhiệm vụ chuẩn: Đồng bộ YouTube, Gán video vào học phần, Tạo QR hàng loạt, Tạo một QR riêng.
-4. Bảng **Danh mục nhiệm vụ đối chứng cần thực hiện** phải hiển thị trạng thái dữ liệu của từng nhiệm vụ.
-5. Dữ liệu cũ có mã không chuẩn vẫn được giữ trong PostgreSQL nhưng không được dùng cho bảng so sánh chuẩn v3.1.
+## Dữ liệu
+- Không cần xóa PostgreSQL hiện tại.
+- Hệ thống tự tạo bảng `course_playlists` và tự bổ sung các cột mới cho `playlists`/`qr_codes` khi khởi động.
+- Dữ liệu video, học phần, lớp, QR và lịch sử quét/xem hiện có được giữ nguyên.

@@ -56,6 +56,7 @@ class Playlist(db.Model):
     title = db.Column(db.String(255), nullable=False, default="")
     description = db.Column(db.Text, nullable=True)
     privacy_status = db.Column(db.String(32), nullable=True)
+    is_available = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
     last_synced_at = db.Column(db.DateTime(timezone=True), nullable=True)
     channel = db.relationship("YouTubeChannel", backref=db.backref("playlists", cascade="all,delete"))
 
@@ -133,6 +134,22 @@ class CourseVideo(db.Model):
     __table_args__ = (UniqueConstraint("course_id", "video_id", name="uq_course_video"),)
 
 
+class CoursePlaylist(db.Model):
+    __tablename__ = "course_playlists"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
+    playlist_id = db.Column(db.Integer, db.ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False)
+    qr_id = db.Column(db.Integer, db.ForeignKey("qr_codes.id", ondelete="SET NULL"), nullable=True, unique=True)
+    added_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    active = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    added_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    course = db.relationship("Course", backref=db.backref("playlist_links", cascade="all,delete", order_by="CoursePlaylist.added_at"))
+    playlist = db.relationship("Playlist", backref=db.backref("course_links", cascade="all,delete"))
+    qr = db.relationship("QrCode", foreign_keys=[qr_id])
+    adder = db.relationship("User", foreign_keys=[added_by])
+    __table_args__ = (UniqueConstraint("course_id", "playlist_id", name="uq_course_playlist"),)
+
+
 class ClassGroup(db.Model):
     __tablename__ = "class_groups"
     id = db.Column(db.Integer, primary_key=True)
@@ -165,11 +182,18 @@ class QrCode(db.Model):
     slug = db.Column(db.String(64), unique=True, nullable=False, index=True)
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text, nullable=True)
+    target_type = db.Column(db.String(16), nullable=False, default="video", server_default="video")
+    playlist_id = db.Column(db.Integer, db.ForeignKey("playlists.id", ondelete="SET NULL"), nullable=True)
     active = db.Column(db.Boolean, default=True, nullable=False)
     processing_seconds = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     owner = db.relationship("User", backref=db.backref("qr_codes", cascade="all,delete"))
     course = db.relationship("Course")
+    playlist = db.relationship("Playlist", foreign_keys=[playlist_id])
+
+    @property
+    def is_playlist(self):
+        return (self.target_type or "video") == "playlist" or self.playlist_id is not None
 
     @property
     def current_target(self):
