@@ -1,6 +1,20 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.6
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.7
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
+
+## Điểm mới v3.7
+- **Lớp và sinh viên được quản lý dùng chung toàn hệ thống**, không tạo lại danh sách theo từng học phần.
+- Quản trị viên tạo lớp và giao **giảng viên chủ nhiệm (GVCN)**; GVCN quản lý danh sách sinh viên của lớp mình.
+- Mã sinh viên dùng **đúng mã do Nhà trường cấp**, không sinh thêm mã nội bộ cho sinh viên.
+- GVCN có thể tải danh sách ban đầu hoặc bổ sung nhiều sinh viên bằng Excel; có thể thêm một sinh viên riêng lẻ.
+- Khi sinh viên bảo lưu, nghỉ học, chuyển trường/chuyển lớp..., GVCN chỉ thay đổi trạng thái và **ngày có hiệu lực**; dữ liệu lịch sử trước đó không bị sửa.
+- Lịch sử lớp lưu theo khoảng thời gian, nhờ đó lượt quét cũ vẫn giữ đúng lớp tại thời điểm phát sinh, còn sĩ số hiện tại thay đổi theo biến động mới.
+- Giảng viên bộ môn chỉ chọn lớp dùng chung cho học phần; không tải lại danh sách sinh viên.
+- Sinh viên quét QR **chỉ nhập mã sinh viên**; hệ thống tự xác định lớp đang học và kiểm tra lớp có được gán cho học phần hay không.
+- Giao diện **Quản lý học phần** được thu gọn: chỉ giữ số video/QR, playlist/QR, số lớp và khu vực chọn lớp áp dụng.
+- Giao diện **Mã QR động** đưa hai chức năng tạo QR một video/một playlist xuống khu vực **Tạo QR riêng lẻ**; quy trình chính ưu tiên tạo theo học phần.
+- Thông báo đăng nhập và lỗi quyền truy cập được chuẩn hóa bằng tiếng Việt; tài khoản giảng viên truy cập nhầm trang quản trị được đưa về giao diện phù hợp thay vì hiện trang lỗi 403 thô.
+- Sao lưu/khôi phục bổ sung dữ liệu lớp dùng chung, sinh viên, lịch sử biến động và liên kết lớp-học phần.
 
 ## Nhóm tác giả
 Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài); Hoàng Thị Nhất; Nguyễn Thu Huyền; Tường Thị Phương Thảo; Nguyễn Hữu Thọ.
@@ -11,8 +25,8 @@ Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài); Hoàng Thị Nhất; Ngu
 - Nút **Mở thử** chuyển sang chế độ xem thử dành cho giảng viên: không yêu cầu nhập mã GV/SV và không ghi lượt quét/thời lượng xem vào thống kê.
 - Bổ sung **Mã GV thực nghiệm** cho tài khoản giảng viên. Quản trị viên cấp mã tại trang **Đánh giá nghiệm thu**; sau khi cấp, mã hiển thị trên giao diện khi giảng viên đăng nhập.
 - Khi giảng viên đã đăng nhập và thực sự quét QR, hệ thống tự dùng Mã GV đã cấp, không yêu cầu nhập lại.
-- Sinh viên **không cần đăng nhập Web App**. Khi quét QR do giảng viên cung cấp, sinh viên được đưa tới trang nhận diện công khai, chỉ nhập **Mã sinh viên** và chọn **Lớp**, sau đó xem học liệu.
-- Trang nhận diện công khai bỏ lựa chọn vai trò GV/SV để tránh nhầm lẫn; luồng công khai mặc định là sinh viên.
+- Sinh viên **không cần đăng nhập Web App**. Khi quét QR do giảng viên cung cấp, sinh viên chỉ nhập **Mã sinh viên do Nhà trường cấp**; hệ thống tự xác định lớp theo dữ liệu GVCN và thời điểm quét.
+- Trang nhận diện công khai không yêu cầu chọn vai trò hoặc chọn lớp; luồng công khai mặc định là sinh viên.
 - PostgreSQL được nâng cấp nhẹ bằng cột `users.lecturer_code`; dữ liệu hiện có được giữ nguyên.
 
 ## Các chức năng chính

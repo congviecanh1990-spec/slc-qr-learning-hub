@@ -167,6 +167,58 @@ class ClassGroup(db.Model):
     __table_args__ = (UniqueConstraint("course_id", "code", name="uq_course_class_code"),)
 
 
+class SchoolClass(db.Model):
+    """Danh mục lớp dùng chung toàn hệ thống, không gắn riêng với từng học phần."""
+    __tablename__ = "school_classes"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=False)
+    homeroom_teacher_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    active = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    homeroom_teacher = db.relationship("User", foreign_keys=[homeroom_teacher_id], backref=db.backref("homeroom_classes", lazy=True))
+
+
+class Student(db.Model):
+    """Sinh viên dùng mã do Nhà trường cấp làm mã định danh duy nhất."""
+    __tablename__ = "students"
+    id = db.Column(db.Integer, primary_key=True)
+    student_code = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    full_name = db.Column(db.String(255), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ClassEnrollment(db.Model):
+    """Khoảng thời gian một sinh viên thuộc một lớp. ended_on là ngày trạng thái mới có hiệu lực."""
+    __tablename__ = "class_enrollments"
+    id = db.Column(db.Integer, primary_key=True)
+    school_class_id = db.Column(db.Integer, db.ForeignKey("school_classes.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
+    started_on = db.Column(db.Date, nullable=False)
+    ended_on = db.Column(db.Date, nullable=True)
+    end_status = db.Column(db.String(32), nullable=True)
+    note = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    school_class = db.relationship("SchoolClass", backref=db.backref("enrollments", cascade="all,delete"))
+    student = db.relationship("Student", backref=db.backref("enrollments", cascade="all,delete"))
+    __table_args__ = (Index("ix_enrollment_class_student_dates", "school_class_id", "student_id", "started_on", "ended_on"),)
+
+
+class CourseClass(db.Model):
+    """Liên kết nhiều-nhiều giữa học phần và lớp dùng chung."""
+    __tablename__ = "course_classes"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    school_class_id = db.Column(db.Integer, db.ForeignKey("school_classes.id", ondelete="CASCADE"), nullable=False, index=True)
+    added_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    active = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    added_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    course = db.relationship("Course", backref=db.backref("school_class_links", cascade="all,delete", order_by="CourseClass.added_at"))
+    school_class = db.relationship("SchoolClass", backref=db.backref("course_links", cascade="all,delete"))
+    adder = db.relationship("User", foreign_keys=[added_by])
+    __table_args__ = (UniqueConstraint("course_id", "school_class_id", name="uq_course_school_class"),)
+
+
 class Participant(db.Model):
     __tablename__ = "participants"
     id = db.Column(db.Integer, primary_key=True)

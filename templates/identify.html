@@ -18,16 +18,12 @@
             <div class="fw-bold mt-2">{{ school_name }}</div>
           </div>
           <h3>Truy cập học liệu</h3>
-          <p class="text-muted">Bạn đang truy cập học liệu bằng mã QR do giảng viên cung cấp. <strong>Không cần đăng nhập Web App.</strong> Vui lòng nhập mã sinh viên và chọn lớp để hệ thống ghi nhận việc khai thác học liệu. Không yêu cầu nhập họ tên.</p>
+          <p class="text-muted">Bạn đang truy cập học liệu bằng mã QR do giảng viên cung cấp. <strong>Không cần đăng nhập hệ thống.</strong> Chỉ cần nhập đúng mã sinh viên do Nhà trường cấp; hệ thống sẽ tự xác định lớp đang học theo dữ liệu của giảng viên chủ nhiệm.</p>
+          {% if message %}<div class="alert alert-warning py-2">{{ message }}</div>{% endif %}
           <form method="post" action="{{ url_for('identify') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label class="form-label fw-bold">Mã sinh viên</label>
-            <input class="form-control mb-3" name="participant_code" required autofocus placeholder="Nhập mã sinh viên">
-            <label class="form-label fw-bold">Lớp</label>
-            <select class="form-select mb-3" name="class_code">
-              <option value="">— Chọn/không xác định —</option>
-              {% for c in classes %}<option value="{{ c.code }}">{{ c.name }}</option>{% endfor %}
-            </select>
+            <input class="form-control mb-3" name="participant_code" required autofocus placeholder="Nhập mã sinh viên do Nhà trường cấp">
             <button class="btn btn-primary w-100">Tiếp tục xem học liệu</button>
           </form>
         </div>

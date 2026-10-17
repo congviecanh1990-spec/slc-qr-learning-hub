@@ -9,7 +9,7 @@ import secrets
 import unicodedata
 import zipfile
 import time
-from datetime import timedelta
+from datetime import timedelta, datetime, date
 from functools import wraps
 from urllib.parse import urlparse
 
@@ -23,13 +23,13 @@ from flask import (
     render_template, request, send_file, session, url_for
 )
 from flask_wtf.csrf import CSRFProtect
-from sqlalchemy import func, text, DateTime, inspect
+from sqlalchemy import func, text, DateTime, inspect, or_
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 from models import (
     db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ClassGroup,
-    Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
+    SchoolClass, Student, ClassEnrollment, CourseClass, Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
     HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
     ResearchSetting, SurveyResult, utcnow
 )
@@ -58,6 +58,102 @@ RESEARCH_COMPARISON_TASKS = [
 RESEARCH_COMPARISON_TASK_MAP = {item["key"]: item for item in RESEARCH_COMPARISON_TASKS}
 
 
+STUDENT_STATUS_LABELS = {
+    "dang_hoc": "Đang học",
+    "bao_luu": "Bảo lưu",
+    "nghi_hoc": "Nghỉ học",
+    "chuyen_truong": "Chuyển trường",
+    "chuyen_lop": "Chuyển lớp",
+    "khac": "Khác",
+}
+
+
+def normalize_student_code(value) -> str:
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return re.sub(r"\s+", "", str(value or "").strip()).upper()[:64]
+
+
+def enrollment_active_on(enrollment: ClassEnrollment, on_date: date) -> bool:
+    return bool(enrollment.started_on <= on_date and (enrollment.ended_on is None or enrollment.ended_on > on_date))
+
+
+def class_size_at(school_class: SchoolClass, on_date: date | None = None) -> int:
+    on_date = on_date or utcnow().date()
+    return len({e.student_id for e in school_class.enrollments if enrollment_active_on(e, on_date)})
+
+
+def student_current_status_in_class(student: Student, school_class: SchoolClass, on_date: date | None = None):
+    on_date = on_date or utcnow().date()
+    rows = sorted((e for e in student.enrollments if e.school_class_id == school_class.id), key=lambda e: (e.started_on, e.id), reverse=True)
+    for e in rows:
+        if enrollment_active_on(e, on_date):
+            return "dang_hoc", e
+    if rows:
+        return (rows[0].end_status or "khac"), rows[0]
+    return "khac", None
+
+
+def can_manage_school_class(user: User, school_class: SchoolClass) -> bool:
+    return bool(user and (user.role == "admin" or school_class.homeroom_teacher_id == user.id))
+
+
+def active_enrollments_for_student(student: Student, on_date: date | None = None):
+    on_date = on_date or utcnow().date()
+    return [e for e in student.enrollments if enrollment_active_on(e, on_date)]
+
+
+def resolve_student_class_for_qr(student_code: str, qr: QrCode, on_date: date | None = None):
+    """Xác định lớp của SV theo mã Nhà trường và thời điểm quét.
+
+    Nếu QR thuộc học phần, SV phải đang thuộc một lớp được gán cho học phần đó.
+    """
+    on_date = on_date or utcnow().date()
+    code = normalize_student_code(student_code)
+    student = Student.query.filter_by(student_code=code).first()
+    if not student:
+        return None, None, "Mã sinh viên chưa có trong danh sách lớp của hệ thống. Vui lòng kiểm tra lại mã hoặc liên hệ giảng viên chủ nhiệm."
+    enrollments = active_enrollments_for_student(student, on_date)
+    if qr.course_id:
+        allowed_ids = {link.school_class_id for link in CourseClass.query.filter_by(course_id=qr.course_id, active=True).all()}
+        if not allowed_ids:
+            return student, None, "Học phần này chưa được giảng viên gán lớp áp dụng. Vui lòng liên hệ giảng viên phụ trách."
+        enrollments = [e for e in enrollments if e.school_class_id in allowed_ids]
+    if not enrollments:
+        return student, None, "Mã sinh viên không thuộc lớp đang áp dụng cho học phần tại thời điểm hiện tại. Vui lòng liên hệ giảng viên phụ trách."
+    if len(enrollments) > 1:
+        return student, None, "Hệ thống phát hiện mã sinh viên đang đồng thời thuộc nhiều lớp phù hợp. Vui lòng liên hệ giảng viên chủ nhiệm để kiểm tra dữ liệu lớp."
+    return student, enrollments[0].school_class, None
+
+
+def role_label(role: str) -> str:
+    return "Quản trị viên" if role == "admin" else "Giảng viên"
+
+
+
+def migrate_legacy_classes():
+    """Chuyển dữ liệu lớp cũ theo học phần sang danh mục lớp dùng chung, không xóa dữ liệu cũ."""
+    try:
+        for old in ClassGroup.query.order_by(ClassGroup.id).all():
+            name = (old.name or "").strip()
+            if not name:
+                continue
+            school_class = SchoolClass.query.filter(func.lower(SchoolClass.name) == name.lower()).first()
+            if not school_class:
+                code = (old.code or f"L{old.id:06d}").strip()
+                if SchoolClass.query.filter_by(code=code).first():
+                    code = f"LOP{old.id:06d}"
+                school_class = SchoolClass(code=code, name=name, active=bool(getattr(old, "active", True)))
+                db.session.add(school_class)
+                db.session.flush()
+            link = CourseClass.query.filter_by(course_id=old.course_id, school_class_id=school_class.id).first()
+            if not link:
+                db.session.add(CourseClass(course_id=old.course_id, school_class_id=school_class.id, active=bool(getattr(old, "active", True))))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -82,6 +178,7 @@ def create_app():
         if app.config["AUTO_CREATE_DB"]:
             db.create_all()
             ensure_schema_upgrades()
+            migrate_legacy_classes()
 
     return app
 
@@ -567,17 +664,34 @@ def qr_download_name(qr: QrCode) -> str:
 
 
 def register_routes(app):
+    @app.errorhandler(403)
+    def handle_forbidden(error):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "khong_co_quyen_truy_cap"}), 403
+        if current_user():
+            flash("Bạn không có quyền truy cập chức năng này.", "warning")
+            return redirect(url_for("index"))
+        return redirect(url_for("login", next=request.path))
+
+    @app.errorhandler(404)
+    def handle_not_found(error):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "khong_tim_thay_du_lieu"}), 404
+        return render_template("http_error.html", title="Không tìm thấy trang", message="Trang hoặc dữ liệu bạn yêu cầu không tồn tại."), 404
+
     @app.context_processor
     def inject_globals():
         endpoint = request.endpoint or ""
         section_map = {
             "youtube_page": "youtube", "youtube_sync": "youtube", "youtube_websub_subscribe": "youtube",
             "videos_page": "videos", "assign_videos_to_course": "videos", "assign_playlists_from_library": "videos",
-            "courses_page": "courses", "add_class": "courses", "update_course_info": "courses",
+            "courses_page": "courses", "add_class": "courses", "set_course_school_classes": "courses", "update_course_info": "courses",
             "assign_playlists_to_course": "courses", "delete_course_playlist": "courses",
             "create_course_qrs_bulk": "courses", "create_course_playlist_qrs_bulk": "courses", "download_course_qrs": "courses",
             "qr_page": "qr", "create_playlist_qr": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr", "delete_all_qrs": "qr",
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
+            "classes_page": "classes", "create_school_class": "classes", "assign_homeroom_teacher": "classes",
+            "upload_class_students": "classes", "add_class_student": "classes", "change_student_status": "classes",
             "research_page": "research",
             "error_logs_page": "errors",
             "data_management": "data_admin",
@@ -595,6 +709,7 @@ def register_routes(app):
             "authors": current_app.config["AUTHORS"],
             "brand_logo": current_app.config["BRAND_LOGO"],
             "support_email": sorted(current_app.config["ADMIN_EMAILS"])[0] if current_app.config["ADMIN_EMAILS"] else "",
+            "has_homeroom_classes": bool(current_user() and (current_user().role == "admin" or SchoolClass.query.filter_by(homeroom_teacher_id=current_user().id, active=True).first())),
         }
 
     @app.get("/health")
@@ -693,13 +808,16 @@ def register_routes(app):
             account.scopes = " ".join(token_scope) if isinstance(token_scope, (list, tuple)) else str(token_scope)
             record_functional_test(
                 "AUTH_LOGIN", "Đăng nhập Google", True, owner_id=user.id,
-                note=f"Đăng nhập thành công với vai trò {user.role}."
+                note=f"Đăng nhập thành công với vai trò {role_label(user.role)}."
             )
             db.session.commit()
             session["user_id"] = user.id
             session.permanent = True
-            flash("Đăng nhập bằng Google thành công.", "success")
-            return redirect(session.pop("after_login", url_for("index")))
+            flash(f"Đăng nhập thành công với vai trò {role_label(user.role)}.", "success")
+            after_login = session.pop("after_login", url_for("index"))
+            if user.role != "admin" and after_login.startswith(("/research", "/admin/")):
+                after_login = url_for("index")
+            return redirect(after_login)
         except Exception as exc:
             db.session.rollback()
             db.session.add(ErrorLog(module="oauth", message="Đăng nhập Google thất bại", details=str(exc)))
@@ -997,12 +1115,14 @@ def register_routes(app):
         faculty_options = sorted({((c.faculty_name or c.unit_name) or "").strip() for c in all_owned_courses if ((c.faculty_name or c.unit_name) or "").strip()}, key=str.casefold)
         department_options = sorted({(c.department_name or "").strip() for c in all_owned_courses if (c.department_name or "").strip()}, key=str.casefold)
         available_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
+        available_school_classes = SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all()
         return render_template(
             "courses.html",
             courses=courses,
             faculty_options=faculty_options,
             department_options=department_options,
             available_playlists=available_playlists,
+            available_school_classes=available_school_classes,
         )
 
     @app.post("/courses/<int:course_id>/info")
@@ -1072,6 +1192,30 @@ def register_routes(app):
         )
         return redirect(url_for("courses_page"))
 
+    @app.post("/courses/<int:course_id>/school-classes")
+    @login_required
+    def set_course_school_classes(course_id):
+        user = current_user()
+        course = db.session.get(Course, course_id) or abort(404)
+        if not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        selected_ids = {int(x) for x in request.form.getlist("school_class_ids") if str(x).isdigit()}
+        valid_ids = {c.id for c in SchoolClass.query.filter(SchoolClass.id.in_(selected_ids), SchoolClass.active.is_(True)).all()} if selected_ids else set()
+        existing = {link.school_class_id: link for link in CourseClass.query.filter_by(course_id=course.id).all()}
+        for class_id in valid_ids:
+            link = existing.get(class_id)
+            if link:
+                link.active = True
+                link.added_by = link.added_by or user.id
+            else:
+                db.session.add(CourseClass(course_id=course.id, school_class_id=class_id, added_by=user.id, active=True))
+        for class_id, link in existing.items():
+            if class_id not in valid_ids:
+                link.active = False
+        db.session.commit()
+        flash(f"Đã cập nhật lớp áp dụng cho học phần “{course.name}”.", "success")
+        return redirect(url_for("courses_page"))
+
     @app.post("/courses/<int:course_id>/classes")
     @login_required
     def add_class(course_id):
@@ -1118,6 +1262,8 @@ def register_routes(app):
             if hasattr(cls, "active"):
                 cls.active = False
         for link in course.playlist_links:
+            link.active = False
+        for link in course.school_class_links:
             link.active = False
         db.session.commit()
         flash(
@@ -1564,17 +1710,25 @@ def register_routes(app):
             viewer_identity = "Quản trị viên"
             tracking_enabled = False
         else:
-            # Sinh viên không cần tài khoản Web App. Màn hình này xuất hiện ngay sau
-            # khi quét QR lần đầu trên trình duyệt và chỉ yêu cầu mã SV + lớp.
-            if not session.get("participant_code") or session.get("participant_role") != "SV":
+            # Sinh viên không đăng nhập hệ thống quản trị. Chỉ nhập mã sinh viên do Nhà trường cấp;
+            # hệ thống tự xác định lớp theo dữ liệu GVCN và thời điểm quét.
+            session_code = session.get("participant_code") if session.get("participant_role") == "SV" else None
+            if session_code:
+                _, resolved_class, resolve_error = resolve_student_class_for_qr(session_code, qr)
+                if resolve_error:
+                    for key in ("participant_code", "participant_role", "participant_class_code"):
+                        session.pop(key, None)
+                    session_code = None
+            if not session_code:
                 session["identify_next"] = url_for("public_qr", slug=slug)
-                course = qr.course
-                classes = [c for c in course.classes if getattr(c, "active", True)] if course else []
-                return render_template("identify.html", qr=qr, classes=classes)
-            pcode = session.get("participant_code")
+                session["identify_qr_slug"] = slug
+                message = session.pop("identify_error", None)
+                return render_template("identify.html", qr=qr, message=message)
+            pcode = normalize_student_code(session_code)
             role = "SV"
-            class_code = session.get("participant_class_code")
+            class_code = resolved_class.code
             viewer_identity = pcode
+            session["participant_class_code"] = class_code
 
         if qr.is_playlist:
             playlist = qr.playlist
@@ -1654,17 +1808,26 @@ def register_routes(app):
 
     @app.post("/identify")
     def identify():
-        # Trang nhận diện công khai chỉ dành cho sinh viên quét QR. Giảng viên đã
-        # đăng nhập được nhận diện bằng tài khoản Google và mã GV do quản trị cấp.
-        code = request.form.get("participant_code", "").strip()
-        class_code = request.form.get("class_code", "").strip()
+        code = normalize_student_code(request.form.get("participant_code", ""))
+        nxt = session.get("identify_next") or url_for("index")
+        slug = session.get("identify_qr_slug")
+        qr = QrCode.query.filter_by(slug=slug, active=True).first() if slug else None
         if not code:
-            flash("Vui lòng nhập mã sinh viên.", "warning")
-            return redirect(session.get("identify_next") or url_for("index"))
-        session["participant_code"] = code[:128]
+            session["identify_error"] = "Vui lòng nhập mã sinh viên do Nhà trường cấp."
+            return redirect(nxt)
+        if not qr:
+            session["identify_error"] = "Không xác định được mã QR đang truy cập. Vui lòng quét lại mã QR."
+            return redirect(nxt)
+        student, school_class, error = resolve_student_class_for_qr(code, qr)
+        if error:
+            session["identify_error"] = error
+            return redirect(nxt)
+        session["participant_code"] = student.student_code
         session["participant_role"] = "SV"
-        session["participant_class_code"] = class_code[:64]
-        nxt = session.pop("identify_next", None) or url_for("index")
+        session["participant_class_code"] = school_class.code
+        session.pop("identify_qr_slug", None)
+        session.pop("identify_error", None)
+        session.pop("identify_next", None)
         return redirect(nxt)
 
     @app.post("/participant/reset")
@@ -1797,14 +1960,19 @@ def register_routes(app):
         scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(500).all()
         watches = watch_q.order_by(WatchSession.started_at.desc()).limit(500).all()
 
-        # Bộ lọc lớp dùng tên lớp thân thiện; mã lớp tự động chỉ dùng nội bộ.
-        class_q = ClassGroup.query.join(Course, ClassGroup.course_id == Course.id)
-        if user.role != "admin":
-            class_q = class_q.filter(Course.owner_id == user.id)
-        all_classes = class_q.order_by(ClassGroup.name).all()
-        class_options = [c for c in all_classes if getattr(c, "active", True)]
-        # Giữ tên của lớp đã xóa khỏi danh sách để dữ liệu lịch sử vẫn hiển thị thân thiện.
-        class_name_map = {c.code: c.name for c in all_classes}
+        # Bộ lọc lớp dùng danh mục lớp dùng chung. Với giảng viên chỉ hiển thị lớp gắn với học phần mình phụ trách.
+        if user.role == "admin":
+            all_classes = SchoolClass.query.order_by(SchoolClass.name).all()
+        else:
+            all_classes = (SchoolClass.query.join(CourseClass, CourseClass.school_class_id == SchoolClass.id)
+                           .join(Course, CourseClass.course_id == Course.id)
+                           .filter(Course.owner_id == user.id)
+                           .distinct().order_by(SchoolClass.name).all())
+        class_options = [c for c in all_classes if c.active]
+        class_name_map = {c.code: c.name for c in SchoolClass.query.all()}
+        # Dữ liệu thử nghiệm cũ vẫn được hiển thị đúng tên nếu còn dùng mã lớp phiên bản trước.
+        for legacy in ClassGroup.query.all():
+            class_name_map.setdefault(legacy.code, legacy.name)
 
         day_q = db.session.query(func.date(ScanLog.scanned_at), func.count(ScanLog.id)).join(QrCode, ScanLog.qr_id == QrCode.id)
         if user.role != "admin":
@@ -1844,12 +2012,256 @@ def register_routes(app):
             w.writerow([s.session_key, s.participant_code, s.role, s.class_code, s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.started_at.isoformat(), round(s.estimated_watch_seconds, 2), round(s.max_position, 2), round(s.duration_seconds, 2), round(s.completion_percent, 2), int(s.completed)])
         return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=watch_sessions.csv"})
 
+
+    @app.get("/classes")
+    @login_required
+    def classes_page():
+        user = current_user()
+        if user.role == "admin":
+            classes = SchoolClass.query.order_by(SchoolClass.name).all()
+        else:
+            classes = SchoolClass.query.filter_by(homeroom_teacher_id=user.id, active=True).order_by(SchoolClass.name).all()
+            if not classes:
+                flash("Tài khoản của bạn hiện chưa được giao chủ nhiệm lớp nào.", "info")
+                return redirect(url_for("index"))
+        today = utcnow().date()
+        class_rows = []
+        for school_class in classes:
+            latest_by_student = {}
+            for e in sorted(school_class.enrollments, key=lambda x: (x.started_on, x.id)):
+                latest_by_student[e.student_id] = e
+            student_rows = []
+            for student_id, latest in latest_by_student.items():
+                student = latest.student
+                status_key, ref = student_current_status_in_class(student, school_class, today)
+                student_rows.append({
+                    "student": student,
+                    "status_key": status_key,
+                    "status_label": STUDENT_STATUS_LABELS.get(status_key, "Khác"),
+                    "reference": ref,
+                })
+            student_rows.sort(key=lambda x: ((x["student"].full_name or "").casefold(), x["student"].student_code))
+            class_rows.append({
+                "class": school_class,
+                "current_size": class_size_at(school_class, today),
+                "student_rows": student_rows,
+            })
+        lecturers = User.query.filter_by(role="lecturer").order_by(User.name, User.email).all() if user.role == "admin" else []
+        return render_template(
+            "classes.html", class_rows=class_rows, lecturers=lecturers,
+            status_labels=STUDENT_STATUS_LABELS, today=today,
+        )
+
+    @app.post("/admin/classes/create")
+    @login_required
+    def create_school_class():
+        user = current_user()
+        if user.role != "admin":
+            flash("Bạn không có quyền thực hiện thao tác này.", "warning")
+            return redirect(url_for("index"))
+        code = (request.form.get("class_code") or "").strip().upper()
+        name = (request.form.get("class_name") or "").strip()
+        homeroom_id = request.form.get("homeroom_teacher_id", type=int)
+        if not code or not name:
+            flash("Vui lòng nhập mã lớp và tên lớp.", "warning")
+            return redirect(url_for("classes_page"))
+        if SchoolClass.query.filter_by(code=code).first():
+            flash("Mã lớp đã tồn tại trong hệ thống.", "warning")
+            return redirect(url_for("classes_page"))
+        teacher = db.session.get(User, homeroom_id) if homeroom_id else None
+        if teacher and teacher.role != "lecturer":
+            teacher = None
+        db.session.add(SchoolClass(code=code[:64], name=name[:255], homeroom_teacher_id=teacher.id if teacher else None))
+        db.session.commit()
+        flash(f"Đã tạo lớp “{name}” và lưu vào danh mục lớp dùng chung.", "success")
+        return redirect(url_for("classes_page"))
+
+    @app.post("/admin/classes/<int:class_id>/homeroom")
+    @login_required
+    def assign_homeroom_teacher(class_id):
+        user = current_user()
+        if user.role != "admin":
+            flash("Bạn không có quyền thực hiện thao tác này.", "warning")
+            return redirect(url_for("index"))
+        school_class = db.session.get(SchoolClass, class_id) or abort(404)
+        teacher_id = request.form.get("homeroom_teacher_id", type=int)
+        teacher = db.session.get(User, teacher_id) if teacher_id else None
+        if teacher and teacher.role != "lecturer":
+            flash("Tài khoản được chọn không phải là giảng viên.", "warning")
+            return redirect(url_for("classes_page"))
+        school_class.homeroom_teacher_id = teacher.id if teacher else None
+        db.session.commit()
+        flash(f"Đã cập nhật giảng viên chủ nhiệm cho lớp “{school_class.name}”.", "success")
+        return redirect(url_for("classes_page"))
+
+    @app.get("/classes/student-template.xlsx")
+    @login_required
+    def student_excel_template():
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Danh sách sinh viên"
+        ws.append(["Mã sinh viên", "Họ và tên"])
+        ws.append(["MSSV001", "Nguyễn Văn A"])
+        bio = io.BytesIO()
+        wb.save(bio)
+        bio.seek(0)
+        return send_file(bio, as_attachment=True, download_name="Mau_danh_sach_sinh_vien.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def read_students_from_excel(upload):
+        from openpyxl import load_workbook
+        wb = load_workbook(upload, read_only=True, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            raise ValueError("Tệp Excel không có dữ liệu.")
+        def clean_header(v):
+            s = unicodedata.normalize("NFD", str(v or "").strip().lower())
+            s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+            return re.sub(r"[^a-z0-9]+", " ", s).strip()
+        headers = [clean_header(v) for v in rows[0]]
+        code_idx = next((i for i,h in enumerate(headers) if h in {"ma sinh vien","ma sv","mssv","student code"}), None)
+        name_idx = next((i for i,h in enumerate(headers) if h in {"ho va ten","ho ten","ten sinh vien","full name"}), None)
+        if code_idx is None or name_idx is None:
+            raise ValueError("Tệp Excel cần có hai cột: “Mã sinh viên” và “Họ và tên”.")
+        result = []
+        seen = set()
+        for row in rows[1:]:
+            code = normalize_student_code(row[code_idx] if code_idx < len(row) else "")
+            name = str(row[name_idx] or "").strip() if name_idx < len(row) else ""
+            if not code or not name or code in seen:
+                continue
+            seen.add(code)
+            result.append((code, name[:255]))
+        return result
+
+    def add_student_to_school_class(school_class, code, name, effective_date):
+        student = Student.query.filter_by(student_code=code).first()
+        if not student:
+            student = Student(student_code=code, full_name=name)
+            db.session.add(student)
+            db.session.flush()
+        elif name and student.full_name != name:
+            student.full_name = name
+        for e in active_enrollments_for_student(student, effective_date):
+            if e.school_class_id == school_class.id:
+                return "already"
+            return f"other:{e.school_class.name}"
+        db.session.add(ClassEnrollment(school_class_id=school_class.id, student_id=student.id, started_on=effective_date))
+        return "added"
+
+    @app.post("/classes/<int:class_id>/students/upload")
+    @login_required
+    def upload_class_students(class_id):
+        user = current_user()
+        school_class = db.session.get(SchoolClass, class_id) or abort(404)
+        if not can_manage_school_class(user, school_class):
+            flash("Bạn chỉ được quản lý danh sách sinh viên của lớp mình chủ nhiệm.", "warning")
+            return redirect(url_for("classes_page"))
+        upload = request.files.get("student_file")
+        effective_text = (request.form.get("effective_date") or "").strip()
+        if not upload or not upload.filename:
+            flash("Vui lòng chọn tệp Excel danh sách sinh viên.", "warning")
+            return redirect(url_for("classes_page"))
+        try:
+            effective_date = date.fromisoformat(effective_text) if effective_text else utcnow().date()
+            rows = read_students_from_excel(upload)
+            added = already = conflict = 0
+            conflicts = []
+            for code, name in rows:
+                result = add_student_to_school_class(school_class, code, name, effective_date)
+                if result == "added": added += 1
+                elif result == "already": already += 1
+                else:
+                    conflict += 1
+                    conflicts.append(f"{code} đang thuộc {result.split(':',1)[1]}")
+            db.session.commit()
+            msg = f"Đã bổ sung {added} sinh viên vào lớp; {already} sinh viên đã có trong lớp"
+            if conflict:
+                msg += f"; {conflict} sinh viên chưa thêm do đang thuộc lớp khác"
+            flash(msg + ".", "success" if added or already else "warning")
+            if conflicts:
+                flash("Cần kiểm tra: " + "; ".join(conflicts[:8]), "warning")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không đọc được danh sách sinh viên: {exc}", "danger")
+        return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+
+    @app.post("/classes/<int:class_id>/students/add")
+    @login_required
+    def add_class_student(class_id):
+        user = current_user()
+        school_class = db.session.get(SchoolClass, class_id) or abort(404)
+        if not can_manage_school_class(user, school_class):
+            flash("Bạn chỉ được quản lý danh sách sinh viên của lớp mình chủ nhiệm.", "warning")
+            return redirect(url_for("classes_page"))
+        code = normalize_student_code(request.form.get("student_code", ""))
+        name = (request.form.get("full_name") or "").strip()
+        effective_text = (request.form.get("effective_date") or "").strip()
+        if not code or not name:
+            flash("Vui lòng nhập mã sinh viên và họ tên.", "warning")
+            return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+        try:
+            effective_date = date.fromisoformat(effective_text) if effective_text else utcnow().date()
+            result = add_student_to_school_class(school_class, code, name, effective_date)
+            if result.startswith("other:"):
+                raise ValueError(f"Sinh viên đang thuộc lớp {result.split(':',1)[1]} tại ngày hiệu lực. Hãy cập nhật trạng thái ở lớp cũ trước.")
+            db.session.commit()
+            flash("Đã bổ sung sinh viên vào lớp." if result == "added" else "Sinh viên đã có trong lớp ở thời điểm này.", "success" if result == "added" else "info")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thêm được sinh viên: {exc}", "danger")
+        return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+
+    @app.post("/classes/<int:class_id>/students/<int:student_id>/status")
+    @login_required
+    def change_student_status(class_id, student_id):
+        user = current_user()
+        school_class = db.session.get(SchoolClass, class_id) or abort(404)
+        student = db.session.get(Student, student_id) or abort(404)
+        if not can_manage_school_class(user, school_class):
+            flash("Bạn chỉ được cập nhật sinh viên của lớp mình chủ nhiệm.", "warning")
+            return redirect(url_for("classes_page"))
+        status = (request.form.get("status") or "").strip()
+        effective_text = (request.form.get("effective_date") or "").strip()
+        note = (request.form.get("note") or "").strip()
+        if status not in STUDENT_STATUS_LABELS:
+            flash("Vui lòng chọn trạng thái hợp lệ.", "warning")
+            return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+        try:
+            effective_date = date.fromisoformat(effective_text) if effective_text else utcnow().date()
+            active_here = next((e for e in student.enrollments if e.school_class_id == school_class.id and enrollment_active_on(e, effective_date)), None)
+            if status == "dang_hoc":
+                if active_here:
+                    flash("Sinh viên đang ở trạng thái Đang học trong lớp tại ngày này.", "info")
+                    return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+                for e in active_enrollments_for_student(student, effective_date):
+                    if e.school_class_id != school_class.id:
+                        raise ValueError(f"Sinh viên đang thuộc lớp {e.school_class.name} tại ngày hiệu lực.")
+                db.session.add(ClassEnrollment(school_class_id=school_class.id, student_id=student.id, started_on=effective_date, note=note or None))
+            else:
+                if not active_here:
+                    raise ValueError("Không tìm thấy khoảng thời gian sinh viên đang học tại lớp ở ngày hiệu lực đã chọn.")
+                if effective_date < active_here.started_on:
+                    raise ValueError("Ngày thay đổi không được trước ngày sinh viên bắt đầu vào lớp.")
+                active_here.ended_on = effective_date
+                active_here.end_status = status
+                if note:
+                    active_here.note = note
+            db.session.commit()
+            flash(f"Đã cập nhật trạng thái sinh viên thành “{STUDENT_STATUS_LABELS[status]}” từ ngày {effective_date.strftime('%d/%m/%Y')}.", "success")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không cập nhật được trạng thái: {exc}", "danger")
+        return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+
     @app.route("/research", methods=["GET", "POST"])
     @login_required
     def research_page():
         user = current_user()
         if user.role != "admin":
-            abort(403)
+            flash("Bạn không có quyền truy cập chức năng này. Chức năng chỉ dành cho Quản trị viên.", "warning")
+            return redirect(url_for("index"))
 
         if request.method == "POST":
             form_type = request.form.get("form_type")
@@ -2101,7 +2513,7 @@ def register_routes(app):
 
 
 
-BACKUP_VERSION = "2.1"
+BACKUP_VERSION = "3.0"
 
 def backup_table_specs():
     return [
@@ -2113,6 +2525,10 @@ def backup_table_specs():
         ("playlist_videos", PlaylistVideo),
         ("courses", Course),
         ("class_groups", ClassGroup),
+        ("school_classes", SchoolClass),
+        ("students", Student),
+        ("class_enrollments", ClassEnrollment),
+        ("course_classes", CourseClass),
         ("participants", Participant),
         ("qr_codes", QrCode),
         ("course_videos", CourseVideo),
@@ -2155,14 +2571,14 @@ def restore_from_zip(fileobj):
         if "manifest.json" not in names:
             raise ValueError("Không có manifest.json; đây không phải backup hợp lệ.")
         manifest = json.loads(zf.read("manifest.json"))
-        if manifest.get("backup_version") not in {"2.0", BACKUP_VERSION}:
+        if manifest.get("backup_version") not in {"2.0", "2.1", BACKUP_VERSION}:
             raise ValueError("Phiên bản backup không tương thích.")
         payload = {}
         for name, model in backup_table_specs():
             fn = f"{name}.json"
             if fn not in names:
                 # Các bảng bổ sung ở phiên bản sau là tùy chọn để backup cũ vẫn khôi phục được.
-                if name in {"research_settings", "course_playlists"}:
+                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes"}:
                     payload[name] = []
                     continue
                 raise ValueError(f"Thiếu {fn} trong backup.")
@@ -2175,9 +2591,11 @@ def restore_from_zip(fileobj):
                     col = columns.get(k)
                     if not col:
                         continue
-                    if v is not None and isinstance(col.type, DateTime) and isinstance(v, str):
-                        from datetime import datetime
-                        v = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                    if v is not None and isinstance(v, str):
+                        if isinstance(col.type, DateTime):
+                            v = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                        elif col.type.__class__.__name__ == "Date":
+                            v = date.fromisoformat(v[:10])
                     item[k] = v
                 cleaned.append(item)
             payload[name] = cleaned
@@ -2191,6 +2609,7 @@ def restore_from_zip(fileobj):
         if rows:
             db.session.execute(model.__table__.insert(), rows)
     db.session.commit()
+    migrate_legacy_classes()
 
     # Đồng bộ lại sequence PostgreSQL sau khi khôi phục ID tường minh.
     if db.engine.dialect.name == "postgresql":

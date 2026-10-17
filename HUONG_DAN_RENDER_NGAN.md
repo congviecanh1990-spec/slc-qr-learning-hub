@@ -1,17 +1,19 @@
-# Cập nhật Web App v3.6 trên Render
+# Cập nhật Web App v3.7 trên Render
 
-1. Giải nén bộ mã nguồn v3.6.
-2. Upload toàn bộ file/thư mục bên trong vào repository GitHub hiện tại `slc-qr-learning-hub` và Commit.
-3. Render đang bật Auto-Deploy sẽ tự build/deploy. Chờ `Live` / `Deploy succeeded`.
-4. Mở Web App và nhấn `Ctrl + F5`.
-5. Kiểm tra **Kho video học liệu**: tên playlist không còn hiển thị mã kỹ thuật `PL...`.
-6. Kiểm tra **Mã QR động**: phần mô tả học phần hiển thị số video/QR và số playlist/tên playlist/QR.
-7. Với tài khoản quản trị, vào **Đánh giá nghiệm thu** → **Mã định danh giảng viên** → cấp mã GV cho từng giảng viên.
-8. Đăng nhập bằng tài khoản giảng viên để kiểm tra Mã GV đã hiển thị trên giao diện.
-9. Tại **Mã QR động**, bấm **Mở thử**: phải vào thẳng trang học liệu, có thông báo chế độ xem thử và không hiện form Mã GV/SV.
-10. Dùng trình duyệt chưa đăng nhập Web App hoặc điện thoại của sinh viên quét QR: trang công khai phải hiện **Mã sinh viên + Lớp**, không yêu cầu đăng nhập.
+Bản v3.7 kế thừa trực tiếp v3.6 và **không cần tạo lại PostgreSQL**.
 
-## Dữ liệu
-- Không cần xóa PostgreSQL hiện tại.
-- v3.6 tự bổ sung cột `users.lecturer_code` để lưu Mã GV do quản trị viên cấp.
-- Dữ liệu video, playlist, học phần, lớp, QR và lịch sử quét/xem hiện có được giữ nguyên.
+1. Giải nén gói v3.7.
+2. Mở repository GitHub đang dùng cho Web App.
+3. Tải toàn bộ tệp/thư mục ở thư mục gốc của v3.7 lên nhánh `main`, ghi đè các tệp cùng tên.
+4. Commit thay đổi và chờ Render tự triển khai đến trạng thái `Live`.
+5. Mở lại Web App và nhấn `Ctrl + F5`.
+
+Sau khi cập nhật, kiểm tra lần lượt:
+- Đăng nhập bằng tài khoản giảng viên; thông báo vai trò phải hiển thị bằng tiếng Việt.
+- Quản trị viên thấy menu **Lớp & sinh viên**; có thể tạo lớp và giao GVCN.
+- GVCN thấy menu **Lớp chủ nhiệm**; có thể tải Excel, thêm một SV và thay đổi trạng thái kèm ngày hiệu lực.
+- Học phần chỉ hiển thị các số liệu tóm tắt và vùng chọn **Lớp áp dụng**.
+- Trang **Mã QR động** ưu tiên tạo QR theo học phần; hai chức năng tạo QR đơn lẻ nằm ở khu vực **Tạo QR riêng lẻ**.
+- Sinh viên quét QR chỉ nhập **Mã sinh viên do Nhà trường cấp**, không phải chọn lớp.
+
+Bản v3.7 bổ sung các bảng dùng chung cho lớp/sinh viên và tự giữ nguyên dữ liệu cũ. Tệp Excel mẫu có thể tải ngay trong giao diện Lớp & sinh viên/Lớp chủ nhiệm.
