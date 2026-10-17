@@ -1,4 +1,4 @@
-# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.4
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v3.5.1
 
 Ứng dụng web phục vụ đề tài tại **Trường Cao đẳng Sơn La**.
 
@@ -26,6 +26,22 @@ Nguyễn Thị Thúy Tươi (Chủ nhiệm đề tài); Hoàng Thị Nhất; Ngu
 5. Vào **Học phần** hoặc **Mã QR động** → tạo QR cho video/playlist chưa có mã.
 6. Tải PNG/ZIP. QR đã tạo là QR động nên có thể cập nhật đích mà không phải phát hành lại mã.
 
+
+
+
+## Điểm mới v3.5.1
+- Hiệu chỉnh nội dung **Hướng dẫn gán học liệu vào học phần** trong Kho video học liệu theo nội dung đã chốt:
+  - Nếu kênh YouTube đã tổ chức video theo playlist, ưu tiên gán playlist cho học phần; các video trong playlist tự động được gán vào học phần tương ứng.
+  - Nếu không muốn gán toàn bộ video trong playlist cho học phần, chọn từng video cần sử dụng và gán video đó vào học phần tương ứng.
+- Không thay đổi logic, cơ sở dữ liệu hoặc schema PostgreSQL của v3.5.
+
+## Điểm mới v3.5
+- Trong **Kho video học liệu**, phần **Danh sách playlist** được đưa lên trước **Danh sách video** để giảng viên ưu tiên phân loại học liệu theo playlist.
+- Bổ sung khung hướng dẫn ngắn: nếu kênh YouTube đã tổ chức video theo playlist thì gán playlist cho học phần; nếu không muốn dùng cả playlist hoặc video chưa thuộc playlist phù hợp thì chọn video riêng và gán cho học phần.
+- Cột **Học phần áp dụng** của từng playlist chuyển từ danh sách checkbox hiển thị thường trực sang **danh sách thả xuống chọn nhiều học phần**. Giao diện không còn kéo dài khi có nhiều học phần.
+- Bộ chọn hiển thị số học phần đã chọn; giảng viên có thể mở lại danh sách, bỏ học phần cũ, chọn học phần mới và bấm **Lưu** để hiệu chỉnh.
+- Không thay đổi cơ chế dữ liệu v3.4: video trong playlist tự kế thừa các học phần của playlist; video gán riêng vẫn được giữ theo quy tắc an toàn.
+- Không thay đổi schema PostgreSQL.
 
 ## Điểm mới v3.4
 - **Học phần** được đưa lên vị trí thứ 2 trên menu, ngay sau **Kênh YouTube**.
