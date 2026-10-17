@@ -4,22 +4,44 @@
   <h2 class="mb-1">Tổng quan hệ thống</h2>
   <div class="text-muted">{{ app_tagline }}</div>
 </div>
+
 {% if me and me.role == 'lecturer' %}
-<div class="alert {{ 'alert-info' if me.lecturer_code else 'alert-warning' }} border mb-4">
-  <strong>Mã GV thực nghiệm:</strong> {{ me.lecturer_code or 'Chưa được quản trị viên cấp' }}.
-  {% if me.lecturer_code %}Mã này được hệ thống dùng để nhận diện giảng viên khi giảng viên thực sự quét mã QR; không cần nhập lại khi đã đăng nhập.{% else %}Vui lòng liên hệ quản trị viên để được cấp mã trước khi tham gia các lượt quét phục vụ thực nghiệm.{% endif %}
+<div class="card shadow-sm mb-4">
+  <div class="card-header fw-bold">Thông tin giảng viên</div>
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-lg-6">
+        <form method="post" action="{{ url_for('update_display_name') }}" class="row g-2 align-items-end">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-md-8">
+            <label class="form-label fw-bold">Họ và tên hiển thị</label>
+            <input class="form-control" name="display_name" value="{{ me.name }}" required maxlength="255">
+            <div class="form-text">Bạn có thể sửa lại họ tên cho đúng với thông tin giảng viên. Tên này không bị thay lại theo tên Gmail ở lần đăng nhập sau.</div>
+          </div>
+          <div class="col-md-4"><button class="btn btn-outline-primary w-100">Lưu họ tên</button></div>
+        </form>
+      </div>
+      <div class="col-lg-6">
+        <div><strong>Email:</strong> {{ me.email }}</div>
+        <div class="mt-2"><strong>Mã GV thực nghiệm:</strong> {{ me.lecturer_code or 'Chưa được quản trị viên cấp' }}</div>
+      </div>
+    </div>
+  </div>
 </div>
 {% endif %}
+
 <div class="row g-3 mb-4">
   {% for label, value in [
+    ('Giảng viên', lecturer_count),
+    ('Lớp', class_count),
     ('Video học liệu', videos),
     ('Học phần', courses),
     ('Mã QR đã tạo', qrs),
-    ('Lượt quét mã QR', scans),
-    ('Phiên xem video', watch),
+    ('Lượt quét của SV', scans),
+    ('Phiên xem của SV', watch),
     ('Tỷ lệ phiên xem hoàn thành', completion_rate ~ '%')
   ] %}
-  <div class="col-6 col-md-4 col-xl-2">
+  <div class="col-6 col-md-4 col-xl-3">
     <div class="card shadow-sm h-100 metric-card">
       <div class="card-body">
         <div class="text-muted small">{{ label }}</div>
@@ -31,25 +53,22 @@
 </div>
 
 <div class="card shadow-sm mb-4">
-  <div class="card-header fw-semibold">Lượt quét gần đây</div>
+  <div class="card-header fw-semibold">Lượt quét của sinh viên gần đây</div>
   <div class="table-responsive">
     <table class="table table-sm mb-0">
-      <thead>
-        <tr><th>Thời gian</th><th>Mã GV/SV</th><th>Vai trò</th><th>Học phần</th><th>Mã QR</th><th>Video</th><th>Kết quả</th></tr>
-      </thead>
+      <thead><tr><th>Thời gian</th><th>Mã SV</th><th>Học phần</th><th>Mã QR</th><th>Video</th><th>Kết quả</th></tr></thead>
       <tbody>
         {% for s in recent_scans %}
         <tr>
           <td>{{ s.scanned_at }}</td>
           <td>{{ s.participant_code }}</td>
-          <td>{{ 'Giảng viên' if s.role == 'GV' else 'Sinh viên' }}</td>
           <td>{{ s.course.name if s.course else '—' }}</td>
           <td>{{ s.qr.slug if s.qr else '' }}</td>
           <td>{{ s.video.title[:45] if s.video else ((s.qr.title[:45] ~ ' (playlist)') if s.qr and s.qr.is_playlist else '') }}</td>
-          <td>{{ '✓' if s.success else '✕' }}</td>
+          <td>{{ 'Thành công' if s.success else 'Không thành công' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -57,16 +76,44 @@
 </div>
 
 {% if me and me.role == 'admin' %}
-<div class="card border-danger shadow-sm mt-4">
-  <div class="card-header fw-bold text-danger">Xóa dữ liệu thử nghiệm</div>
+<div class="card border-warning shadow-sm mb-4">
+  <div class="card-header fw-bold">Xóa dữ liệu của một giảng viên</div>
   <div class="card-body">
-    <p class="mb-2">Nút dưới đây xóa toàn bộ dữ liệu đang lưu trong cơ sở dữ liệu của ứng dụng, bao gồm tài khoản đăng nhập, kết nối YouTube, video đã đồng bộ, học phần, lớp, mã QR, lịch sử quét/xem, dữ liệu kiểm thử và khảo sát. Cấu hình Render/Google OAuth không bị xóa.</p>
-    <p class="small text-danger fw-bold mb-3">Chỉ sử dụng khi cần làm sạch hoàn toàn dữ liệu thử nghiệm. Sau khi xóa, bạn sẽ phải đăng nhập lại và đồng bộ lại kênh YouTube.</p>
-    <form method="post" action="{{ url_for('reset_all_data') }}" onsubmit="return confirm('CẢNH BÁO: Thao tác này sẽ xóa TOÀN BỘ dữ liệu ứng dụng và không thể hoàn tác. Bạn có chắc chắn?') && confirm('Xác nhận lần cuối: xóa toàn bộ dữ liệu đã lưu?');">
+    <p class="mb-3">Dùng khi cần làm sạch dữ liệu thử nghiệm của một giảng viên. Hệ thống xóa kênh/video đã đồng bộ, học phần, QR, lượt quét/xem và dữ liệu thực nghiệm do giảng viên đó tạo; vẫn giữ tài khoản, họ tên, email, mã GV và quyền GVCN.</p>
+    <form id="resetLecturerForm" method="post" class="row g-2 align-items-end" onsubmit="return prepareLecturerReset(this);">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-md-9">
+        <label class="form-label fw-bold">Giảng viên cần xóa dữ liệu</label>
+        <select class="form-select" id="resetLecturerSelect" required>
+          <option value="">— Chọn giảng viên —</option>
+          {% for u in lecturers_for_reset %}<option value="{{ u.id }}">{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3"><button class="btn btn-outline-danger w-100">Xóa dữ liệu của GV</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="card border-danger shadow-sm mt-4">
+  <div class="card-header fw-bold text-danger">Xóa toàn bộ dữ liệu đã lưu</div>
+  <div class="card-body">
+    <p class="mb-2">Thao tác này xóa toàn bộ dữ liệu nghiệp vụ và thử nghiệm của hệ thống, gồm giảng viên, mã GV đã cấp, kết nối YouTube, video, học phần, lớp, sinh viên, QR, lịch sử quét/xem, dữ liệu kiểm thử và khảo sát.</p>
+    <p class="small text-danger fw-bold mb-3">Tài khoản và phiên đăng nhập của quản trị viên đang thực hiện được giữ lại để có thể thiết lập lại hệ thống ngay, không cần đăng nhập Google lại.</p>
+    <form method="post" action="{{ url_for('reset_all_data') }}" onsubmit="return confirm('CẢNH BÁO: Thao tác này sẽ xóa TOÀN BỘ dữ liệu đã lưu và toàn bộ mã GV đã cấp. Bạn có chắc chắn?') && confirm('Xác nhận lần cuối: xóa toàn bộ dữ liệu và làm lại từ đầu?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-danger">Xóa toàn bộ dữ liệu đã lưu</button>
     </form>
   </div>
 </div>
+<script>
+function prepareLecturerReset(form){
+  const select=document.getElementById('resetLecturerSelect');
+  if(!select.value){return false;}
+  const label=select.options[select.selectedIndex].text;
+  if(!confirm('Xóa toàn bộ dữ liệu nghiệp vụ và thử nghiệm của ' + label + '?')){return false;}
+  form.action='{{ url_for("reset_lecturer_data", lecturer_id=0) }}'.replace('/0/', '/' + select.value + '/');
+  return true;
+}
+</script>
 {% endif %}
 {% endblock %}

@@ -14,10 +14,9 @@
   <div class="card-body">
     <form method="post" action="{{ url_for('create_school_class') }}" class="row g-3">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-md-3"><label class="form-label fw-bold">Mã lớp</label><input class="form-control" name="class_code" required placeholder="Ví dụ: K66CNTT1"></div>
-      <div class="col-md-4"><label class="form-label fw-bold">Tên lớp</label><input class="form-control" name="class_name" required placeholder="Ví dụ: Cao đẳng CNTT K66"></div>
-      <div class="col-md-4"><label class="form-label fw-bold">Giảng viên chủ nhiệm</label><select class="form-select" name="homeroom_teacher_id"><option value="">— Chưa giao —</option>{% for u in lecturers %}<option value="{{ u.id }}">{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}</select></div>
-      <div class="col-md-1 d-flex align-items-end"><button class="btn btn-primary w-100">Tạo</button></div>
+      <div class="col-md-5"><label class="form-label fw-bold">Tên lớp</label><input class="form-control" name="class_name" required placeholder="Ví dụ: Cao đẳng CNTT K66"></div>
+      <div class="col-md-5"><label class="form-label fw-bold">Giảng viên chủ nhiệm</label><select class="form-select" name="homeroom_teacher_id"><option value="">— Chưa giao —</option>{% for u in lecturers %}<option value="{{ u.id }}">{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}</select><div class="form-text">Mã lớp được hệ thống tự động tạo.</div></div>
+      <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100">Tạo lớp</button></div>
     </form>
   </div>
 </div>
@@ -30,7 +29,7 @@
     <div><strong>{{ cls.name }}</strong> <span class="text-muted">({{ cls.code }})</span></div>
     <div class="d-flex flex-wrap gap-2 align-items-center small">
       <span class="badge text-bg-primary">Sĩ số hiện tại: {{ item.current_size }}</span>
-      <span>GVCN: <strong>{{ cls.homeroom_teacher.name if cls.homeroom_teacher else 'Chưa giao' }}</strong></span>
+      <span>GVCN: <strong>{% if cls.homeroom_teacher %}{{ cls.homeroom_teacher.name or cls.homeroom_teacher.email }} — {{ cls.homeroom_teacher.email }}{% else %}Chưa giao{% endif %}</strong></span>
     </div>
   </div>
   <div class="card-body">

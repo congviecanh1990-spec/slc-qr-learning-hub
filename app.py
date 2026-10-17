@@ -385,6 +385,14 @@ def assign_auto_class_code(class_group: ClassGroup) -> str:
     return class_group.code
 
 
+def assign_auto_school_class_code(school_class: SchoolClass) -> str:
+    """Sinh mã lớp dùng chung tự động; quản trị viên chỉ nhập tên lớp và giao GVCN."""
+    if not school_class.id:
+        db.session.flush()
+    school_class.code = f"L{school_class.id:06d}"
+    return school_class.code
+
+
 def video_is_usable(video: Video | None) -> bool:
     return bool(video and video.is_available and video.embeddable is not False and video.privacy_status != "private")
 
@@ -695,6 +703,7 @@ def register_routes(app):
             "research_page": "research",
             "error_logs_page": "errors",
             "data_management": "data_admin",
+            "update_display_name": "", "reset_lecturer_data": "",
             "backup_zip": "data_admin",
             "restore_backup": "data_admin",
         }
@@ -732,8 +741,10 @@ def register_routes(app):
         videos = visible_video_query(user).count()
         qrs = QrCode.query.filter_by(owner_id=user.id, active=True).count() if user.role != "admin" else QrCode.query.filter_by(active=True).count()
         courses = Course.query.filter_by(owner_id=user.id, active=True).count() if user.role != "admin" else Course.query.filter_by(active=True).count()
-        scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
-        watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id)
+
+        # Giao diện thống kê chỉ đánh giá hoạt động quét/xem của sinh viên.
+        scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
+        watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
         if user.role != "admin":
             scan_q = scan_q.filter(QrCode.owner_id == user.id)
             watch_q = watch_q.filter(QrCode.owner_id == user.id)
@@ -742,8 +753,14 @@ def register_routes(app):
         completed = watch_q.filter(WatchSession.completed.is_(True)).count()
         completion_rate = round(100 * completed / watch, 1) if watch else 0
         recent_scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(10).all()
-        return render_template("dashboard.html", videos=videos, courses=courses, qrs=qrs, scans=scans, watch=watch,
-                               completion_rate=completion_rate, recent_scans=recent_scans)
+        lecturer_count = User.query.filter_by(role="lecturer").count()
+        class_count = SchoolClass.query.filter_by(active=True).count()
+        lecturers_for_reset = User.query.filter_by(role="lecturer").order_by(User.name, User.email).all() if user.role == "admin" else []
+        return render_template(
+            "dashboard.html", videos=videos, courses=courses, qrs=qrs, scans=scans, watch=watch,
+            completion_rate=completion_rate, recent_scans=recent_scans, lecturer_count=lecturer_count,
+            class_count=class_count, lecturers_for_reset=lecturers_for_reset,
+        )
 
     @app.get("/auth/login")
     def login():
@@ -783,7 +800,10 @@ def register_routes(app):
                 db.session.add(user)
                 db.session.flush()
             else:
-                user.name = info.get("name") or user.name
+                # Họ tên hiển thị có thể được người dùng hiệu chỉnh trong Web App;
+                # không ghi đè lại bằng tên hồ sơ Google ở những lần đăng nhập sau.
+                if not (user.name or "").strip():
+                    user.name = info.get("name") or email
                 user.google_sub = info.get("sub") or user.google_sub
                 # Quyền quản trị chỉ dựa trên ADMIN_EMAILS hiện hành. Mọi tài khoản
                 # Google khác luôn là giảng viên, kể cả trước đây từng được cấu hình admin.
@@ -828,6 +848,19 @@ def register_routes(app):
             db.session.commit()
             flash(f"Đăng nhập thất bại: {exc}", "danger")
             return redirect(url_for("index"))
+
+    @app.post("/profile/display-name")
+    @login_required
+    def update_display_name():
+        user = current_user()
+        display_name = re.sub(r"\s+", " ", (request.form.get("display_name") or "").strip())
+        if len(display_name) < 2:
+            flash("Vui lòng nhập họ và tên đầy đủ để hiển thị trên hệ thống.", "warning")
+            return redirect(url_for("index"))
+        user.name = display_name[:255]
+        db.session.commit()
+        flash("Đã cập nhật họ tên hiển thị.", "success")
+        return redirect(url_for("index"))
 
     @app.get("/auth/logout")
     def logout():
@@ -1934,22 +1967,18 @@ def register_routes(app):
     @login_required
     def analytics():
         user = current_user()
-        scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
-        watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id)
+        scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
+        watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
         if user.role != "admin":
             scan_q = scan_q.filter(QrCode.owner_id == user.id)
             watch_q = watch_q.filter(QrCode.owner_id == user.id)
 
         participant = request.args.get("participant", "").strip()
-        role = request.args.get("role", "").strip()
         class_code = request.args.get("class_code", "").strip()
         qr_slug = request.args.get("qr", "").strip()
         if participant:
             scan_q = scan_q.filter(ScanLog.participant_code.ilike(f"%{participant}%"))
             watch_q = watch_q.filter(WatchSession.participant_code.ilike(f"%{participant}%"))
-        if role in {"GV", "SV"}:
-            scan_q = scan_q.filter(ScanLog.role == role)
-            watch_q = watch_q.filter(WatchSession.role == role)
         if class_code:
             scan_q = scan_q.filter(ScanLog.class_code == class_code)
             watch_q = watch_q.filter(WatchSession.class_code == class_code)
@@ -1974,7 +2003,7 @@ def register_routes(app):
         for legacy in ClassGroup.query.all():
             class_name_map.setdefault(legacy.code, legacy.name)
 
-        day_q = db.session.query(func.date(ScanLog.scanned_at), func.count(ScanLog.id)).join(QrCode, ScanLog.qr_id == QrCode.id)
+        day_q = db.session.query(func.date(ScanLog.scanned_at), func.count(ScanLog.id)).join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
         if user.role != "admin":
             day_q = day_q.filter(QrCode.owner_id == user.id)
         by_day = day_q.group_by(func.date(ScanLog.scanned_at)).order_by(func.date(ScanLog.scanned_at)).limit(30).all()
@@ -1989,13 +2018,13 @@ def register_routes(app):
     def export_scans():
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["scan_id", "participant_code", "role", "class_code", "course", "qr_slug", "video_id", "scanned_at", "success"])
+        w.writerow(["Mã lượt quét", "Mã sinh viên", "Mã lớp", "Học phần", "Mã QR", "Mã video YouTube", "Thời gian quét", "Thành công"])
         user = current_user()
-        q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
+        q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
         if user.role != "admin":
             q = q.filter(QrCode.owner_id == user.id)
         for s in q.order_by(ScanLog.scanned_at).all():
-            w.writerow([s.id, s.participant_code, s.role, s.class_code, s.course.code if s.course else "", s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.scanned_at.isoformat(), int(s.success)])
+            w.writerow([s.id, s.participant_code, s.class_code, s.course.code if s.course else "", s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.scanned_at.isoformat(), int(s.success)])
         return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=scan_logs.csv"})
 
     @app.get("/exports/watch.csv")
@@ -2003,13 +2032,13 @@ def register_routes(app):
     def export_watch():
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["session_key", "participant_code", "role", "class_code", "qr_slug", "video_id", "started_at", "estimated_watch_seconds", "max_position", "duration_seconds", "completion_percent", "completed"])
+        w.writerow(["Mã phiên xem", "Mã sinh viên", "Mã lớp", "Mã QR", "Mã video YouTube", "Thời gian bắt đầu", "Thời lượng xem ước tính", "Vị trí xa nhất", "Thời lượng video", "Tỷ lệ hoàn thành", "Đã hoàn thành"])
         user = current_user()
-        q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id)
+        q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
         if user.role != "admin":
             q = q.filter(QrCode.owner_id == user.id)
         for s in q.order_by(WatchSession.started_at).all():
-            w.writerow([s.session_key, s.participant_code, s.role, s.class_code, s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.started_at.isoformat(), round(s.estimated_watch_seconds, 2), round(s.max_position, 2), round(s.duration_seconds, 2), round(s.completion_percent, 2), int(s.completed)])
+            w.writerow([s.session_key, s.participant_code, s.class_code, s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.started_at.isoformat(), round(s.estimated_watch_seconds, 2), round(s.max_position, 2), round(s.duration_seconds, 2), round(s.completion_percent, 2), int(s.completed)])
         return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=watch_sessions.csv"})
 
 
@@ -2059,21 +2088,20 @@ def register_routes(app):
         if user.role != "admin":
             flash("Bạn không có quyền thực hiện thao tác này.", "warning")
             return redirect(url_for("index"))
-        code = (request.form.get("class_code") or "").strip().upper()
         name = (request.form.get("class_name") or "").strip()
         homeroom_id = request.form.get("homeroom_teacher_id", type=int)
-        if not code or not name:
-            flash("Vui lòng nhập mã lớp và tên lớp.", "warning")
-            return redirect(url_for("classes_page"))
-        if SchoolClass.query.filter_by(code=code).first():
-            flash("Mã lớp đã tồn tại trong hệ thống.", "warning")
+        if not name:
+            flash("Vui lòng nhập tên lớp.", "warning")
             return redirect(url_for("classes_page"))
         teacher = db.session.get(User, homeroom_id) if homeroom_id else None
         if teacher and teacher.role != "lecturer":
             teacher = None
-        db.session.add(SchoolClass(code=code[:64], name=name[:255], homeroom_teacher_id=teacher.id if teacher else None))
+        school_class = SchoolClass(code=f"TMP-{secrets.token_hex(8)}", name=name[:255], homeroom_teacher_id=teacher.id if teacher else None)
+        db.session.add(school_class)
+        db.session.flush()
+        assign_auto_school_class_code(school_class)
         db.session.commit()
-        flash(f"Đã tạo lớp “{name}” và lưu vào danh mục lớp dùng chung.", "success")
+        flash(f"Đã tạo lớp “{name}”. Mã lớp {school_class.code} được hệ thống tự động tạo.", "success")
         return redirect(url_for("classes_page"))
 
     @app.post("/admin/classes/<int:class_id>/homeroom")
@@ -2390,6 +2418,59 @@ def register_routes(app):
             lecturers=lecturers,
         )
 
+    def delete_lecturer_business_data(lecturer: User):
+        """Xóa dữ liệu nghiệp vụ/thử nghiệm của một GV nhưng giữ tài khoản, họ tên, email, mã GV và quyền GVCN."""
+        qr_ids = [x[0] for x in db.session.query(QrCode.id).filter(QrCode.owner_id == lecturer.id).all()]
+        course_ids = [x[0] for x in db.session.query(Course.id).filter(Course.owner_id == lecturer.id).all()]
+        channel_ids = [x[0] for x in db.session.query(YouTubeChannel.id).filter(YouTubeChannel.user_id == lecturer.id).all()]
+
+        if qr_ids:
+            watch_ids = [x[0] for x in db.session.query(WatchSession.id).filter(WatchSession.qr_id.in_(qr_ids)).all()]
+            if watch_ids:
+                WatchEvent.query.filter(WatchEvent.watch_session_id.in_(watch_ids)).delete(synchronize_session=False)
+            WatchSession.query.filter(WatchSession.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            ScanLog.query.filter(ScanLog.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            QrTargetHistory.query.filter(QrTargetHistory.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+
+        if course_ids:
+            Participant.query.filter(Participant.course_id.in_(course_ids)).delete(synchronize_session=False)
+            CourseVideo.query.filter(CourseVideo.course_id.in_(course_ids)).delete(synchronize_session=False)
+            CoursePlaylist.query.filter(CoursePlaylist.course_id.in_(course_ids)).delete(synchronize_session=False)
+            CourseClass.query.filter(CourseClass.course_id.in_(course_ids)).delete(synchronize_session=False)
+            ClassGroup.query.filter(ClassGroup.course_id.in_(course_ids)).delete(synchronize_session=False)
+
+        QrCode.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+        Course.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+
+        if channel_ids:
+            HubEvent.query.filter(HubEvent.channel_id.in_(channel_ids)).delete(synchronize_session=False)
+            # HubSubscription/Playlist/Video/PlaylistVideo được xóa theo cascade khi xóa kênh.
+        YouTubeChannel.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
+
+        ExperimentRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+        FunctionalTestRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+        SurveyResult.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+
+    @app.post("/admin/lecturers/<int:lecturer_id>/reset-data")
+    @login_required
+    def reset_lecturer_data(lecturer_id):
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        lecturer = db.session.get(User, lecturer_id) or abort(404)
+        if lecturer.role != "lecturer":
+            flash("Chỉ có thể xóa dữ liệu của tài khoản giảng viên.", "warning")
+            return redirect(url_for("index"))
+        try:
+            display = lecturer.name or lecturer.email
+            delete_lecturer_business_data(lecturer)
+            db.session.commit()
+            flash(f"Đã xóa dữ liệu nghiệp vụ và thử nghiệm của giảng viên {display}. Tài khoản, mã GV và quyền GVCN được giữ lại.", "success")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thể xóa dữ liệu của giảng viên: {exc}", "danger")
+        return redirect(url_for("index"))
+
     @app.post("/admin/reset-all-data")
     @login_required
     def reset_all_data():
@@ -2397,13 +2478,22 @@ def register_routes(app):
         if user.role != "admin":
             abort(403)
         try:
-            # Xóa toàn bộ dữ liệu theo thứ tự ngược để tôn trọng khóa ngoại.
-            # Giữ nguyên cấu trúc DB và cấu hình Render/Google OAuth bên ngoài DB.
+            admin_id = user.id
+            # Xóa toàn bộ dữ liệu nghiệp vụ/thử nghiệm nhưng giữ tài khoản + phiên OAuth
+            # của chính quản trị viên đang thao tác để không phải đăng nhập lại.
+            # Tất cả tài khoản GV bị xóa nên toàn bộ mã GV đã cấp cũng được làm mới từ đầu.
+            keep_models = {User, OAuthAccount}
             for _, model in reversed(backup_table_specs()):
+                if model in keep_models:
+                    continue
                 db.session.execute(model.__table__.delete())
+            OAuthAccount.query.filter(OAuthAccount.user_id != admin_id).delete(synchronize_session=False)
+            User.query.filter(User.id != admin_id).delete(synchronize_session=False)
+            user.lecturer_code = None
             db.session.commit()
-            session.clear()
-            flash("Đã xóa toàn bộ dữ liệu đã lưu. Vui lòng đăng nhập lại để bắt đầu phiên thử nghiệm mới.", "success")
+            session["user_id"] = admin_id
+            session.permanent = True
+            flash("Đã xóa toàn bộ dữ liệu đã lưu và toàn bộ mã GV đã cấp. Phiên quản trị hiện tại được giữ để bạn tiếp tục thiết lập hệ thống từ đầu.", "success")
             return redirect(url_for("index"))
         except Exception as exc:
             db.session.rollback()

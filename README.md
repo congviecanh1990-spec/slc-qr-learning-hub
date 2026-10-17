@@ -240,3 +240,12 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Khi đồng bộ YouTube, video mới thêm vào playlist tự động được bổ sung vào các học phần đang dùng playlist.
 - Khi bỏ một học phần khỏi playlist, các video chỉ được kế thừa từ playlist đó tự động được bỏ khỏi học phần; video đã gán riêng hoặc còn thuộc playlist khác vẫn được giữ.
 - Vùng gán video riêng trong Kho video chỉ dùng cho video lẻ hoặc trường hợp đặc biệt.
+
+
+## Cập nhật v3.8
+- Giảng viên tự hiệu chỉnh họ tên hiển thị; tên đã sửa không bị ghi đè bởi tên Google ở lần đăng nhập sau.
+- Mã lớp dùng chung được sinh tự động; quản trị viên chỉ nhập tên lớp và chọn GVCN theo họ tên + email.
+- Tổng quan bổ sung số lượng giảng viên và số lượng lớp; bảng quét chỉ hiển thị sinh viên.
+- Thống kê khai thác và tệp CSV tập trung vào dữ liệu sinh viên, bỏ cột vai trò và dữ liệu quét GV khỏi báo cáo giao diện.
+- Quản trị viên có thể xóa dữ liệu nghiệp vụ/thử nghiệm của từng giảng viên.
+- Xóa toàn bộ dữ liệu làm mới cả mã GV nhưng giữ phiên quản trị đang thao tác, không yêu cầu đăng nhập lại.

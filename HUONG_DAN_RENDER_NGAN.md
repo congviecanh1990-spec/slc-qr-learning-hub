@@ -17,3 +17,6 @@ Sau khi cập nhật, kiểm tra lần lượt:
 - Sinh viên quét QR chỉ nhập **Mã sinh viên do Nhà trường cấp**, không phải chọn lớp.
 
 Bản v3.7 bổ sung các bảng dùng chung cho lớp/sinh viên và tự giữ nguyên dữ liệu cũ. Tệp Excel mẫu có thể tải ngay trong giao diện Lớp & sinh viên/Lớp chủ nhiệm.
+
+
+Phiên bản v3.8: cập nhật họ tên GV, mã lớp tự sinh, xóa dữ liệu theo GV/toàn hệ thống và thống kê tập trung vào SV.
