@@ -12,7 +12,7 @@
 </div>
 
 <div class="alert alert-info">
-  <strong>Nguyên tắc quản lý:</strong> Họ tên hiển thị do giảng viên tự hiệu chỉnh trên giao diện Tổng quan. Chức vụ được hệ thống xác định theo quyền hiện tại: Giảng viên, Giảng viên kiêm GVCN hoặc Quản trị viên.
+  <strong>Nguyên tắc quản lý:</strong> Họ tên hiển thị do giảng viên tự hiệu chỉnh trên giao diện Tổng quan. Chức vụ được hệ thống xác định theo quyền hiện tại: Giảng viên, Giảng viên kiêm GVCN hoặc Quản trị viên. Quản trị viên xác định thêm nhóm chuyên môn để hệ thống thống kê số giảng viên thuộc chuyên ngành khác Công nghệ thông tin trong chỉ tiêu nghiệm thu.
 </div>
 
 <div class="card shadow-sm">
@@ -26,6 +26,7 @@
           <th>Tên kênh YouTube</th>
           <th>Địa chỉ email</th>
           <th class="text-nowrap">Chức vụ</th>
+          <th style="min-width:210px">Nhóm chuyên môn</th>
           <th style="min-width:220px">Thao tác</th>
         </tr>
       </thead>
@@ -47,6 +48,21 @@
           <td class="text-nowrap">{{ u.email }}</td>
           <td><span class="badge {{ 'text-bg-danger' if u.role == 'admin' else ('text-bg-primary' if row.position == 'Giảng viên kiêm GVCN' else 'text-bg-secondary') }}">{{ row.position }}</span></td>
           <td>
+            {% if u.role == 'lecturer' %}
+            <form method="post" action="{{ url_for('update_lecturer_professional_group', lecturer_id=u.id) }}" class="d-flex gap-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select class="form-select form-select-sm" name="professional_group" aria-label="Nhóm chuyên môn của giảng viên">
+                <option value="" {{ 'selected' if not u.professional_group else '' }}>Chưa xác định</option>
+                <option value="it" {{ 'selected' if u.professional_group == 'it' else '' }}>Công nghệ thông tin</option>
+                <option value="other" {{ 'selected' if u.professional_group == 'other' else '' }}>Khác CNTT</option>
+              </select>
+              <button class="btn btn-outline-primary btn-sm">Lưu</button>
+            </form>
+            {% else %}
+              <span class="text-muted">Không áp dụng</span>
+            {% endif %}
+          </td>
+          <td>
             <div class="d-flex flex-wrap gap-2">
               {% if u.role == 'lecturer' %}
                 <form method="post" action="{{ url_for('assign_lecturer_code_admin', lecturer_id=u.id) }}">
@@ -64,7 +80,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="text-center text-muted py-4">Chưa có tài khoản nào trong hệ thống.</td></tr>
+        <tr><td colspan="7" class="text-center text-muted py-4">Chưa có tài khoản nào trong hệ thống.</td></tr>
         {% endfor %}
       </tbody>
     </table>

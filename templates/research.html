@@ -12,10 +12,18 @@
       {% for m in metrics %}
       <tr>
         <td>{{ m.name }}</td>
-        <td>{{ m.op }} {{ m.target }}{{ m.suffix }}</td>
+        <td>
+          {% if m.target_display is defined %}
+            {{ m.target_display }}
+          {% else %}
+            {{ '' if m.op == '=' else (m.op ~ ' ') }}{{ m.target }}{{ m.suffix }}
+          {% endif %}
+        </td>
         <td>
           {% if m.external %}
             <span class="text-muted">Theo Google Sheets</span>
+          {% elif m.value_display is defined %}
+            {{ m.value_display }}
           {% else %}
             {{ (m.value|string + m.suffix) if m.value is not none else 'Chưa đủ dữ liệu' }}
           {% endif %}

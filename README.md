@@ -1,3 +1,13 @@
+# TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v4.1
+
+## Điểm mới v4.1
+- Với tài khoản giảng viên kiêm GVCN, menu **Lớp chủ nhiệm** được đưa lên vị trí thứ 2, ngay sau **Kênh YouTube**.
+- Trong **Lớp chủ nhiệm**, bỏ dòng hướng dẫn và tiêu đề cột “Xóa nhập nhầm”; chức năng xóa sinh viên nhập sai vẫn được giữ dưới cột **Thao tác**.
+- Trong **Đánh giá nghiệm thu**, các mục tiêu 100% hiển thị trực tiếp **100%**, không có dấu “=” phía trước.
+- Đổi chỉ tiêu **Số đơn vị/khoa/bộ môn** thành **Số bộ môn** và đếm theo tên bộ môn duy nhất của các môn học/mô đun thực nghiệm.
+- Chỉ tiêu **Số giảng viên tham gia** hiển thị mục tiêu **>= 3 (GV CN khác CNTT: >= 1)**; số thực tế theo dạng `5 (2)`, trong đó số trong ngoặc là giảng viên thuộc nhóm chuyên môn khác CNTT.
+- Giao diện **Giảng viên** bổ sung trường **Nhóm chuyên môn** (Công nghệ thông tin / Khác CNTT) để quản trị viên xác định chính xác số liệu trong ngoặc của chỉ tiêu nghiệm thu.
+
 
 ## Bổ sung v3.9.2
 - GVCN có thể xóa một sinh viên bị nhập nhầm/nhập thừa khỏi chính lớp mình chủ nhiệm.
@@ -279,3 +289,7 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Nhật ký lỗi có cột **Thao tác** và **Môn học/ Mô đun**, không hiển thị tên mô-đun kỹ thuật nội bộ.
 - Ô sửa họ tên GV không điền/gợi lại nội dung cũ; nút **Lưu họ tên** đặt ngay bên phải ô nhập.
 - Xóa toàn bộ dữ liệu đặt lại bộ đếm mã nghiệp vụ: mã GV cấp lại từ GV0001, mã lớp từ L000001, mã môn học/ mô đun từ HP000001; vẫn giữ phiên quản trị hiện tại.
+
+
+## Phiên bản 4.1.1
+- Giao diện Lớp chủ nhiệm: tách hai thao tác thành hai cột **Lưu** và **Xóa**, căn giữa từng nút để bảng rõ ràng hơn.

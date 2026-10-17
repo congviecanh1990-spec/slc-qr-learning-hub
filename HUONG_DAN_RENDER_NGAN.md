@@ -1,3 +1,9 @@
+# CẬP NHẬT v4.1
+
+- Không cần tạo lại PostgreSQL. Khi deploy, hệ thống tự bổ sung cột `professional_group` cho bảng người dùng nếu chưa có.
+- Sau khi cập nhật, Quản trị viên vào **Giảng viên** và xác định **Nhóm chuyên môn** cho các tài khoản tham gia thực nghiệm để chỉ tiêu “Số giảng viên tham gia” tính đúng số GV khác CNTT.
+- GVCN sẽ thấy **Lớp chủ nhiệm** ngay sau **Kênh YouTube** trên menu.
+
 # Cập nhật Web App v4.0 trên Render
 
 Bản v4.0 kế thừa trực tiếp v3.9.2, không cần tạo lại PostgreSQL và không cần cấu hình lại Google OAuth.

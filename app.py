@@ -202,6 +202,8 @@ def ensure_schema_upgrades():
                     conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_lecturer_code ON users (lecturer_code)"))
                 except Exception:
                     pass
+            if "professional_group" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN professional_group VARCHAR(16)"))
         if "courses" in tables:
             columns = {c["name"] for c in inspector.get_columns("courses")}
             if "faculty_name" not in columns:
@@ -714,7 +716,7 @@ def register_routes(app):
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
             "classes_page": "classes", "create_school_class": "classes", "assign_homeroom_teacher": "classes",
             "upload_class_students": "classes", "add_class_student": "classes", "change_student_status": "classes", "delete_class_student": "classes",
-            "lecturers_page": "lecturers", "assign_lecturer_code_admin": "lecturers", "delete_lecturer_account": "lecturers",
+            "lecturers_page": "lecturers", "assign_lecturer_code_admin": "lecturers", "update_lecturer_professional_group": "lecturers", "delete_lecturer_account": "lecturers",
             "research_page": "research",
             "error_logs_page": "errors",
             "data_management": "data_admin",
@@ -2573,6 +2575,26 @@ def register_routes(app):
             flash(f"Không thể cấp mã giảng viên: {exc}", "danger")
         return redirect(url_for("lecturers_page"))
 
+    @app.post("/admin/lecturers/<int:lecturer_id>/professional-group")
+    @login_required
+    def update_lecturer_professional_group(lecturer_id):
+        admin = current_user()
+        if admin.role != "admin":
+            abort(403)
+        lecturer = db.session.get(User, lecturer_id) or abort(404)
+        if lecturer.role != "lecturer":
+            flash("Chỉ cập nhật nhóm chuyên môn cho tài khoản Giảng viên.", "warning")
+            return redirect(url_for("lecturers_page"))
+        group = (request.form.get("professional_group") or "").strip()
+        if group not in {"it", "other", ""}:
+            flash("Nhóm chuyên môn không hợp lệ.", "warning")
+            return redirect(url_for("lecturers_page"))
+        lecturer.professional_group = group or None
+        db.session.commit()
+        label = {"it": "Công nghệ thông tin", "other": "Khác CNTT", "": "Chưa xác định"}.get(group, "Chưa xác định")
+        flash(f"Đã cập nhật nhóm chuyên môn của {lecturer.name or lecturer.email}: {label}.", "success")
+        return redirect(url_for("lecturers_page"))
+
     @app.post("/admin/lecturers/<int:lecturer_id>/delete")
     @login_required
     def delete_lecturer_account(lecturer_id):
@@ -2987,8 +3009,15 @@ def acceptance_metrics(user):
     if user.role != "admin":
         participant_base = participant_base.filter(QrCode.owner_id == user.id)
     # Giảng viên tham gia được tính theo tài khoản giảng viên đã đăng nhập vào Web App.
+    # Số trong ngoặc là số giảng viên được quản trị viên xác định thuộc nhóm chuyên môn khác CNTT.
     # Sinh viên tham gia được tính theo mã SV thực tế đã quét QR.
-    gv_count = User.query.filter(User.role == "lecturer", User.last_login_at.isnot(None)).count() if user.role == "admin" else 1
+    if user.role == "admin":
+        participating_lecturers_q = User.query.filter(User.role == "lecturer", User.last_login_at.isnot(None))
+        gv_count = participating_lecturers_q.count()
+        gv_non_it_count = participating_lecturers_q.filter(User.professional_group == "other").count()
+    else:
+        gv_count = 1
+        gv_non_it_count = 1 if user.professional_group == "other" else 0
     sv_count = participant_base.filter(ScanLog.role == "SV").distinct().count()
 
     video_q = Video.query.join(YouTubeChannel)
@@ -2998,18 +3027,17 @@ def acceptance_metrics(user):
     course_q = Course.query.filter_by(active=True) if user.role == "admin" else Course.query.filter_by(owner_id=user.id, active=True)
     course_count = course_q.count()
 
-    # Mỗi tổ hợp Khoa + Bộ môn được tính là một đơn vị tham gia thực nghiệm.
-    # Nhờ vậy nhiều bộ môn trong cùng một khoa vẫn được ghi nhận riêng.
-    unit_rows = course_q.with_entities(Course.faculty_name, Course.department_name, Course.unit_name).all()
-    unit_keys = set()
-    for faculty, department, legacy_unit in unit_rows:
-        faculty = (faculty or legacy_unit or "").strip()
-        department = (department or "").strip()
-        if faculty or department:
-            unit_keys.add((faculty.casefold(), department.casefold()))
-    unit_count = len(unit_keys)
+    # Chỉ tiêu nghiệm thu yêu cầu số bộ môn, vì vậy đếm tên bộ môn duy nhất.
+    # Dữ liệu cũ chưa có department_name được phép dùng unit_name làm giá trị dự phòng.
+    department_rows = course_q.with_entities(Course.department_name, Course.unit_name).all()
+    department_keys = set()
+    for department, legacy_unit in department_rows:
+        department = (department or legacy_unit or "").strip()
+        if department:
+            department_keys.add(department.casefold())
+    department_count = len(department_keys)
 
-    return [
+    metrics = [
         metric("Đăng nhập vào hệ thống", login_rate, "=", 100, "%"),
         metric("Đồng bộ video thành công", sync_rate, "=", 100, "%"),
         metric("Tỷ lệ QR quét thành công", scan_rate, ">=", 98, "%"),
@@ -3018,13 +3046,18 @@ def acceptance_metrics(user):
         metric("Giảm tổng thời gian so với thủ công", reduction_time, ">=", 30, "%"),
         metric("Tỷ lệ ca kiểm thử chức năng đạt", test_rate, ">=", 95, "%"),
         metric("Số môn học/ mô đun thực nghiệm", course_count, ">=", 3, ""),
-        metric("Số đơn vị/khoa/bộ môn", unit_count, ">=", 2, ""),
-        metric("Số giảng viên tham gia", gv_count, ">=", 3, ""),
+        metric("Số bộ môn", department_count, ">=", 2, ""),
         metric("Số sinh viên tham gia", sv_count, ">=", 50, ""),
         metric("Số video/tình huống kiểm thử", video_q.count(), ">=", 100, ""),
         metric("Mức hài lòng giảng viên", lecturer_sat, ">=", 80, "%", external=True),
         metric("Mức hài lòng sinh viên", student_sat, ">=", 80, "%", external=True),
     ]
+    gv_metric = metric("Số giảng viên tham gia", gv_count, ">=", 3, "")
+    gv_metric["target_display"] = ">= 3 (GV CN khác CNTT: >= 1)"
+    gv_metric["value_display"] = f"{gv_count} ({gv_non_it_count})"
+    gv_metric["passed"] = gv_count >= 3 and gv_non_it_count >= 1
+    metrics.insert(9, gv_metric)
+    return metrics
 
 
 def metric(name, value, op, target, suffix, external=False):

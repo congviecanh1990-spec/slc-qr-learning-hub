@@ -22,6 +22,9 @@ class User(db.Model):
     # Mã GV dùng cho nhận diện trong thực nghiệm/ghi log. Mã do quản trị viên cấp,
     # không thay thế tài khoản Google và không chứa họ tên.
     lecturer_code = db.Column(db.String(32), unique=True, nullable=True, index=True)
+    # Phân nhóm chuyên môn phục vụ chỉ tiêu nghiệm thu: CNTT / khác CNTT.
+    # Để trống khi quản trị viên chưa xác định.
+    professional_group = db.Column(db.String(16), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
