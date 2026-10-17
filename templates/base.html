@@ -39,9 +39,9 @@
       <div class="collapse navbar-collapse" id="navMain">
         <ul class="navbar-nav me-auto mb-2 mb-xl-0">
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'youtube' else '' }}" href="{{ url_for('youtube_page') }}">Kênh YouTube</a></li>
-          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'courses' else '' }}" href="{{ url_for('courses_page') }}">Học phần</a></li>
-          {% if has_homeroom_classes %}<li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'classes' else '' }}" href="{{ url_for('classes_page') }}">{{ 'Lớp & sinh viên' if me.role == 'admin' else 'Lớp chủ nhiệm' }}</a></li>{% endif %}
           {% if me.role == 'admin' %}<li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'lecturers' else '' }}" href="{{ url_for('lecturers_page') }}">Giảng viên</a></li>{% endif %}
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'courses' else '' }}" href="{{ url_for('courses_page') }}">Môn học/ mô đun</a></li>
+          {% if has_homeroom_classes %}<li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'classes' else '' }}" href="{{ url_for('classes_page') }}">{{ 'Lớp & sinh viên' if me.role == 'admin' else 'Lớp chủ nhiệm' }}</a></li>{% endif %}
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'videos' else '' }}" href="{{ url_for('videos_page') }}">Kho video học liệu</a></li>
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'qr' else '' }}" href="{{ url_for('qr_page') }}">Mã QR động</a></li>
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'analytics' else '' }}" href="{{ url_for('analytics') }}">Thống kê khai thác</a></li>

@@ -270,3 +270,12 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Không hiển thị danh sách sinh viên, tải Excel, thêm sinh viên hoặc thay đổi trạng thái sinh viên trên giao diện Quản trị viên.
 - Cột **Sĩ số đang học** chỉ tính sinh viên có quan hệ lớp còn hiệu lực tại ngày hiện tại, tương ứng trạng thái **Đang học**.
 - GVCN tiếp tục quản lý đầy đủ danh sách sinh viên và biến động lớp tại giao diện **Lớp chủ nhiệm**.
+
+
+## Phiên bản 4.0
+- Giao diện Quản trị viên đưa **Giảng viên** lên vị trí thứ 2 ngay sau **Kênh YouTube**.
+- Đổi thuật ngữ giao diện **Học phần** thành **Môn học/ mô đun**; trang quản lý dùng các nhãn “Tên môn học/ mô đun”, “Bộ môn quản lý môn học/ mô đun”.
+- Trang Đánh giá nghiệm thu bỏ cột **Mã ca**, bổ sung chỉ tiêu đăng nhập hệ thống 100%, đồng bộ video 100%, tối thiểu 3 giảng viên và 50 sinh viên tham gia.
+- Nhật ký lỗi có cột **Thao tác** và **Môn học/ Mô đun**, không hiển thị tên mô-đun kỹ thuật nội bộ.
+- Ô sửa họ tên GV không điền/gợi lại nội dung cũ; nút **Lưu họ tên** đặt ngay bên phải ô nhập.
+- Xóa toàn bộ dữ liệu đặt lại bộ đếm mã nghiệp vụ: mã GV cấp lại từ GV0001, mã lớp từ L000001, mã môn học/ mô đun từ HP000001; vẫn giữ phiên quản trị hiện tại.

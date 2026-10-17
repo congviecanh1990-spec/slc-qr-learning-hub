@@ -355,7 +355,10 @@ class HubEvent(db.Model):
 class ErrorLog(db.Model):
     __tablename__ = "error_logs"
     id = db.Column(db.Integer, primary_key=True)
+    # module giữ lại để tương thích dữ liệu cũ/nội bộ; giao diện không hiển thị thuật ngữ kỹ thuật này.
     module = db.Column(db.String(64), nullable=False)
+    action = db.Column(db.String(128), nullable=True)
+    course_module = db.Column(db.String(255), nullable=True)
     message = db.Column(db.String(500), nullable=False)
     details = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)

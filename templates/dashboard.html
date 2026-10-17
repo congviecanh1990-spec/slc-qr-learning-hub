@@ -11,14 +11,15 @@
   <div class="card-body">
     <div class="row g-3 align-items-end">
       <div class="col-lg-6">
-        <form method="post" action="{{ url_for('update_display_name') }}" class="row g-2 align-items-end">
+        <div class="small mb-2"><strong>Họ và tên hiện tại:</strong> {{ me.name or 'Chưa cập nhật' }}</div>
+        <form method="post" action="{{ url_for('update_display_name') }}" autocomplete="off">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <div class="col-md-8">
-            <label class="form-label fw-bold">Họ và tên hiển thị</label>
-            <input class="form-control" name="display_name" value="{{ me.name }}" required maxlength="255">
-            <div class="form-text">Bạn có thể sửa lại họ tên cho đúng với thông tin giảng viên. Tên này không bị thay lại theo tên Gmail ở lần đăng nhập sau.</div>
+          <label class="form-label fw-bold">Nhập lại họ tên hiển thị</label>
+          <div class="input-group">
+            <input class="form-control" name="display_name" value="" required maxlength="255" autocomplete="off" placeholder="Nhập họ và tên chính xác">
+            <button class="btn btn-outline-primary">Lưu họ tên</button>
           </div>
-          <div class="col-md-4"><button class="btn btn-outline-primary w-100">Lưu họ tên</button></div>
+          <div class="form-text">Ô nhập không lưu/gợi lại nội dung đã gõ trước đó trên giao diện. Họ tên sau khi lưu vẫn được hệ thống sử dụng làm tên hiển thị chính thức.</div>
         </form>
       </div>
       <div class="col-lg-6">
@@ -35,7 +36,7 @@
     ('Giảng viên', lecturer_count),
     ('Lớp', class_count),
     ('Video học liệu', videos),
-    ('Học phần', courses),
+    ('Môn học/ mô đun', courses),
     ('Mã QR đã tạo', qrs),
     ('Lượt quét của SV', scans),
     ('Phiên xem của SV', watch),
@@ -56,7 +57,7 @@
   <div class="card-header fw-semibold">Lượt quét của sinh viên gần đây</div>
   <div class="table-responsive">
     <table class="table table-sm mb-0">
-      <thead><tr><th>Thời gian</th><th>Mã SV</th><th>Học phần</th><th>Mã QR</th><th>Video</th><th>Kết quả</th></tr></thead>
+      <thead><tr><th>Thời gian</th><th>Mã SV</th><th>Môn học/ mô đun</th><th>Mã QR</th><th>Video</th><th>Kết quả</th></tr></thead>
       <tbody>
         {% for s in recent_scans %}
         <tr>
@@ -79,8 +80,8 @@
 <div class="card border-danger shadow-sm mt-4">
   <div class="card-header fw-bold text-danger">Xóa toàn bộ dữ liệu đã lưu</div>
   <div class="card-body">
-    <p class="mb-2">Thao tác này xóa toàn bộ dữ liệu nghiệp vụ và thử nghiệm của hệ thống, gồm giảng viên, mã GV đã cấp, kết nối YouTube, video, học phần, lớp, sinh viên, QR, lịch sử quét/xem, dữ liệu kiểm thử và khảo sát.</p>
-    <p class="small text-danger fw-bold mb-3">Tài khoản và phiên đăng nhập của quản trị viên đang thực hiện được giữ lại để có thể thiết lập lại hệ thống ngay, không cần đăng nhập Google lại.</p>
+    <p class="mb-2">Thao tác này xóa toàn bộ dữ liệu nghiệp vụ và thử nghiệm của hệ thống, gồm giảng viên, mã GV đã cấp, kết nối YouTube, video, môn học/ mô đun, lớp, sinh viên, QR, lịch sử quét/xem, dữ liệu kiểm thử và khảo sát.</p>
+    <p class="small text-danger fw-bold mb-3">Tài khoản và phiên đăng nhập của quản trị viên đang thực hiện được giữ lại để có thể thiết lập lại hệ thống ngay, không cần đăng nhập Google lại. Bộ đếm mã GV, mã lớp và mã môn học/ mô đun được đặt lại để cấp từ đầu.</p>
     <form method="post" action="{{ url_for('reset_all_data') }}" onsubmit="return confirm('CẢNH BÁO: Thao tác này sẽ xóa TOÀN BỘ dữ liệu đã lưu và toàn bộ mã GV đã cấp. Bạn có chắc chắn?') && confirm('Xác nhận lần cuối: xóa toàn bộ dữ liệu và làm lại từ đầu?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-danger">Xóa toàn bộ dữ liệu đã lưu</button>

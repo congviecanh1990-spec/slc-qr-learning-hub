@@ -2,14 +2,14 @@
 {% block content %}
 <div class="row g-4">
   <div class="col-lg-4">
-    <h2>Quản lý học phần</h2>
+    <h2>Quản lý môn học/ mô đun</h2>
     <form method="post" class="card card-body shadow-sm" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-      <label class="form-label fw-bold">Tên học phần</label>
+      <label class="form-label fw-bold">Tên môn học/ mô đun</label>
       <input class="form-control mb-3" name="course_name" required autocomplete="off" placeholder="Ví dụ: Tin học văn phòng">
 
-      <label class="form-label fw-bold">Bộ môn quản lý học phần</label>
+      <label class="form-label fw-bold">Bộ môn quản lý môn học/ mô đun</label>
       <input class="form-control mb-3" name="department_name" list="department-name-options" required autocomplete="organization-title" placeholder="Ví dụ: Bộ môn Công nghệ thông tin">
       <datalist id="department-name-options">
         {% for department in department_options %}<option value="{{ department }}"></option>{% endfor %}
@@ -21,7 +21,7 @@
         {% for faculty in faculty_options %}<option value="{{ faculty }}"></option>{% endfor %}
       </datalist>
 
-      <button class="btn btn-primary">Thêm học phần</button>
+      <button class="btn btn-primary">Thêm môn học/ mô đun</button>
     </form>
   </div>
 
@@ -45,14 +45,14 @@
           <div class="small text-muted mb-3">{{ c.department_name or 'Chưa cập nhật bộ môn' }} · {{ c.faculty_name or c.unit_name or 'Chưa cập nhật khoa' }}</div>
 
           <div class="border rounded p-3 bg-body-tertiary mb-3">
-            <div><b>Video của học phần:</b> {{ '%02d'|format(total_video) }}, <b>đã có mã QR:</b> {{ ns.video_qr }}</div>
-            <div><b>Playlist của học phần:</b> {{ '%02d'|format(ns.playlist_total) }}, <b>đã có mã QR:</b> {{ ns.playlist_qr }}</div>
+            <div><b>Video của môn học/ mô đun:</b> {{ '%02d'|format(total_video) }}, <b>đã có mã QR:</b> {{ ns.video_qr }}</div>
+            <div><b>Playlist của môn học/ mô đun:</b> {{ '%02d'|format(ns.playlist_total) }}, <b>đã có mã QR:</b> {{ ns.playlist_qr }}</div>
             <div><b>Số lớp:</b> {{ ns.class_total }}</div>
           </div>
 
           <form method="post" action="{{ url_for('set_course_school_classes', course_id=c.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <label class="form-label fw-bold">Lớp áp dụng cho học phần</label>
+            <label class="form-label fw-bold">Lớp áp dụng cho môn học/ mô đun</label>
             <select class="form-select" name="school_class_ids" multiple size="5">
               {% set selected_ids = c.school_class_links|selectattr('active')|map(attribute='school_class_id')|list %}
               {% for cls in available_school_classes %}
@@ -61,13 +61,13 @@
                 <option disabled>Chưa có lớp trong danh mục dùng chung.</option>
               {% endfor %}
             </select>
-            <div class="form-text">Giữ Ctrl để chọn nhiều lớp. Danh sách sinh viên của lớp do giảng viên chủ nhiệm quản lý tập trung, không nhập lại theo từng học phần.</div>
+            <div class="form-text">Giữ Ctrl để chọn nhiều lớp. Danh sách sinh viên của lớp do giảng viên chủ nhiệm quản lý tập trung, không nhập lại theo từng môn học/ mô đun.</div>
             <button class="btn btn-outline-primary btn-sm mt-2" {{ 'disabled' if not available_school_classes else '' }}>Lưu lớp áp dụng</button>
           </form>
         </div>
       </div>
     {% else %}
-      <div class="text-muted">Chưa có học phần.</div>
+      <div class="text-muted">Chưa có môn học/ mô đun.</div>
     {% endfor %}
   </div>
 </div>

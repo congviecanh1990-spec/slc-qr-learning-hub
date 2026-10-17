@@ -2,11 +2,11 @@
 {% block content %}
 <div class="mb-3">
   <h2 class="mb-1">Quản lý mã QR động</h2>
-  <div class="text-muted">Ưu tiên tạo mã QR theo học phần để giảm thao tác. Mã QR có logo trường và giữ nguyên khi nội dung đích được cập nhật. Nút <strong>Mở thử</strong> chỉ dùng để giảng viên kiểm tra học liệu và không ghi dữ liệu thống kê.</div>
+  <div class="text-muted">Ưu tiên tạo mã QR theo môn học/ mô đun để giảm thao tác. Mã QR có logo trường và giữ nguyên khi nội dung đích được cập nhật. Nút <strong>Mở thử</strong> chỉ dùng để giảng viên kiểm tra học liệu và không ghi dữ liệu thống kê.</div>
 </div>
 
 <div class="card shadow-sm mb-4">
-  <div class="card-header fw-semibold">Tạo mã QR tự động theo học phần</div>
+  <div class="card-header fw-semibold">Tạo mã QR tự động theo môn học/ mô đun</div>
   <div class="card-body">
     <div class="row g-3">
       {% for item in course_stats %}
@@ -24,11 +24,11 @@
             {% if pitem.unavailable %}<div class="small text-danger mt-1"><b>{{ pitem.unavailable }} playlist không còn khả dụng</b></div>{% endif %}
             <div class="d-flex gap-2 flex-wrap mt-2">
               <form method="post" action="{{ url_for('create_course_playlist_qrs_bulk', course_id=item.course.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="return_to" value="qr"><button class="btn btn-outline-primary btn-sm" {{ 'disabled' if pitem.missing == 0 else '' }}>Tạo {{ pitem.missing }} QR playlist còn thiếu</button></form>
-              <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if (item.has_qr + pitem.has_qr) == 0 else '' }}" href="{{ url_for('download_course_qrs', course_id=item.course.id) }}">Tải ZIP học phần</a>
+              <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if (item.has_qr + pitem.has_qr) == 0 else '' }}" href="{{ url_for('download_course_qrs', course_id=item.course.id) }}">Tải ZIP môn học/ mô đun</a>
             </div>
           </div>
         </div>
-      {% else %}<div class="text-muted">Chưa có học phần. Hãy tạo học phần và gán video/playlist trước.</div>{% endfor %}
+      {% else %}<div class="text-muted">Chưa có môn học/ mô đun. Hãy tạo môn học/ mô đun và gán video/playlist trước.</div>{% endfor %}
     </div>
   </div>
 </div>
@@ -36,7 +36,7 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-semibold">Tạo QR riêng lẻ</div>
   <div class="card-body">
-    <div class="text-muted small mb-3">Chỉ dùng khi cần tạo mã cho một video hoặc một playlist cụ thể, không cần tạo hàng loạt cho toàn học phần.</div>
+    <div class="text-muted small mb-3">Chỉ dùng khi cần tạo mã cho một video hoặc một playlist cụ thể, không cần tạo hàng loạt cho toàn môn học/ mô đun.</div>
     <div class="d-flex flex-wrap gap-2 mb-3">
       <button class="btn btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#singleQrCreator">Tạo một mã QR video</button>
       <button class="btn btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#singlePlaylistQrCreator">Tạo một mã QR playlist</button>
@@ -47,7 +47,7 @@
     <div class="card-body">
       <form method="post" class="row g-3">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="col-lg-4"><label class="form-label fw-bold">Học phần</label><select class="form-select" name="course_id"><option value="">— Không gán —</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+        <div class="col-lg-4"><label class="form-label fw-bold">Môn học/ mô đun</label><select class="form-select" name="course_id"><option value="">— Không gán —</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
         <div class="col-lg-8"><label class="form-label fw-bold">Video đích</label><select class="form-select" name="video_id" required><option value="">— Chọn video —</option>{% for v in videos %}<option value="{{ v.id }}">{{ v.title }}</option>{% endfor %}</select></div>
         <div class="col-12"><button class="btn btn-primary">Tạo mã QR video</button></div>
       </form>
@@ -62,12 +62,12 @@
       <form method="post" action="{{ url_for('create_playlist_qr') }}" class="row g-3">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="col-12">
-          <label class="form-label fw-bold">Playlist đã gán cho học phần</label>
+          <label class="form-label fw-bold">Playlist đã gán cho môn học/ mô đun</label>
           <select class="form-select" name="course_playlist_id" required>
-            <option value="">— Chọn học phần / playlist —</option>
+            <option value="">— Chọn môn học/ mô đun / playlist —</option>
             {% for link in course_playlist_options %}<option value="{{ link.id }}">{{ link.course.name }} — {{ link.playlist.title }}</option>{% endfor %}
           </select>
-          {% if not course_playlist_options %}<div class="form-text">Hãy vào Học phần để gán playlist trước khi tạo mã QR.</div>{% endif %}
+          {% if not course_playlist_options %}<div class="form-text">Hãy vào Môn học/ mô đun để gán playlist trước khi tạo mã QR.</div>{% endif %}
         </div>
         <div class="col-12"><button class="btn btn-primary" {{ 'disabled' if not course_playlist_options else '' }}>Tạo mã QR playlist</button></div>
       </form>
@@ -98,7 +98,7 @@
           <div>
             <div class="badge text-bg-info mb-2">QR playlist</div>
             <h5 class="mb-1">{{ q.title }}</h5>
-            <div class="small text-muted">Học phần: {{ q.course.name if q.course else 'Không gán học phần' }}</div>
+            <div class="small text-muted">Môn học/ mô đun: {{ q.course.name if q.course else 'Không gán môn học/ mô đun' }}</div>
             <div class="small text-muted">Mã định danh QR: {{ q.slug }}</div>
             <div class="mt-2">Playlist hiện tại: <b>{{ q.playlist.title if q.playlist else 'Chưa gán' }}</b></div>
             {% if q.playlist %}<div class="small text-muted">Số video hiện có: {{ q.playlist.video_links|length }}</div>{% endif %}
@@ -117,7 +117,7 @@
     <div class="card mb-3 shadow-sm">
       <div class="card-body">
         <div class="d-flex flex-wrap justify-content-between gap-3">
-          <div><div class="badge text-bg-light border mb-2">QR video</div><h5 class="mb-1">{{ q.title }}</h5><div class="small text-muted">Học phần: {{ q.course.name if q.course else 'Không gán học phần' }}</div><div class="small text-muted">Mã định danh QR: {{ q.slug }}</div><div class="mt-2">Video hiện tại: <b>{{ t.video.title if t else 'Chưa gán' }}</b></div>{% if not usable %}<div class="text-danger small mt-1"><b>Cần cập nhật video đích</b> — video hiện tại đã bị xóa, chuyển riêng tư hoặc không cho phép phát nhúng.</div>{% endif %}</div>
+          <div><div class="badge text-bg-light border mb-2">QR video</div><h5 class="mb-1">{{ q.title }}</h5><div class="small text-muted">Môn học/ mô đun: {{ q.course.name if q.course else 'Không gán môn học/ mô đun' }}</div><div class="small text-muted">Mã định danh QR: {{ q.slug }}</div><div class="mt-2">Video hiện tại: <b>{{ t.video.title if t else 'Chưa gán' }}</b></div>{% if not usable %}<div class="text-danger small mt-1"><b>Cần cập nhật video đích</b> — video hiện tại đã bị xóa, chuyển riêng tư hoặc không cho phép phát nhúng.</div>{% endif %}</div>
           <div class="text-end"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('qr_png', qr_id=q.id) }}">Tải PNG có logo</a><a class="btn btn-outline-primary btn-sm" target="_blank" href="{{ url_for('public_qr', slug=q.slug, preview=1) }}" title="Mở thử không ghi dữ liệu thống kê">Mở thử</a></div>
         </div>
         <hr>

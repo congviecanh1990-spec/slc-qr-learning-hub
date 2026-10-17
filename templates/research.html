@@ -46,22 +46,21 @@
       <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Không đạt</div><div class="fs-3 fw-bold text-danger">{{ tests_fail }}</div></div></div>
       <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Tỷ lệ đạt</div><div class="fs-3 fw-bold">{{ (test_rate|string + '%') if test_rate is not none else '—' }}</div></div></div>
     </div>
-    <p class="small text-muted">Hệ thống tự ghi nhận từ các hoạt động thật như đăng nhập Google, đồng bộ YouTube, gán video vào học phần, tạo QR, quét QR, đổi video đích, sao lưu và khôi phục dữ liệu.</p>
+    <p class="small text-muted">Hệ thống tự ghi nhận từ các hoạt động thật như đăng nhập Google, đồng bộ YouTube, gán video vào môn học/ mô đun, tạo QR, quét QR, đổi video đích, sao lưu và khôi phục dữ liệu.</p>
     <div class="table-responsive">
       <table class="table table-sm table-striped align-middle">
-        <thead><tr><th>Thời gian</th><th>Mã ca</th><th>Chức năng</th><th>Kết quả</th><th>Người dùng</th><th>Minh chứng / ghi chú</th></tr></thead>
+        <thead><tr><th>Thời gian</th><th>Chức năng</th><th>Kết quả</th><th>Người dùng</th><th>Minh chứng / ghi chú</th></tr></thead>
         <tbody>
           {% for t in tests %}
           <tr>
             <td class="text-nowrap">{{ t.created_at.strftime('%d/%m/%Y %H:%M:%S') if t.created_at else '' }}</td>
-            <td><code>{{ t.case_code }}</code></td>
             <td>{{ t.case_name }}</td>
             <td>{% if t.passed %}<span class="badge text-bg-success">Đạt</span>{% else %}<span class="badge text-bg-danger">Không đạt</span>{% endif %}</td>
             <td>{{ t.owner.email if t.owner else 'Chưa xác định' }}</td>
             <td class="small">{{ t.note or '—' }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="text-center text-muted py-4">Chưa có dữ liệu kiểm thử tự động. Hãy sử dụng các chức năng của Web App để hệ thống tự ghi nhận.</td></tr>
+          <tr><td colspan="5" class="text-center text-muted py-4">Chưa có dữ liệu kiểm thử tự động. Hãy sử dụng các chức năng của Web App để hệ thống tự ghi nhận.</td></tr>
           {% endfor %}
         </tbody>
       </table>

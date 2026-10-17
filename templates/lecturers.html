@@ -53,7 +53,7 @@
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="btn btn-sm btn-outline-primary" {{ 'disabled' if u.lecturer_code else '' }}>{{ 'Đã cấp mã' if u.lecturer_code else 'Cấp mã GV' }}</button>
                 </form>
-                <form method="post" action="{{ url_for('delete_lecturer_account', lecturer_id=u.id) }}" onsubmit="return confirm('Bạn có chắc chắn muốn xóa giảng viên {{ (u.name or u.email)|e }} khỏi Web App?') && confirm('Xác nhận lần cuối: toàn bộ dữ liệu thuộc giảng viên này như kết nối YouTube, học phần, QR, lượt quét/xem và dữ liệu thử nghiệm sẽ bị xóa. Thao tác này không thể hoàn tác nếu chưa có bản sao lưu.');">
+                <form method="post" action="{{ url_for('delete_lecturer_account', lecturer_id=u.id) }}" onsubmit="return confirm('Bạn có chắc chắn muốn xóa giảng viên {{ (u.name or u.email)|e }} khỏi Web App?') && confirm('Xác nhận lần cuối: toàn bộ dữ liệu thuộc giảng viên này như kết nối YouTube, môn học/ mô đun, QR, lượt quét/xem và dữ liệu thử nghiệm sẽ bị xóa. Thao tác này không thể hoàn tác nếu chưa có bản sao lưu.');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="btn btn-sm btn-outline-danger">Xóa giảng viên</button>
                 </form>
@@ -72,6 +72,6 @@
 </div>
 
 <div class="small text-muted mt-3">
-  Khi xóa một giảng viên, tài khoản Google/OAuth và toàn bộ dữ liệu nghiệp vụ, học phần, kênh/video đã đồng bộ, mã QR, lượt quét/xem và dữ liệu thử nghiệm thuộc giảng viên đó sẽ bị xóa. Danh mục lớp và sinh viên dùng chung của Nhà trường được giữ lại; nếu người bị xóa là GVCN, lớp sẽ chuyển về trạng thái chưa giao GVCN.
+  Khi xóa một giảng viên, tài khoản Google/OAuth và toàn bộ dữ liệu nghiệp vụ, môn học/ mô đun, kênh/video đã đồng bộ, mã QR, lượt quét/xem và dữ liệu thử nghiệm thuộc giảng viên đó sẽ bị xóa. Danh mục lớp và sinh viên dùng chung của Nhà trường được giữ lại; nếu người bị xóa là GVCN, lớp sẽ chuyển về trạng thái chưa giao GVCN.
 </div>
 {% endblock %}

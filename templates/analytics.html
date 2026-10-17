@@ -16,7 +16,7 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-semibold">Lịch sử quét mã QR của sinh viên</div>
   <div class="table-responsive"><table class="table table-sm mb-0">
-    <thead><tr><th>Thời gian</th><th>Mã SV</th><th>Lớp</th><th>Học phần</th><th>Mã QR</th><th>Video</th><th>Kết quả</th></tr></thead>
+    <thead><tr><th>Thời gian</th><th>Mã SV</th><th>Lớp</th><th>Môn học/ mô đun</th><th>Mã QR</th><th>Video</th><th>Kết quả</th></tr></thead>
     <tbody>{% for s in scans %}<tr><td>{{ s.scanned_at }}</td><td>{{ s.participant_code }}</td><td>{{ class_name_map.get(s.class_code, s.class_code or '') }}</td><td>{{ s.course.name if s.course else '—' }}</td><td>{{ s.qr.slug if s.qr else '' }}</td><td>{{ s.video.title[:40] if s.video else ((s.qr.title[:40] ~ ' (playlist)') if s.qr and s.qr.is_playlist else '') }}</td><td>{{ 'Thành công' if s.success else 'Không thành công' }}</td></tr>{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>

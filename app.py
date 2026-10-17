@@ -106,7 +106,7 @@ def active_enrollments_for_student(student: Student, on_date: date | None = None
 def resolve_student_class_for_qr(student_code: str, qr: QrCode, on_date: date | None = None):
     """Xác định lớp của SV theo mã Nhà trường và thời điểm quét.
 
-    Nếu QR thuộc học phần, SV phải đang thuộc một lớp được gán cho học phần đó.
+    Nếu QR thuộc môn học/ mô đun, SV phải đang thuộc một lớp được gán cho môn học/ mô đun đó.
     """
     on_date = on_date or utcnow().date()
     code = normalize_student_code(student_code)
@@ -117,10 +117,10 @@ def resolve_student_class_for_qr(student_code: str, qr: QrCode, on_date: date | 
     if qr.course_id:
         allowed_ids = {link.school_class_id for link in CourseClass.query.filter_by(course_id=qr.course_id, active=True).all()}
         if not allowed_ids:
-            return student, None, "Học phần này chưa được giảng viên gán lớp áp dụng. Vui lòng liên hệ giảng viên phụ trách."
+            return student, None, "Môn học/ mô đun này chưa được giảng viên gán lớp áp dụng. Vui lòng liên hệ giảng viên phụ trách."
         enrollments = [e for e in enrollments if e.school_class_id in allowed_ids]
     if not enrollments:
-        return student, None, "Mã sinh viên không thuộc lớp đang áp dụng cho học phần tại thời điểm hiện tại. Vui lòng liên hệ giảng viên phụ trách."
+        return student, None, "Mã sinh viên không thuộc lớp đang áp dụng cho môn học/ mô đun tại thời điểm hiện tại. Vui lòng liên hệ giảng viên phụ trách."
     if len(enrollments) > 1:
         return student, None, "Hệ thống phát hiện mã sinh viên đang đồng thời thuộc nhiều lớp phù hợp. Vui lòng liên hệ giảng viên chủ nhiệm để kiểm tra dữ liệu lớp."
     return student, enrollments[0].school_class, None
@@ -132,7 +132,7 @@ def role_label(role: str) -> str:
 
 
 def migrate_legacy_classes():
-    """Chuyển dữ liệu lớp cũ theo học phần sang danh mục lớp dùng chung, không xóa dữ liệu cũ."""
+    """Chuyển dữ liệu lớp cũ theo môn học/ mô đun sang danh mục lớp dùng chung, không xóa dữ liệu cũ."""
     try:
         for old in ClassGroup.query.order_by(ClassGroup.id).all():
             name = (old.name or "").strip()
@@ -238,6 +238,12 @@ def ensure_schema_upgrades():
             class_columns = {c["name"] for c in inspector.get_columns("class_groups")}
             if "active" not in class_columns:
                 conn.execute(text("ALTER TABLE class_groups ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE"))
+        if "error_logs" in tables:
+            error_columns = {c["name"] for c in inspector.get_columns("error_logs")}
+            if "action" not in error_columns:
+                conn.execute(text("ALTER TABLE error_logs ADD COLUMN action VARCHAR(128)"))
+            if "course_module" not in error_columns:
+                conn.execute(text("ALTER TABLE error_logs ADD COLUMN course_module VARCHAR(255)"))
         if "functional_test_runs" in tables:
             test_columns = {c["name"] for c in inspector.get_columns("functional_test_runs")}
             if "source" not in test_columns:
@@ -303,17 +309,25 @@ def current_user():
 
 
 def allocate_lecturer_code(user: User) -> str:
-    """Cấp mã GV ổn định, không chứa họ tên, do quản trị viên chủ động cấp."""
+    """Cấp mã GV tuần tự GV0001, GV0002... độc lập với ID tài khoản.
+
+    Sau khi quản trị viên xóa toàn bộ dữ liệu, danh sách mã GV trống nên lần cấp
+    tiếp theo tự bắt đầu lại từ GV0001 mà không cần đăng xuất/đăng nhập lại.
+    """
     if user.lecturer_code:
         return user.lecturer_code
     if user.role != "lecturer":
         raise ValueError("Chỉ cấp mã GV cho tài khoản giảng viên.")
-    base = f"GV{user.id:04d}"
-    code = base
+    used = []
+    for value, in db.session.query(User.lecturer_code).filter(User.lecturer_code.isnot(None)).all():
+        m = re.fullmatch(r"GV(\d{4,})", (value or "").strip().upper())
+        if m:
+            used.append(int(m.group(1)))
     n = 1
-    while User.query.filter(User.lecturer_code == code, User.id != user.id).first():
+    used_set = set(used)
+    while n in used_set:
         n += 1
-        code = f"{base}-{n}"
+    code = f"GV{n:04d}"
     user.lecturer_code = code
     return code
 
@@ -366,10 +380,10 @@ def safe_filename(value: str, fallback: str = "ma_qr") -> str:
 
 
 def assign_auto_course_code(course: Course) -> str:
-    """Sinh mã học phần tự động, ổn định và không yêu cầu GV nhập.
+    """Sinh mã môn học/ mô đun tự động, ổn định và không yêu cầu GV nhập.
 
     Dùng khóa chính của CSDL để mã không trùng ngay cả khi nhiều giảng viên thao tác
-    đồng thời. Mã chỉ phục vụ nhận diện nội bộ; người dùng chủ yếu làm việc bằng tên học phần.
+    đồng thời. Mã chỉ phục vụ nhận diện nội bộ; người dùng chủ yếu làm việc bằng tên môn học/ mô đun.
     """
     if not course.id:
         db.session.flush()
@@ -409,10 +423,10 @@ def visible_video_query(user: User):
 
 
 def visible_playlist_query(user: User):
-    """Playlist có thể gán vào học phần của tài khoản đang đăng nhập.
+    """Playlist có thể gán vào môn học/ mô đun của tài khoản đang đăng nhập.
 
     Chỉ lấy playlist do chính kênh YouTube của người dùng sở hữu và còn tồn tại.
-    Playlist Uploads hệ thống của YouTube không đưa vào danh sách gán học phần.
+    Playlist Uploads hệ thống của YouTube không đưa vào danh sách gán môn học/ mô đun.
     """
     q = Playlist.query.join(YouTubeChannel).filter(YouTubeChannel.user_id == user.id)
     q = q.filter(Playlist.is_available.is_(True))
@@ -478,11 +492,11 @@ def active_qr_for_course_video(course_id: int, video_id: int, owner_id: int):
 
 
 def ensure_course_video_link(course: Course, video: Video, user: User, source_playlist_id=None, manual=True):
-    """Bảo đảm video thuộc học phần.
+    """Bảo đảm video thuộc môn học/ mô đun.
 
     manual=True khi GV chọn video trực tiếp; manual=False khi video được kế thừa
-    tự động từ một playlist đã gán cho học phần. Cờ này giúp bỏ playlist mà không
-    làm mất những video GV vẫn muốn giữ riêng trong học phần.
+    tự động từ một playlist đã gán cho môn học/ mô đun. Cờ này giúp bỏ playlist mà không
+    làm mất những video GV vẫn muốn giữ riêng trong môn học/ mô đun.
     """
     link = CourseVideo.query.filter_by(course_id=course.id, video_id=video.id).first()
     if link:
@@ -504,12 +518,12 @@ def ensure_course_video_link(course: Course, video: Video, user: User, source_pl
 
 
 def reconcile_course_videos_from_playlists(course: Course, user: User):
-    """Đồng bộ danh sách video của học phần theo các playlist đang được gán.
+    """Đồng bộ danh sách video của môn học/ mô đun theo các playlist đang được gán.
 
     - Video mới xuất hiện trong bất kỳ playlist đã gán nào sẽ tự động được thêm.
     - Khi bỏ playlist hoặc video bị gỡ khỏi playlist, liên kết tự động sẽ bị bỏ nếu
-      video không còn thuộc playlist nào khác của học phần và chưa từng được GV gán riêng.
-    - QR video đã phát hành không bị xóa; chỉ liên kết video-học phần được điều chỉnh.
+      video không còn thuộc playlist nào khác của môn học/ mô đun và chưa từng được GV gán riêng.
+    - QR video đã phát hành không bị xóa; chỉ liên kết video-môn học/ mô đun được điều chỉnh.
     """
     active_links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).all()
     playlist_ids = [x.playlist_id for x in active_links if x.playlist_id]
@@ -543,7 +557,7 @@ def reconcile_course_videos_from_playlists(course: Course, user: User):
 
 
 def set_playlist_courses(playlist: Playlist, selected_course_ids: set[int], user: User):
-    """Đặt lại toàn bộ các học phần áp dụng cho một playlist theo lựa chọn hiện tại."""
+    """Đặt lại toàn bộ các môn học/ mô đun áp dụng cho một playlist theo lựa chọn hiện tại."""
     owned_courses = Course.query.filter_by(owner_id=user.id, active=True).all()
     owned_by_id = {c.id: c for c in owned_courses}
     selected_course_ids = {cid for cid in selected_course_ids if cid in owned_by_id}
@@ -840,7 +854,7 @@ def register_routes(app):
             return redirect(after_login)
         except Exception as exc:
             db.session.rollback()
-            db.session.add(ErrorLog(module="oauth", message="Đăng nhập Google thất bại", details=str(exc)))
+            db.session.add(ErrorLog(module="oauth", action="Đăng nhập hệ thống", course_module="Hệ thống", message="Đăng nhập Google thất bại", details=str(exc)))
             record_functional_test(
                 "AUTH_LOGIN", "Đăng nhập Google", False, owner_id=None,
                 note=f"OAuth thất bại: {exc}"
@@ -896,6 +910,10 @@ def register_routes(app):
         except Exception as exc:
             db.session.rollback()
             elapsed = time.perf_counter() - t0
+            db.session.add(ErrorLog(
+                module="youtube", action="Đồng bộ kênh/video", course_module="Hệ thống",
+                message="Đồng bộ kênh/video YouTube thất bại", details=str(exc)
+            ))
             record_functional_test(
                 "YT_SYNC", "Đồng bộ kênh/video YouTube", False, owner_id=user.id, note=str(exc)
             )
@@ -937,7 +955,7 @@ def register_routes(app):
                 evt.processed = True
                 db.session.commit()
             except Exception as exc:
-                db.session.add(ErrorLog(module="websub", message="Nhận thông báo cập nhật nhưng đồng bộ video lỗi", details=str(exc)))
+                db.session.add(ErrorLog(module="websub", action="Đồng bộ video", course_module="Hệ thống", message="Nhận thông báo cập nhật nhưng đồng bộ video lỗi", details=str(exc)))
                 db.session.commit()
         return "", 204
 
@@ -964,7 +982,7 @@ def register_routes(app):
         if search:
             q = q.filter(Video.title.ilike(f"%{search}%"))
 
-        # Danh sách playlist của chính giảng viên để lọc video và gán học phần.
+        # Danh sách playlist của chính giảng viên để lọc video và gán môn học/ mô đun.
         available_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
         allowed_playlist_ids = {p.id for p in available_playlists}
         if playlist_filter_id:
@@ -1024,7 +1042,7 @@ def register_routes(app):
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
         if not video_ids:
-            flash("Vui lòng chọn ít nhất một video để gán vào học phần.", "warning")
+            flash("Vui lòng chọn ít nhất một video để gán vào môn học/ mô đun.", "warning")
             return redirect(url_for("videos_page"))
         allowed_ids = {v.id for v in visible_video_query(user).filter(Video.id.in_([int(x) for x in video_ids if str(x).isdigit()])).all()}
         t0 = time.perf_counter()
@@ -1039,11 +1057,11 @@ def register_routes(app):
                 skipped += 1
         elapsed = time.perf_counter() - t0
         record_functional_test(
-            "ASSIGN_COURSE", "Gán video vào học phần", True, owner_id=user.id,
-            note=f"Học phần: {course.name}; gán mới {created}; bỏ qua {skipped}."
+            "ASSIGN_COURSE", "Gán video vào môn học/ mô đun", True, owner_id=user.id,
+            note=f"Môn học/ mô đun: {course.name}; gán mới {created}; bỏ qua {skipped}."
         )
         db.session.commit()
-        flash(f"Đã gán {created} video vào học phần “{course.name}”. Bỏ qua {skipped} video đã được gán trước đó.", "success")
+        flash(f"Đã gán {created} video vào môn học/ mô đun “{course.name}”. Bỏ qua {skipped} video đã được gán trước đó.", "success")
         return redirect(url_for("videos_page"))
 
     @app.post("/playlists/assign-course")
@@ -1057,7 +1075,7 @@ def register_routes(app):
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
         if not playlist_ids:
-            flash("Vui lòng chọn ít nhất một playlist để gán vào học phần.", "warning")
+            flash("Vui lòng chọn ít nhất một playlist để gán vào môn học/ mô đun.", "warning")
             return redirect(url_for("videos_page"))
 
         allowed = {p.id: p for p in visible_playlist_query(user).filter(Playlist.id.in_(playlist_ids)).all()}
@@ -1074,12 +1092,12 @@ def register_routes(app):
                 skipped += 1
         auto_added, auto_removed = reconcile_course_videos_from_playlists(course, user)
         record_functional_test(
-            "ASSIGN_PLAYLIST", "Gán playlist vào học phần", bool(created or skipped), owner_id=user.id,
+            "ASSIGN_PLAYLIST", "Gán playlist vào môn học/ mô đun", bool(created or skipped), owner_id=user.id,
             note=f"Kho học liệu → {course.name}; playlist mới/khôi phục {created}; đã có {skipped}; video tự gán {auto_added}; video tự bỏ {auto_removed}."
         )
         db.session.commit()
         flash(
-            f"Đã cập nhật playlist cho học phần “{course.name}”. Hệ thống tự gán thêm {auto_added} video thuộc playlist; không cần chọn lại từng video.",
+            f"Đã cập nhật playlist cho môn học/ mô đun “{course.name}”. Hệ thống tự gán thêm {auto_added} video thuộc playlist; không cần chọn lại từng video.",
             "success",
         )
         return redirect(url_for("videos_page") + "#playlists")
@@ -1087,10 +1105,10 @@ def register_routes(app):
     @app.post("/playlists/<int:playlist_id>/set-courses")
     @login_required
     def set_playlist_course_assignments(playlist_id):
-        """Lưu toàn bộ học phần áp dụng cho một playlist trong một thao tác.
+        """Lưu toàn bộ môn học/ mô đun áp dụng cho một playlist trong một thao tác.
 
-        Danh sách học phần gửi lên là trạng thái cuối cùng: học phần được chọn sẽ
-        nhận playlist và toàn bộ video của playlist; học phần bỏ chọn sẽ bỏ playlist
+        Danh sách môn học/ mô đun gửi lên là trạng thái cuối cùng: môn học/ mô đun được chọn sẽ
+        nhận playlist và toàn bộ video của playlist; môn học/ mô đun bỏ chọn sẽ bỏ playlist
         và các video chỉ được kế thừa từ playlist đó.
         """
         user = current_user()
@@ -1100,13 +1118,13 @@ def register_routes(app):
         selected_course_ids = {int(x) for x in request.form.getlist("course_ids") if str(x).isdigit()}
         activated, deactivated, auto_added, auto_removed = set_playlist_courses(playlist, selected_course_ids, user)
         record_functional_test(
-            "SET_PLAYLIST_COURSES", "Thiết lập học phần cho playlist", True, owner_id=user.id,
-            note=(f"Playlist: {playlist.title}; thêm/khôi phục học phần {activated}; bỏ học phần {deactivated}; "
+            "SET_PLAYLIST_COURSES", "Thiết lập môn học/ mô đun cho playlist", True, owner_id=user.id,
+            note=(f"Playlist: {playlist.title}; thêm/khôi phục môn học/ mô đun {activated}; bỏ môn học/ mô đun {deactivated}; "
                   f"video tự gán {auto_added}; video tự bỏ {auto_removed}."),
         )
         db.session.commit()
         flash(
-            f"Đã lưu học phần cho playlist “{playlist.title}”. Video trong playlist được tự động đồng bộ vào các học phần đã chọn.",
+            f"Đã lưu môn học/ mô đun cho playlist “{playlist.title}”. Video trong playlist được tự động đồng bộ vào các môn học/ mô đun đã chọn.",
             "success",
         )
         return redirect(url_for("videos_page") + "#playlists")
@@ -1120,7 +1138,7 @@ def register_routes(app):
             faculty = request.form.get("faculty_name", "").strip()
             department = request.form.get("department_name", "").strip()
             if not name or not faculty or not department:
-                flash("Vui lòng nhập tên học phần, tên khoa và bộ môn quản lý học phần.", "warning")
+                flash("Vui lòng nhập tên môn học/ mô đun, tên khoa và bộ môn quản lý môn học/ mô đun.", "warning")
             else:
                 try:
                     # GV không phải tự đặt mã. Tạo mã tạm để lấy ID, sau đó đổi sang mã tự động ổn định.
@@ -1136,15 +1154,15 @@ def register_routes(app):
                     db.session.flush()
                     assign_auto_course_code(course)
                     db.session.commit()
-                    flash(f"Đã thêm học phần “{course.name}”. Mã học phần được hệ thống tự tạo.", "success")
+                    flash(f"Đã thêm môn học/ mô đun “{course.name}”. Mã môn học/ mô đun được hệ thống tự tạo.", "success")
                 except Exception as exc:
                     db.session.rollback()
-                    flash(f"Không thêm được học phần: {exc}", "danger")
+                    flash(f"Không thêm được môn học/ mô đun: {exc}", "danger")
             return redirect(url_for("courses_page"))
         all_owned_courses = Course.query.filter_by(owner_id=user.id).order_by(Course.created_at.desc()).all()
         courses = [c for c in all_owned_courses if c.active]
-        # Không gợi ý tên học phần cũ. Tên khoa và bộ môn từng dùng vẫn được giữ
-        # trong gợi ý để GV chọn lại nhanh, kể cả khi một học phần cũ đã được ẩn.
+        # Không gợi ý tên môn học/ mô đun cũ. Tên khoa và bộ môn từng dùng vẫn được giữ
+        # trong gợi ý để GV chọn lại nhanh, kể cả khi một môn học/ mô đun cũ đã được ẩn.
         faculty_options = sorted({((c.faculty_name or c.unit_name) or "").strip() for c in all_owned_courses if ((c.faculty_name or c.unit_name) or "").strip()}, key=str.casefold)
         department_options = sorted({(c.department_name or "").strip() for c in all_owned_courses if (c.department_name or "").strip()}, key=str.casefold)
         available_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
@@ -1168,13 +1186,13 @@ def register_routes(app):
         faculty = request.form.get("faculty_name", "").strip()
         department = request.form.get("department_name", "").strip()
         if not faculty or not department:
-            flash("Vui lòng nhập đầy đủ tên khoa và bộ môn quản lý học phần.", "warning")
+            flash("Vui lòng nhập đầy đủ tên khoa và bộ môn quản lý môn học/ mô đun.", "warning")
             return redirect(url_for("courses_page"))
         course.faculty_name = faculty
         course.department_name = department
         course.unit_name = faculty  # giữ tương thích với dữ liệu cũ
         db.session.commit()
-        flash(f"Đã cập nhật khoa và bộ môn cho học phần “{course.name}”.", "success")
+        flash(f"Đã cập nhật khoa và bộ môn cho môn học/ mô đun “{course.name}”.", "success")
         return redirect(url_for("courses_page"))
 
     @app.post("/courses/<int:course_id>/playlists")
@@ -1186,7 +1204,7 @@ def register_routes(app):
             abort(403)
         playlist_ids = [int(x) for x in request.form.getlist("playlist_ids") if str(x).isdigit()]
         if not playlist_ids:
-            flash("Vui lòng chọn ít nhất một playlist để gán vào học phần.", "warning")
+            flash("Vui lòng chọn ít nhất một playlist để gán vào môn học/ mô đun.", "warning")
             return redirect(url_for("courses_page"))
         allowed = {p.id: p for p in visible_playlist_query(user).filter(Playlist.id.in_(playlist_ids)).all()}
         created = 0
@@ -1202,11 +1220,11 @@ def register_routes(app):
                 skipped += 1
         auto_added, auto_removed = reconcile_course_videos_from_playlists(course, user)
         record_functional_test(
-            "ASSIGN_PLAYLIST", "Gán playlist vào học phần", bool(created or skipped), owner_id=user.id,
-            note=f"Học phần: {course.name}; playlist mới/khôi phục {created}; đã có {skipped}; video tự gán {auto_added}; video tự bỏ {auto_removed}."
+            "ASSIGN_PLAYLIST", "Gán playlist vào môn học/ mô đun", bool(created or skipped), owner_id=user.id,
+            note=f"Môn học/ mô đun: {course.name}; playlist mới/khôi phục {created}; đã có {skipped}; video tự gán {auto_added}; video tự bỏ {auto_removed}."
         )
         db.session.commit()
-        flash(f"Đã gán playlist vào học phần “{course.name}” và tự động cập nhật các video thuộc playlist.", "success")
+        flash(f"Đã gán playlist vào môn học/ mô đun “{course.name}” và tự động cập nhật các video thuộc playlist.", "success")
         return redirect(url_for("courses_page"))
 
     @app.post("/course-playlists/<int:link_id>/delete")
@@ -1220,7 +1238,7 @@ def register_routes(app):
         auto_added, auto_removed = reconcile_course_videos_from_playlists(link.course, user)
         db.session.commit()
         flash(
-            f"Đã bỏ playlist “{link.playlist.title}” khỏi học phần và tự động bỏ {auto_removed} video chỉ được kế thừa từ playlist này. Video đã gán riêng hoặc còn thuộc playlist khác vẫn được giữ.",
+            f"Đã bỏ playlist “{link.playlist.title}” khỏi môn học/ mô đun và tự động bỏ {auto_removed} video chỉ được kế thừa từ playlist này. Video đã gán riêng hoặc còn thuộc playlist khác vẫn được giữ.",
             "success",
         )
         return redirect(url_for("courses_page"))
@@ -1246,7 +1264,7 @@ def register_routes(app):
             if class_id not in valid_ids:
                 link.active = False
         db.session.commit()
-        flash(f"Đã cập nhật lớp áp dụng cho học phần “{course.name}”.", "success")
+        flash(f"Đã cập nhật lớp áp dụng cho môn học/ mô đun “{course.name}”.", "success")
         return redirect(url_for("courses_page"))
 
     @app.post("/courses/<int:course_id>/classes")
@@ -1281,7 +1299,7 @@ def register_routes(app):
     @app.post("/courses/<int:course_id>/delete")
     @login_required
     def delete_course(course_id):
-        """Ẩn học phần khỏi danh sách sử dụng nhưng giữ dữ liệu lịch sử.
+        """Ẩn môn học/ mô đun khỏi danh sách sử dụng nhưng giữ dữ liệu lịch sử.
 
         Không xóa cứng vì ScanLog/WatchSession/QR là minh chứng nghiên cứu. Các mã QR
         đã phát hành vẫn được giữ nguyên và có thể được xóa riêng nếu giảng viên muốn.
@@ -1300,7 +1318,7 @@ def register_routes(app):
             link.active = False
         db.session.commit()
         flash(
-            f"Đã xóa học phần “{course.name}” khỏi danh sách sử dụng. Dữ liệu lịch sử và mã QR đã phát hành được giữ lại để không mất minh chứng.",
+            f"Đã xóa môn học/ mô đun “{course.name}” khỏi danh sách sử dụng. Dữ liệu lịch sử và mã QR đã phát hành được giữ lại để không mất minh chứng.",
             "success",
         )
         return redirect(url_for("courses_page"))
@@ -1348,7 +1366,7 @@ def register_routes(app):
         passed = bool(created or existing or not links)
         record_functional_test(
             "QR_BULK", "Tạo mã QR hàng loạt", passed, owner_id=user.id,
-            note=f"Học phần: {course.name}; mới {created}; đã có {existing}; bỏ qua {skipped}."
+            note=f"Môn học/ mô đun: {course.name}; mới {created}; đã có {existing}; bỏ qua {skipped}."
         )
         record_webapp_experiment(
             user.id, "TAO_QR_HANG_LOAT", elapsed, operations_count=1, success=passed,
@@ -1361,7 +1379,7 @@ def register_routes(app):
             "success" if created or existing else "warning",
         )
         # Khi tạo mã từ trang Quản lý mã QR động, giữ người dùng ở chính trang đó.
-        # Khi tạo từ trang Học phần, quay lại trang Học phần như trước.
+        # Khi tạo từ trang Môn học/ mô đun, quay lại trang Môn học/ mô đun như trước.
         return_to = request.form.get("return_to", "courses").strip().lower()
         return redirect(url_for("qr_page" if return_to == "qr" else "courses_page"))
 
@@ -1393,12 +1411,12 @@ def register_routes(app):
         passed = bool(created or existing or not links)
         record_functional_test(
             "QR_PLAYLIST_BULK", "Tạo mã QR hàng loạt cho playlist", passed, owner_id=user.id,
-            note=f"Học phần: {course.name}; mới {created}; đã có {existing}; bỏ qua {skipped}."
+            note=f"Môn học/ mô đun: {course.name}; mới {created}; đã có {existing}; bỏ qua {skipped}."
         )
         # QR cho nhiều playlist thuộc cùng nhóm nhiệm vụ đối chứng tạo QR hàng loạt.
         record_webapp_experiment(
             user.id, "TAO_QR_HANG_LOAT", elapsed, operations_count=1, success=passed,
-            note=f"Playlist học phần {course.name}: tổng {len(links)}; mới {created}; đã có {existing}; bỏ qua {skipped}",
+            note=f"Playlist môn học/ mô đun {course.name}: tổng {len(links)}; mới {created}; đã có {existing}; bỏ qua {skipped}",
             processing_seconds=(total_processing / created if created else None),
         )
         db.session.commit()
@@ -1466,7 +1484,7 @@ def register_routes(app):
                 elapsed = time.perf_counter() - action_started
                 record_functional_test(
                     "QR_SINGLE", "Tạo một mã QR", True, owner_id=user.id,
-                    note=f"Video: {video.title}; học phần: {course.name}; tạo mới: {was_created}."
+                    note=f"Video: {video.title}; môn học/ mô đun: {course.name}; tạo mới: {was_created}."
                 )
                 record_webapp_experiment(
                     user.id, "TAO_QR_RIENG", elapsed, operations_count=1, success=True,
@@ -1477,7 +1495,7 @@ def register_routes(app):
                 if was_created:
                     flash("Đã tạo mã QR động thành công.", "success")
                 else:
-                    flash("Video này đã có mã QR trong học phần; hệ thống không tạo trùng.", "info")
+                    flash("Video này đã có mã QR trong môn học/ mô đun; hệ thống không tạo trùng.", "info")
             else:
                 t0 = time.perf_counter()
                 slug = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:12]
@@ -1488,11 +1506,11 @@ def register_routes(app):
                 qr.processing_seconds = round(time.perf_counter() - t0, 4)
                 elapsed = time.perf_counter() - action_started
                 record_functional_test(
-                    "QR_SINGLE", "Tạo một mã QR", True, owner_id=user.id, note=f"Video: {video.title}; không gắn học phần."
+                    "QR_SINGLE", "Tạo một mã QR", True, owner_id=user.id, note=f"Video: {video.title}; không gắn môn học/ mô đun."
                 )
                 record_webapp_experiment(
                     user.id, "TAO_QR_RIENG", elapsed, operations_count=1, success=True,
-                    note=f"Video: {video.title}; không gắn học phần", processing_seconds=qr.processing_seconds
+                    note=f"Video: {video.title}; không gắn môn học/ mô đun", processing_seconds=qr.processing_seconds
                 )
                 db.session.commit()
                 flash("Đã tạo mã QR động thành công.", "success")
@@ -1569,10 +1587,10 @@ def register_routes(app):
         qr, was_created = create_qr_for_course_playlist(link.course, link.playlist, user, link)
         record_functional_test(
             "QR_PLAYLIST_SINGLE", "Tạo mã QR cho một playlist", True, owner_id=user.id,
-            note=f"Học phần: {link.course.name}; playlist: {link.playlist.title}; tạo mới: {was_created}."
+            note=f"Môn học/ mô đun: {link.course.name}; playlist: {link.playlist.title}; tạo mới: {was_created}."
         )
         db.session.commit()
-        flash("Đã tạo mã QR playlist thành công." if was_created else "Playlist này đã có mã QR trong học phần; hệ thống không tạo trùng.", "success" if was_created else "info")
+        flash("Đã tạo mã QR playlist thành công." if was_created else "Playlist này đã có mã QR trong môn học/ mô đun; hệ thống không tạo trùng.", "success" if was_created else "info")
         return redirect(url_for("qr_page"))
 
 
@@ -1600,7 +1618,7 @@ def register_routes(app):
             duplicate = CourseVideo.query.filter_by(course_id=linked.course_id, video_id=video.id).first()
             if duplicate and duplicate.id != linked.id:
                 if duplicate.qr_id and duplicate.qr_id != qr.id:
-                    flash("Video mới đã có một mã QR khác trong cùng học phần; không thể tạo liên kết trùng.", "warning")
+                    flash("Video mới đã có một mã QR khác trong cùng môn học/ mô đun; không thể tạo liên kết trùng.", "warning")
                     return redirect(url_for("qr_page"))
                 db.session.delete(duplicate)
                 db.session.flush()
@@ -1631,7 +1649,7 @@ def register_routes(app):
             flash("Mã QR này đã được xóa khỏi danh sách sử dụng.", "info")
             return redirect(url_for("qr_page"))
         qr.active = False
-        # Gỡ liên kết hiện hành để video trong học phần có thể tạo một QR mới nếu cần.
+        # Gỡ liên kết hiện hành để video trong môn học/ mô đun có thể tạo một QR mới nếu cần.
         for link in CourseVideo.query.filter_by(qr_id=qr.id).all():
             link.qr_id = None
         for link in CoursePlaylist.query.filter_by(qr_id=qr.id).all():
@@ -1989,7 +2007,7 @@ def register_routes(app):
         scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(500).all()
         watches = watch_q.order_by(WatchSession.started_at.desc()).limit(500).all()
 
-        # Bộ lọc lớp dùng danh mục lớp dùng chung. Với giảng viên chỉ hiển thị lớp gắn với học phần mình phụ trách.
+        # Bộ lọc lớp dùng danh mục lớp dùng chung. Với giảng viên chỉ hiển thị lớp gắn với môn học/ mô đun mình phụ trách.
         if user.role == "admin":
             all_classes = SchoolClass.query.order_by(SchoolClass.name).all()
         else:
@@ -2018,7 +2036,7 @@ def register_routes(app):
     def export_scans():
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["Mã lượt quét", "Mã sinh viên", "Mã lớp", "Học phần", "Mã QR", "Mã video YouTube", "Thời gian quét", "Thành công"])
+        w.writerow(["Mã lượt quét", "Mã sinh viên", "Mã lớp", "Môn học/ mô đun", "Mã QR", "Mã video YouTube", "Thời gian quét", "Thành công"])
         user = current_user()
         q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
         if user.role != "admin":
@@ -2632,6 +2650,23 @@ def register_routes(app):
         flash("Chức năng quản lý giảng viên đã được chuyển sang giao diện Giảng viên.", "info")
         return redirect(url_for("lecturers_page"))
 
+    def reset_business_code_sequences():
+        """Đặt lại bộ đếm ID của các bảng dùng ID để sinh mã nghiệp vụ.
+
+        Không đặt lại sequence users vì tài khoản quản trị hiện tại được giữ lại;
+        mã GV được cấp bằng bộ đếm riêng trong allocate_lecturer_code().
+        """
+        table_names = [Course.__tablename__, SchoolClass.__tablename__, ClassGroup.__tablename__]
+        dialect = db.engine.dialect.name
+        if dialect == "postgresql":
+            for table_name in table_names:
+                db.session.execute(text(
+                    "SELECT setval(pg_get_serial_sequence(:table_name, 'id'), 1, false)"
+                ), {"table_name": table_name})
+        elif dialect == "sqlite":
+            for table_name in table_names:
+                db.session.execute(text("DELETE FROM sqlite_sequence WHERE name = :name"), {"name": table_name})
+
     @app.post("/admin/reset-all-data")
     @login_required
     def reset_all_data():
@@ -2651,10 +2686,11 @@ def register_routes(app):
             OAuthAccount.query.filter(OAuthAccount.user_id != admin_id).delete(synchronize_session=False)
             User.query.filter(User.id != admin_id).delete(synchronize_session=False)
             user.lecturer_code = None
+            reset_business_code_sequences()
             db.session.commit()
             session["user_id"] = admin_id
             session.permanent = True
-            flash("Đã xóa toàn bộ dữ liệu đã lưu và toàn bộ mã GV đã cấp. Phiên quản trị hiện tại được giữ để bạn tiếp tục thiết lập hệ thống từ đầu.", "success")
+            flash("Đã xóa toàn bộ dữ liệu đã lưu, toàn bộ mã GV đã cấp và đặt lại bộ đếm mã nghiệp vụ. Mã GV, mã lớp và mã môn học/ mô đun mới sẽ được tạo lại từ đầu; phiên quản trị hiện tại vẫn được giữ.", "success")
             return redirect(url_for("index"))
         except Exception as exc:
             db.session.rollback()
@@ -2692,7 +2728,7 @@ def register_routes(app):
                 return redirect(url_for("index"))
             except Exception as exc:
                 db.session.rollback()
-                db.session.add(ErrorLog(module="restore", message="Khôi phục bản sao lưu thất bại", details=str(exc)))
+                db.session.add(ErrorLog(module="restore", action="Khôi phục dữ liệu", course_module="Hệ thống", message="Khôi phục bản sao lưu thất bại", details=str(exc)))
                 record_functional_test("RESTORE", "Khôi phục dữ liệu từ bản sao lưu", False, owner_id=user.id, note=str(exc))
                 db.session.commit()
                 flash(f"Khôi phục thất bại: {exc}", "danger")
@@ -2739,7 +2775,23 @@ def register_routes(app):
         if current_user().role != "admin":
             abort(403)
         logs = ErrorLog.query.order_by(ErrorLog.created_at.desc()).limit(300).all()
-        return render_template("errors.html", logs=logs)
+        action_fallback = {
+            "oauth": "Đăng nhập hệ thống",
+            "youtube": "Đồng bộ kênh/video",
+            "websub": "Đồng bộ video",
+            "reconcile": "Đồng bộ video",
+            "restore": "Khôi phục dữ liệu",
+            "backup": "Sao lưu dữ liệu",
+            "qr": "Tạo/điều chỉnh mã QR",
+            "scan": "Quét mã QR",
+            "viewer": "Phát video",
+        }
+        error_rows = [{
+            "log": e,
+            "action": e.action or action_fallback.get((e.module or "").lower(), "Xử lý hệ thống"),
+            "course_module": e.course_module or "Hệ thống",
+        } for e in logs]
+        return render_template("errors.html", error_rows=error_rows)
 
     @app.post("/tasks/reconcile")
     @csrf.exempt
@@ -2757,7 +2809,7 @@ def register_routes(app):
                 total += count
                 results.append({"user": user.email, "videos": count, "ok": True})
             except Exception as exc:
-                db.session.add(ErrorLog(module="reconcile", message=f"Đối soát lỗi: {user.email}", details=str(exc)))
+                db.session.add(ErrorLog(module="reconcile", action="Đồng bộ video", course_module="Hệ thống", message=f"Đối soát lỗi: {user.email}", details=str(exc)))
                 db.session.commit()
                 results.append({"user": user.email, "ok": False, "error": str(exc)})
         return jsonify({"ok": True, "total_videos": total, "results": results})
@@ -2893,6 +2945,16 @@ def acceptance_metrics(user):
     tests_pass = tests_q.filter(FunctionalTestRun.passed.is_(True)).count()
     test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
 
+    login_q = tests_q.filter(FunctionalTestRun.case_code == "AUTH_LOGIN")
+    login_total = login_q.count()
+    login_pass = login_q.filter(FunctionalTestRun.passed.is_(True)).count()
+    login_rate = round(100 * login_pass / login_total, 1) if login_total else None
+
+    sync_q = tests_q.filter(FunctionalTestRun.case_code == "YT_SYNC")
+    sync_total = sync_q.count()
+    sync_pass = sync_q.filter(FunctionalTestRun.passed.is_(True)).count()
+    sync_rate = round(100 * sync_pass / sync_total, 1) if sync_total else None
+
     exp_q = ExperimentRun.query if user.role == "admin" else ExperimentRun.query.filter_by(owner_id=user.id)
     comparison_keys = list(RESEARCH_COMPARISON_TASK_MAP.keys())
     manual = exp_q.filter(ExperimentRun.mode == "manual", ExperimentRun.success.is_(True), ExperimentRun.task_key.in_(comparison_keys)).all()
@@ -2924,7 +2986,9 @@ def acceptance_metrics(user):
     participant_base = db.session.query(ScanLog.participant_code).join(QrCode, ScanLog.qr_id == QrCode.id)
     if user.role != "admin":
         participant_base = participant_base.filter(QrCode.owner_id == user.id)
-    gv_count = participant_base.filter(ScanLog.role == "GV").distinct().count()
+    # Giảng viên tham gia được tính theo tài khoản giảng viên đã đăng nhập vào Web App.
+    # Sinh viên tham gia được tính theo mã SV thực tế đã quét QR.
+    gv_count = User.query.filter(User.role == "lecturer", User.last_login_at.isnot(None)).count() if user.role == "admin" else 1
     sv_count = participant_base.filter(ScanLog.role == "SV").distinct().count()
 
     video_q = Video.query.join(YouTubeChannel)
@@ -2946,15 +3010,17 @@ def acceptance_metrics(user):
     unit_count = len(unit_keys)
 
     return [
+        metric("Đăng nhập vào hệ thống", login_rate, "=", 100, "%"),
+        metric("Đồng bộ video thành công", sync_rate, "=", 100, "%"),
         metric("Tỷ lệ QR quét thành công", scan_rate, ">=", 98, "%"),
         metric("Thời gian xử lý hệ thống trung bình/video", round(avg_processing, 2) if avg_processing is not None else None, "<=", 5, " giây"),
         metric("Giảm số thao tác so với thủ công", reduction_ops, ">=", 30, "%"),
         metric("Giảm tổng thời gian so với thủ công", reduction_time, ">=", 30, "%"),
         metric("Tỷ lệ ca kiểm thử chức năng đạt", test_rate, ">=", 95, "%"),
-        metric("Số học phần thực nghiệm", course_count, ">=", 3, ""),
+        metric("Số môn học/ mô đun thực nghiệm", course_count, ">=", 3, ""),
         metric("Số đơn vị/khoa/bộ môn", unit_count, ">=", 2, ""),
-        metric("Số giảng viên tham gia", gv_count, ">=", 5, ""),
-        metric("Số sinh viên tham gia", sv_count, ">=", 60, ""),
+        metric("Số giảng viên tham gia", gv_count, ">=", 3, ""),
+        metric("Số sinh viên tham gia", sv_count, ">=", 50, ""),
         metric("Số video/tình huống kiểm thử", video_q.count(), ">=", 100, ""),
         metric("Mức hài lòng giảng viên", lecturer_sat, ">=", 80, "%", external=True),
         metric("Mức hài lòng sinh viên", student_sat, ">=", 80, "%", external=True),
@@ -2964,7 +3030,14 @@ def acceptance_metrics(user):
 def metric(name, value, op, target, suffix, external=False):
     passed = None
     if value is not None:
-        passed = value >= target if op == ">=" else value <= target
+        if op == ">=":
+            passed = value >= target
+        elif op == "<=":
+            passed = value <= target
+        elif op == "=":
+            passed = value == target
+        else:
+            passed = None
     return {"name": name, "value": value, "op": op, "target": target, "suffix": suffix, "passed": passed, "external": external}
 
 

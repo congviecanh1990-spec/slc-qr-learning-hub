@@ -5,10 +5,10 @@
 </div>
 
 <div class="alert alert-info shadow-sm mb-4" role="alert">
-  <div class="fw-bold mb-1">Hướng dẫn gán học liệu vào học phần</div>
+  <div class="fw-bold mb-1">Hướng dẫn gán học liệu vào môn học/ mô đun</div>
   <div>
-    <div>• Nếu kênh YouTube đã tổ chức video theo <strong>playlist</strong>, ưu tiên <strong>gán playlist cho học phần</strong>. Khi đó, các video trong playlist sẽ tự động được gán vào học phần tương ứng.</div>
-    <div class="mt-1">• Nếu <strong>không muốn gán toàn bộ video trong playlist</strong> cho học phần, hãy thực hiện <strong>chọn từng video cần sử dụng và gán video đó vào học phần tương ứng</strong>.</div>
+    <div>• Nếu kênh YouTube đã tổ chức video theo <strong>playlist</strong>, ưu tiên <strong>gán playlist cho môn học/ mô đun</strong>. Khi đó, các video trong playlist sẽ tự động được gán vào môn học/ mô đun tương ứng.</div>
+    <div class="mt-1">• Nếu <strong>không muốn gán toàn bộ video trong playlist</strong> cho môn học/ mô đun, hãy thực hiện <strong>chọn từng video cần sử dụng và gán video đó vào môn học/ mô đun tương ứng</strong>.</div>
   </div>
 </div>
 
@@ -16,7 +16,7 @@
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
     <div>
       <h4 class="mb-0">1. Danh sách playlist</h4>
-      <div class="text-muted small">Chọn học phần áp dụng cho playlist trước. Toàn bộ video hiện có và video bổ sung sau này trong playlist sẽ tự động thuộc các học phần đã chọn.</div>
+      <div class="text-muted small">Chọn môn học/ mô đun áp dụng cho playlist trước. Toàn bộ video hiện có và video bổ sung sau này trong playlist sẽ tự động thuộc các môn học/ mô đun đã chọn.</div>
     </div>
     <span class="text-muted small">Đang hiển thị: {{ playlists|length }} playlist</span>
   </div>
@@ -28,11 +28,11 @@
         <input class="form-control" name="p_q" value="{{ playlist_search }}" placeholder="Nhập từ khóa trong tên playlist">
       </div>
       <div class="col-lg-4">
-        <label class="form-label small">Phân loại học phần</label>
+        <label class="form-label small">Phân loại môn học/ mô đun</label>
         <select class="form-select" name="p_assignment">
           <option value="">Tất cả</option>
-          <option value="unassigned" {{ 'selected' if playlist_assignment=='unassigned' else '' }}>Chưa gán học phần</option>
-          <option value="assigned" {{ 'selected' if playlist_assignment=='assigned' else '' }}>Đã gán học phần</option>
+          <option value="unassigned" {{ 'selected' if playlist_assignment=='unassigned' else '' }}>Chưa gán môn học/ mô đun</option>
+          <option value="assigned" {{ 'selected' if playlist_assignment=='assigned' else '' }}>Đã gán môn học/ mô đun</option>
         </select>
       </div>
       <div class="col-lg-2"><button class="btn btn-outline-primary w-100">Lọc playlist</button></div>
@@ -42,7 +42,7 @@
   <div class="table-responsive playlist-table-wrap">
     <table class="table table-hover align-middle bg-white">
       <thead><tr>
-        <th>Playlist</th><th>Kênh YouTube</th><th>Số video</th><th style="min-width:300px">Học phần áp dụng</th><th>Trạng thái</th>
+        <th>Playlist</th><th>Kênh YouTube</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th>
       </tr></thead>
       <tbody>
       {% for p in playlists %}
@@ -61,11 +61,11 @@
                 <div class="dropdown course-picker" data-bs-auto-close="outside">
                   <button class="btn btn-outline-secondary dropdown-toggle course-picker-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                     <span class="course-picker-label">
-                      {% if active_course_ids|length == 0 %}Chọn học phần{% else %}Đã chọn {{ active_course_ids|length }} học phần{% endif %}
+                      {% if active_course_ids|length == 0 %}Chọn môn học/ mô đun{% else %}Đã chọn {{ active_course_ids|length }} môn học/ mô đun{% endif %}
                     </span>
                   </button>
                   <div class="dropdown-menu p-2 shadow course-picker-menu">
-                    <div class="small fw-bold px-2 pt-1 pb-2">Chọn một hoặc nhiều học phần</div>
+                    <div class="small fw-bold px-2 pt-1 pb-2">Chọn một hoặc nhiều môn học/ mô đun</div>
                     {% for c in courses %}
                       <label class="dropdown-item d-flex align-items-start gap-2 py-2 mb-0" for="pl{{ p.id }}-c{{ c.id }}">
                         <input class="form-check-input mt-1 playlist-course-check" type="checkbox" name="course_ids" value="{{ c.id }}" id="pl{{ p.id }}-c{{ c.id }}" {{ 'checked' if c.id in active_course_ids else '' }}>
@@ -78,13 +78,13 @@
               </div>
               <div class="form-text mt-1 course-picker-summary">
                 {% if active_course_ids|length == 0 %}
-                  Chưa gán học phần.
+                  Chưa gán môn học/ mô đun.
                 {% else %}
-                  Đang áp dụng cho {{ active_course_ids|length }} học phần. Mở danh sách để thêm hoặc bỏ học phần rồi bấm Lưu.
+                  Đang áp dụng cho {{ active_course_ids|length }} môn học/ mô đun. Mở danh sách để thêm hoặc bỏ môn học/ mô đun rồi bấm Lưu.
                 {% endif %}
               </div>
               {% else %}
-                <div class="text-muted small">Chưa có học phần. Hãy tạo học phần trước.</div>
+                <div class="text-muted small">Chưa có môn học/ mô đun. Hãy tạo môn học/ mô đun trước.</div>
               {% endif %}
             </form>
           </td>
@@ -105,7 +105,7 @@
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
     <div>
       <h4 class="mb-0">2. Danh sách video</h4>
-      <div class="text-muted small">Chỉ gán riêng khi video chưa được xử lý qua playlist hoặc khi bạn không muốn dùng toàn bộ playlist cho học phần.</div>
+      <div class="text-muted small">Chỉ gán riêng khi video chưa được xử lý qua playlist hoặc khi bạn không muốn dùng toàn bộ playlist cho môn học/ mô đun.</div>
     </div>
     <span class="text-muted small">Đang hiển thị: {{ videos|length }} video</span>
   </div>
@@ -127,11 +127,11 @@
         </select>
       </div>
       <div class="col-xl-2 col-lg-6">
-        <label class="form-label small">Phân loại học phần</label>
+        <label class="form-label small">Phân loại môn học/ mô đun</label>
         <select class="form-select" name="assignment">
           <option value="">Tất cả</option>
-          <option value="unassigned" {{ 'selected' if assignment=='unassigned' else '' }}>Chưa gán học phần</option>
-          <option value="assigned" {{ 'selected' if assignment=='assigned' else '' }}>Đã gán học phần</option>
+          <option value="unassigned" {{ 'selected' if assignment=='unassigned' else '' }}>Chưa gán môn học/ mô đun</option>
+          <option value="assigned" {{ 'selected' if assignment=='assigned' else '' }}>Đã gán môn học/ mô đun</option>
         </select>
       </div>
       <div class="col-xl-3 col-lg-6">
@@ -152,13 +152,13 @@
     <div class="card shadow-sm mb-3">
       <div class="card-body d-flex flex-wrap gap-2 align-items-end">
         <div class="flex-grow-1">
-          <label class="form-label small">Học phần đích cho video được chọn</label>
+          <label class="form-label small">Môn học/ mô đun đích cho video được chọn</label>
           <select class="form-select" name="course_id" required>
-            <option value="">— Chọn học phần —</option>
+            <option value="">— Chọn môn học/ mô đun —</option>
             {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
           </select>
         </div>
-        <button class="btn btn-primary" {{ 'disabled' if not courses else '' }}>Gán video đã chọn vào học phần</button>
+        <button class="btn btn-primary" {{ 'disabled' if not courses else '' }}>Gán video đã chọn vào môn học/ mô đun</button>
         <span class="text-muted small" id="selectedVideoCount">Đã chọn: 0 video</span>
       </div>
     </div>
@@ -167,7 +167,7 @@
       <table class="table table-hover align-middle bg-white">
         <thead><tr>
           <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllVideos" title="Chọn tất cả video đang hiển thị"></th>
-          <th>Video học liệu</th><th>Kênh YouTube</th><th>Playlist</th><th>Học phần đã gán</th><th>Khả năng phát</th><th>Trạng thái</th>
+          <th>Video học liệu</th><th>Kênh YouTube</th><th>Playlist</th><th>Môn học/ mô đun đã gán</th><th>Khả năng phát</th><th>Trạng thái</th>
         </tr></thead>
         <tbody>
         {% for v in videos %}<tr>
@@ -207,8 +207,8 @@ function updateCoursePicker(form){
   const selected=checks.filter(x=>x.checked);
   const label=form.querySelector('.course-picker-label');
   const summary=form.querySelector('.course-picker-summary');
-  if(label){ label.textContent=selected.length ? `Đã chọn ${selected.length} học phần` : 'Chọn học phần'; }
-  if(summary){ summary.textContent=selected.length ? `Đang áp dụng cho ${selected.length} học phần. Mở danh sách để thêm hoặc bỏ học phần rồi bấm Lưu.` : 'Chưa gán học phần.'; }
+  if(label){ label.textContent=selected.length ? `Đã chọn ${selected.length} môn học/ mô đun` : 'Chọn môn học/ mô đun'; }
+  if(summary){ summary.textContent=selected.length ? `Đang áp dụng cho ${selected.length} môn học/ mô đun. Mở danh sách để thêm hoặc bỏ môn học/ mô đun rồi bấm Lưu.` : 'Chưa gán môn học/ mô đun.'; }
 }
 
 document.querySelectorAll('.playlist-course-form').forEach(form=>{
