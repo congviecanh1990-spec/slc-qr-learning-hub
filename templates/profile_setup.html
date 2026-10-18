@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-8 col-xl-7">
+  <h2>Hoàn tất thông tin giảng viên</h2>
+  <p class="text-muted">Vui lòng khai báo thông tin một lần để hệ thống cấp mã giảng viên, xác định lớp chủ nhiệm (nếu có) và đồng bộ học liệu từ YouTube.</p>
+  <form method="post" class="card card-body shadow-sm" autocomplete="off" id="setup-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3"><label class="form-label fw-bold">Họ và tên đầy đủ</label>
+      <input class="form-control" name="full_name" required maxlength="255" autocomplete="name" placeholder="Nhập họ tên thật, không lấy theo tên kênh YouTube"></div>
+    <div class="mb-3"><label class="form-label fw-bold">Nhóm chuyên môn</label>
+      <select class="form-select" name="professional_group" required><option value="" selected disabled>Chọn nhóm chuyên môn</option>
+        <option value="it">Công nghệ thông tin (CNTT)</option><option value="other">Khác CNTT</option>
+      </select></div>
+    <fieldset class="mb-3"><legend class="fs-6 fw-bold">Bạn có là giảng viên chủ nhiệm lớp không?</legend>
+      <div class="form-check form-check-inline"><input class="form-check-input" type="radio" id="hr-no" name="is_homeroom" value="no" checked><label class="form-check-label" for="hr-no">Không</label></div>
+      <div class="form-check form-check-inline"><input class="form-check-input" type="radio" id="hr-yes" name="is_homeroom" value="yes"><label class="form-check-label" for="hr-yes">Có</label></div>
+    </fieldset>
+    <div id="homeroom-fields" class="border rounded p-3 bg-body-tertiary mb-3" hidden>
+      <div class="mb-3"><label class="form-label fw-bold">Tên lớp chủ nhiệm</label>
+        <input class="form-control" name="homeroom_class_name" maxlength="255" placeholder="Ví dụ: Cao đẳng CNTT K66A"></div>
+      <div><label class="form-label fw-bold">Sĩ số lớp khai báo</label>
+        <input class="form-control" type="number" name="declared_size" min="1" max="1000" placeholder="Ví dụ: 20">
+        <div class="form-text">Sĩ số khai báo chỉ để đối chiếu với danh sách SV thực tế sau khi tải Excel lên; thống kê tham gia dùng danh sách SV hợp lệ.</div>
+      </div>
+    </div>
+    <div class="alert alert-info small">Nếu lớp đã tồn tại trên hệ thống, hãy liên hệ Quản trị viên để tránh trùng tên lớp hoặc nhầm giảng viên chủ nhiệm.</div>
+    <button class="btn btn-primary">Lưu thông tin và tiếp tục</button>
+  </form>
+</div></div>
+{% endblock %}
+{% block scripts %}<script>
+(() => {
+ const radios=document.querySelectorAll('input[name="is_homeroom"]'), area=document.getElementById('homeroom-fields');
+ const fields=area.querySelectorAll('input');
+ const update=()=>{const yes=document.getElementById('hr-yes').checked;area.hidden=!yes;fields.forEach(f=>f.required=yes)};
+ radios.forEach(x=>x.addEventListener('change',update));update();
+})();
+</script>{% endblock %}

@@ -19,12 +19,13 @@ class User(db.Model):
     name = db.Column(db.String(255), nullable=False, default="")
     google_sub = db.Column(db.String(255), unique=True, nullable=True)
     role = db.Column(db.String(32), nullable=False, default="lecturer")
-    # Mã GV dùng cho nhận diện trong thực nghiệm/ghi log. Mã do quản trị viên cấp,
+    # Mã GV dùng cho nhận diện trong thực nghiệm/ghi log. Hệ thống tự cấp,
     # không thay thế tài khoản Google và không chứa họ tên.
     lecturer_code = db.Column(db.String(32), unique=True, nullable=True, index=True)
     # Phân nhóm chuyên môn phục vụ chỉ tiêu nghiệm thu: CNTT / khác CNTT.
     # Để trống khi quản trị viên chưa xác định.
     professional_group = db.Column(db.String(16), nullable=True)
+    profile_completed = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
@@ -178,6 +179,7 @@ class SchoolClass(db.Model):
     name = db.Column(db.String(255), nullable=False)
     homeroom_teacher_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     active = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    declared_size = db.Column(db.Integer, nullable=True)  # Chỉ là sĩ số GVCN khai báo, không thay danh sách SV thực tế.
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     homeroom_teacher = db.relationship("User", foreign_keys=[homeroom_teacher_id], backref=db.backref("homeroom_classes", lazy=True))
 

@@ -2,40 +2,20 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
   <div>
-    <h2 class="mb-1">{{ 'Quản lý lớp & sinh viên' if me.role == 'admin' else 'Lớp chủ nhiệm' }}</h2>
-    {% if me.role == 'admin' %}
-      <div class="text-muted">Quản trị viên tạo lớp, giao giảng viên chủ nhiệm và theo dõi sĩ số hiện tại. Danh sách sinh viên và biến động lớp do giảng viên chủ nhiệm quản lý.</div>
+    <h2 class="mb-1">{{ 'Quản lý lớp & sinh viên' if me.role == 'admin' and not own_classes else 'Lớp chủ nhiệm' }}</h2>
+    {% if me.role == 'admin' and not own_classes %}
+      <div class="text-muted">Lớp được tạo tự động từ thông tin khai báo của GVCN; Quản trị viên theo dõi sĩ số thực tế. Danh sách sinh viên và biến động lớp do giảng viên chủ nhiệm quản lý.</div>
     {% else %}
       <div class="text-muted">Quản lý danh sách sinh viên của lớp chủ nhiệm. Mã sinh viên sử dụng đúng mã do Nhà trường cấp; biến động được lưu theo ngày có hiệu lực để bảo toàn lịch sử.</div>
     {% endif %}
   </div>
-  {% if me.role != 'admin' %}
+  {% if me.role != 'admin' or own_classes %}
     <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('student_excel_template') }}">Tải tệp Excel mẫu</a>
   {% endif %}
 </div>
 
-{% if me.role == 'admin' %}
-<div class="card shadow-sm mb-4">
-  <div class="card-header fw-bold">Tạo lớp và giao giảng viên chủ nhiệm</div>
-  <div class="card-body">
-    <form method="post" action="{{ url_for('create_school_class') }}" class="row g-3">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-md-5">
-        <label class="form-label fw-bold">Tên lớp</label>
-        <input class="form-control" name="class_name" required placeholder="Ví dụ: Cao đẳng CNTT K66">
-      </div>
-      <div class="col-md-5">
-        <label class="form-label fw-bold">Giảng viên chủ nhiệm</label>
-        <select class="form-select" name="homeroom_teacher_id">
-          <option value="">— Chưa giao —</option>
-          {% for u in lecturers %}<option value="{{ u.id }}">{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}
-        </select>
-        <div class="form-text">Mã lớp được hệ thống tự động tạo.</div>
-      </div>
-      <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100">Tạo lớp</button></div>
-    </form>
-  </div>
-</div>
+{% if me.role == 'admin' and not own_classes %}
+<div class="alert alert-info">Lớp được tạo tự động khi giảng viên khai báo chủ nhiệm lớp trong lần đăng nhập đầu tiên. Quản trị viên theo dõi danh mục lớp và có thể điều chỉnh GVCN khi cần chuyển giao.</div>
 
 <div class="card shadow-sm">
   <div class="card-header fw-bold">Danh sách lớp đã tạo</div>
@@ -89,6 +69,7 @@
       <div><strong>{{ cls.name }}</strong> <span class="text-muted">({{ cls.code }})</span></div>
       <div class="d-flex flex-wrap gap-2 align-items-center small">
         <span class="badge text-bg-primary">Sĩ số đang học: {{ item.current_size }}</span>
+        {% if cls.declared_size is not none %}<span class="text-muted">Sĩ số khai báo: {{ cls.declared_size }}</span>{% endif %}
       </div>
     </div>
     <div class="card-body">

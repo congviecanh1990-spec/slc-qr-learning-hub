@@ -1,25 +1,17 @@
-# CẬP NHẬT v4.1
+# HƯỚNG DẪN CẬP NHẬT WEB APP v4.2.0
 
-- Không cần tạo lại PostgreSQL. Khi deploy, hệ thống tự bổ sung cột `professional_group` cho bảng người dùng nếu chưa có.
-- Sau khi cập nhật, Quản trị viên vào **Giảng viên** và xác định **Nhóm chuyên môn** cho các tài khoản tham gia thực nghiệm để chỉ tiêu “Số giảng viên tham gia” tính đúng số GV khác CNTT.
-- GVCN sẽ thấy **Lớp chủ nhiệm** ngay sau **Kênh YouTube** trên menu.
+Phiên bản v4.2.0 nâng cấp từ v4.1.1, không tạo database PostgreSQL mới và không yêu cầu thay đổi thông số OAuth Google.
 
-# Cập nhật Web App v4.0 trên Render
+## Cập nhật
+1. Giải nén tệp ZIP, tải các tệp/thư mục bên trong lên nhánh `main` của repository GitHub đang sử dụng; ghi đè tệp có sẵn và Commit.
+2. Chờ dịch vụ Render triển khai và báo **Live**. Không xóa cơ sở dữ liệu cũ.
+3. Mở Web App, đăng nhập bằng một tài khoản Google giảng viên. Lần đầu trên bản mới, xác nhận họ tên, chọn nhóm chuyên môn, có/không chủ nhiệm lớp. Nếu có, nhập tên lớp và sĩ số khai báo.
+4. Quan sát trang “Chờ trong giây lát để hệ thống đồng bộ kênh YouTube…”. Khi thành công hệ thống tự chuyển trang. Nếu thất bại, có thể vào hệ thống và bấm đồng bộ lại trên trang Kênh YouTube.
+5. Kiểm tra mã GV được cấp tự động; GVCN kiểm tra mã lớp và tải danh sách Excel. Vào trang Môn học/ mô đun, thêm môn học và chọn lớp; kiểm tra bảng môn học và các bộ đếm không thêm số 0 đầu.
 
-Bản v4.0 kế thừa trực tiếp v3.9.2, không cần tạo lại PostgreSQL và không cần cấu hình lại Google OAuth.
-
-1. Giải nén gói v4.0.
-2. Mở repository GitHub đang dùng cho Web App.
-3. Tải toàn bộ tệp/thư mục ở thư mục gốc của v4.0 lên nhánh `main`, ghi đè các tệp cùng tên.
-4. Commit thay đổi và chờ Render tự triển khai đến trạng thái `Live`.
-5. Mở lại Web App và nhấn `Ctrl + F5`.
-
-Sau khi cập nhật, kiểm tra:
-- Với Quản trị viên, menu **Giảng viên** nằm ngay sau **Kênh YouTube**.
-- Menu/trang **Môn học/ mô đun** hiển thị các nhãn mới đúng quy ước.
-- Trang **Đánh giá nghiệm thu** không còn cột Mã ca; có chỉ tiêu đăng nhập 100%, đồng bộ video 100%, tối thiểu 3 giảng viên và 50 sinh viên tham gia.
-- Trang **Nhật ký lỗi** có cột **Thao tác** và **Môn học/ Mô đun**.
-- Ô sửa họ tên GV không điền lại nội dung đã nhập trước; nút **Lưu họ tên** nằm ngay bên phải ô nhập.
-- Khi **Xóa toàn bộ dữ liệu đã lưu**, phiên Quản trị viên hiện tại vẫn được giữ; mã GV cấp lại từ `GV0001`, mã lớp từ `L000001`, mã môn học/ mô đun từ `HP000001`.
-
-Schema hiện có được nâng cấp tự động thêm thông tin phục vụ Nhật ký lỗi; dữ liệu cũ được giữ nguyên nếu không sử dụng chức năng xóa toàn bộ dữ liệu.
+## Lưu ý quan trọng
+- Những tài khoản đã đăng nhập trước đây vẫn phải xác nhận họ tên và nhóm chuyên môn **một lần** khi sử dụng bản mới.
+- Sĩ số khai báo của GVCN **không** thay thế số SV thực tế; phải tải Excel theo đúng mã SV của Nhà trường để sử dụng quét QR và thống kê.
+- Nếu tên lớp đã tồn tại của giảng viên khác, hệ thống từ chối tạo trùng. Quản trị viên có thể kiểm tra và chuyển giao GVCN ở danh sách lớp.
+- Tự đồng bộ cần quyền YouTube đọc dữ liệu, kết nối mạng và hạn mức API. Trên Render miễn phí, quá trình khởi động/đồng bộ có thể chậm. Nút “Vào hệ thống” không làm mất quyền đăng nhập.
+- Chưa chạy kiểm thử tích hợp với dịch vụ Google/Render trong môi trường tạo tệp. Cần nghiệm thu các thao tác thực tế sau triển khai.

@@ -5,7 +5,7 @@
   <div class="text-muted">{{ app_tagline }}</div>
 </div>
 
-{% if me and me.role == 'lecturer' %}
+{% if me %}
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-bold">Thông tin giảng viên</div>
   <div class="card-body">
@@ -24,7 +24,7 @@
       </div>
       <div class="col-lg-6">
         <div><strong>Email:</strong> {{ me.email }}</div>
-        <div class="mt-2"><strong>Mã GV thực nghiệm:</strong> {{ me.lecturer_code or 'Chưa được quản trị viên cấp' }}</div>
+        <div class="mt-2"><strong>Mã GV thực nghiệm:</strong> {{ me.lecturer_code or 'Hệ thống chưa cấp mã' }}</div>
       </div>
     </div>
   </div>

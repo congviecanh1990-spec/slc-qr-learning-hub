@@ -23,7 +23,7 @@
         <div>
           <div class="fw-semibold">{{ me.name or me.email }}</div>
           <span class="badge text-bg-secondary">{{ 'Quản trị viên' if me.role == 'admin' else 'Giảng viên' }}</span>
-          {% if me.role == 'lecturer' %}
+          {% if me.lecturer_code %}
             <div class="mt-1 text-muted">Mã GV: <strong>{{ me.lecturer_code or 'Chưa được cấp' }}</strong></div>
           {% endif %}
         </div>
@@ -39,13 +39,16 @@
       <div class="collapse navbar-collapse" id="navMain">
         <ul class="navbar-nav me-auto mb-2 mb-xl-0">
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'youtube' else '' }}" href="{{ url_for('youtube_page') }}">Kênh YouTube</a></li>
-          {% if me.role == 'admin' %}
-            <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'lecturers' else '' }}" href="{{ url_for('lecturers_page') }}">Giảng viên</a></li>
-          {% elif has_homeroom_classes %}
-            <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'classes' else '' }}" href="{{ url_for('classes_page') }}">Lớp chủ nhiệm</a></li>
+          {% if has_homeroom_classes %}
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'classes' else '' }}" href="{{ url_for('my_classes_page') }}">Lớp chủ nhiệm</a></li>
+          {% elif me.role == 'admin' %}
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'lecturers' else '' }}" href="{{ url_for('lecturers_page') }}">Giảng viên</a></li>
+          {% endif %}
+          {% if me.role == 'admin' and has_homeroom_classes %}
+          <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'lecturers' else '' }}" href="{{ url_for('lecturers_page') }}">Giảng viên</a></li>
           {% endif %}
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'courses' else '' }}" href="{{ url_for('courses_page') }}">Môn học/ mô đun</a></li>
-          {% if me.role == 'admin' and has_homeroom_classes %}<li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'classes' else '' }}" href="{{ url_for('classes_page') }}">Lớp & sinh viên</a></li>{% endif %}
+          {% if me.role == 'admin' %}<li class="nav-item"><a class="nav-link" href="{{ url_for('classes_page') }}">Lớp & sinh viên</a></li>{% endif %}
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'videos' else '' }}" href="{{ url_for('videos_page') }}">Kho video học liệu</a></li>
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'qr' else '' }}" href="{{ url_for('qr_page') }}">Mã QR động</a></li>
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'analytics' else '' }}" href="{{ url_for('analytics') }}">Thống kê khai thác</a></li>
@@ -57,7 +60,7 @@
         </ul>
         <div class="d-lg-none small border-top pt-2 mt-2">
           <span class="fw-semibold">{{ me.name or me.email }}</span> · {{ 'Quản trị viên' if me.role == 'admin' else 'Giảng viên' }}
-          {% if me.role == 'lecturer' %}<span class="ms-2">Mã GV: <strong>{{ me.lecturer_code or 'Chưa được cấp' }}</strong></span>{% endif %}
+          {% if me.lecturer_code %}<span class="ms-2">Mã GV: <strong>{{ me.lecturer_code or 'Chưa được cấp' }}</strong></span>{% endif %}
           <a class="btn btn-outline-secondary btn-sm ms-2" href="{{ url_for('logout') }}">Đăng xuất</a>
         </div>
       </div>

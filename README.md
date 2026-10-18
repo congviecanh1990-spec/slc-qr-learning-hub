@@ -293,3 +293,12 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 
 ## Phiên bản 4.1.1
 - Giao diện Lớp chủ nhiệm: tách hai thao tác thành hai cột **Lưu** và **Xóa**, căn giữa từng nút để bảng rõ ràng hơn.
+
+
+## Cập nhật v4.2.0
+- Khai báo họ tên đầy đủ, nhóm chuyên môn, GVCN, tên lớp và sĩ số dự kiến lần đầu; tạo mã GV/lớp tự động.
+- Quản trị viên cũng là giảng viên; nếu là GVCN thì có trang Lớp chủ nhiệm và có mã GV.
+- Sau đăng nhập, màn hình chờ tự đồng bộ YouTube; có nút vào hệ thống/thử lại.
+- Thêm môn học/mô đun có thể chọn ngay lớp; danh sách môn học trình bày dạng bảng với bộ chọn nhiều lớp; số lượng không đệm 0.
+- Sĩ số khai báo không thay thế số SV đang học (lấy từ danh sách SV GVCN tải Excel).
+- Nâng schema thêm users.profile_completed và school_classes.declared_size; không xóa dữ liệu cũ.

@@ -1,74 +1,61 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="row g-4">
-  <div class="col-lg-4">
-    <h2>Quản lý môn học/ mô đun</h2>
-    <form method="post" class="card card-body shadow-sm" autocomplete="off">
+<h2 class="mb-3">Quản lý môn học/ mô đun</h2>
+<div class="card shadow-sm mb-4">
+  <div class="card-header fw-bold">Thêm môn học/ mô đun</div>
+  <div class="card-body">
+    <form method="post" class="row g-3 align-items-end" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-      <label class="form-label fw-bold">Tên môn học/ mô đun</label>
-      <input class="form-control mb-3" name="course_name" required autocomplete="off" placeholder="Ví dụ: Tin học văn phòng">
-
-      <label class="form-label fw-bold">Bộ môn quản lý môn học/ mô đun</label>
-      <input class="form-control mb-3" name="department_name" list="department-name-options" required autocomplete="organization-title" placeholder="Ví dụ: Bộ môn Công nghệ thông tin">
-      <datalist id="department-name-options">
-        {% for department in department_options %}<option value="{{ department }}"></option>{% endfor %}
-      </datalist>
-
-      <label class="form-label fw-bold">Tên khoa</label>
-      <input class="form-control mb-3" name="faculty_name" list="faculty-name-options" required autocomplete="organization" placeholder="Gõ mới hoặc chọn tên khoa đã dùng">
-      <datalist id="faculty-name-options">
-        {% for faculty in faculty_options %}<option value="{{ faculty }}"></option>{% endfor %}
-      </datalist>
-
-      <button class="btn btn-primary">Thêm môn học/ mô đun</button>
-    </form>
-  </div>
-
-  <div class="col-lg-8">
-    <h2 class="invisible d-none d-lg-block">.</h2>
-    {% for c in courses %}
-      {% set total_video = c.video_links|length %}
-      {% set ns = namespace(video_qr=0, playlist_total=0, playlist_qr=0, class_total=0) %}
-      {% for link in c.video_links %}
-        {% if link.qr_id and link.qr and link.qr.active %}{% set ns.video_qr = ns.video_qr + 1 %}{% endif %}
-      {% endfor %}
-      {% for link in c.playlist_links if link.active %}
-        {% set ns.playlist_total = ns.playlist_total + 1 %}
-        {% if link.qr_id and link.qr and link.qr.active %}{% set ns.playlist_qr = ns.playlist_qr + 1 %}{% endif %}
-      {% endfor %}
-      {% for link in c.school_class_links if link.active %}{% set ns.class_total = ns.class_total + 1 %}{% endfor %}
-
-      <div class="card mb-3 shadow-sm">
-        <div class="card-body">
-          <h5 class="mb-1">{{ c.name }}</h5>
-          <div class="small text-muted mb-3">{{ c.department_name or 'Chưa cập nhật bộ môn' }} · {{ c.faculty_name or c.unit_name or 'Chưa cập nhật khoa' }}</div>
-
-          <div class="border rounded p-3 bg-body-tertiary mb-3">
-            <div><b>Video của môn học/ mô đun:</b> {{ '%02d'|format(total_video) }}, <b>đã có mã QR:</b> {{ ns.video_qr }}</div>
-            <div><b>Playlist của môn học/ mô đun:</b> {{ '%02d'|format(ns.playlist_total) }}, <b>đã có mã QR:</b> {{ ns.playlist_qr }}</div>
-            <div><b>Số lớp:</b> {{ ns.class_total }}</div>
+      <div class="col-lg-3"><label class="form-label fw-bold">Tên môn học/ mô đun</label><input class="form-control" name="course_name" required placeholder="Nhập tên môn học"></div>
+      <div class="col-lg-3"><label class="form-label fw-bold">Bộ môn quản lý môn học/ mô đun</label><input class="form-control" name="department_name" list="department-options" required placeholder="Nhập tên bộ môn"><datalist id="department-options">{% for d in department_options %}<option value="{{ d }}"></option>{% endfor %}</datalist></div>
+      <div class="col-lg-2"><label class="form-label fw-bold">Tên khoa</label><input class="form-control" name="faculty_name" list="faculty-options" required placeholder="Tên khoa"><datalist id="faculty-options">{% for f in faculty_options %}<option value="{{ f }}"></option>{% endfor %}</datalist></div>
+      <div class="col-lg-3"><label class="form-label fw-bold">Lớp áp dụng</label>
+        <div class="dropdown"><button type="button" class="btn btn-outline-secondary dropdown-toggle w-100 text-start" data-bs-toggle="dropdown" data-bs-auto-close="outside">Chọn lớp áp dụng</button>
+          <div class="dropdown-menu p-2 shadow" style="max-height:220px;overflow-y:auto;min-width:250px">
+          {% for cls in available_school_classes %}<label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" name="school_class_ids" value="{{ cls.id }}">{{ cls.name }}</label>
+          {% else %}<span class="dropdown-item-text text-muted">Chưa có lớp được tạo</span>{% endfor %}
           </div>
-
-          <form method="post" action="{{ url_for('set_course_school_classes', course_id=c.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <label class="form-label fw-bold">Lớp áp dụng cho môn học/ mô đun</label>
-            <select class="form-select" name="school_class_ids" multiple size="5">
-              {% set selected_ids = c.school_class_links|selectattr('active')|map(attribute='school_class_id')|list %}
-              {% for cls in available_school_classes %}
-                <option value="{{ cls.id }}" {{ 'selected' if cls.id in selected_ids else '' }}>{{ cls.name }}{% if cls.code %} — {{ cls.code }}{% endif %}</option>
-              {% else %}
-                <option disabled>Chưa có lớp trong danh mục dùng chung.</option>
-              {% endfor %}
-            </select>
-            <div class="form-text">Giữ Ctrl để chọn nhiều lớp. Danh sách sinh viên của lớp do giảng viên chủ nhiệm quản lý tập trung, không nhập lại theo từng môn học/ mô đun.</div>
-            <button class="btn btn-outline-primary btn-sm mt-2" {{ 'disabled' if not available_school_classes else '' }}>Lưu lớp áp dụng</button>
-          </form>
         </div>
       </div>
-    {% else %}
-      <div class="text-muted">Chưa có môn học/ mô đun.</div>
-    {% endfor %}
+      <div class="col-lg-1"><button class="btn btn-primary w-100">Thêm</button></div>
+    </form>
+  </div>
+</div>
+<div class="card shadow-sm">
+  <div class="card-header fw-bold">Danh sách môn học/ mô đun đã tạo</div>
+  <div class="table-responsive" style="overflow:visible">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>Môn học/ mô đun</th><th>Bộ môn – Khoa</th><th>Video của môn học/ mô đun</th><th>Playlist của môn học/ mô đun</th><th>Số lớp</th><th style="min-width:210px">Lớp của môn học/ mô đun</th></tr></thead>
+      <tbody>
+      {% for c in courses %}
+        {% set ns = namespace(video_qr=0, playlist_total=0, playlist_qr=0, class_total=0) %}
+        {% for link in c.video_links %}{% if link.qr_id and link.qr and link.qr.active %}{% set ns.video_qr=ns.video_qr+1 %}{% endif %}{% endfor %}
+        {% for link in c.playlist_links if link.active %}{% set ns.playlist_total=ns.playlist_total+1 %}{% if link.qr_id and link.qr and link.qr.active %}{% set ns.playlist_qr=ns.playlist_qr+1 %}{% endif %}{% endfor %}
+        {% for link in c.school_class_links if link.active %}{% set ns.class_total=ns.class_total+1 %}{% endfor %}
+        <tr>
+          <td><strong>{{ c.name }}</strong></td><td><span class="small">{{ c.department_name or 'Chưa cập nhật' }}<br>{{ c.faculty_name or c.unit_name or 'Chưa cập nhật' }}</span></td>
+          <td>Video: <strong>{{ c.video_links|length }}</strong><div class="small text-muted">Đã có mã QR: {{ ns.video_qr }}</div></td>
+          <td>Playlist: <strong>{{ ns.playlist_total }}</strong><div class="small text-muted">Đã có mã QR: {{ ns.playlist_qr }}</div></td>
+          <td class="text-center"><strong>{{ ns.class_total }}</strong></td>
+          <td>
+            <form method="post" action="{{ url_for('set_course_school_classes', course_id=c.id) }}" class="d-flex align-items-center gap-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              {% set selected_ids = c.school_class_links|selectattr('active')|map(attribute='school_class_id')|list %}
+              <div class="dropdown flex-grow-1">
+                <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle w-100" data-bs-toggle="dropdown" data-bs-auto-close="outside">{{ 'Đã chọn ' ~ ns.class_total ~ ' lớp' if ns.class_total else 'Chọn lớp' }}</button>
+                <div class="dropdown-menu p-2 shadow" style="max-height:220px;overflow-y:auto;min-width:240px">
+                  {% for cls in available_school_classes %}
+                    <label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" name="school_class_ids" value="{{ cls.id }}" {{ 'checked' if cls.id in selected_ids else '' }}>{{ cls.name }}</label>
+                  {% else %}<span class="dropdown-item-text text-muted">Chưa có lớp trong hệ thống</span>{% endfor %}
+                </div>
+              </div>
+              <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not available_school_classes else '' }}>Lưu</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}<tr><td colspan="6" class="text-center text-muted py-4">Chưa có môn học/ mô đun.</td></tr>{% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 {% endblock %}

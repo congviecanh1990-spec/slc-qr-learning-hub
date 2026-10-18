@@ -7,12 +7,12 @@
   </div>
   <div class="text-end small text-muted">
     <div>Tổng tài khoản: <strong>{{ rows|length }}</strong></div>
-    <div>Mã GV chỉ cấp cho tài khoản Giảng viên.</div>
+    <div>Mã giảng viên cấp tự động cho tất cả tài khoản, bao gồm Quản trị viên.</div>
   </div>
 </div>
 
 <div class="alert alert-info">
-  <strong>Nguyên tắc quản lý:</strong> Họ tên hiển thị do giảng viên tự hiệu chỉnh trên giao diện Tổng quan. Chức vụ được hệ thống xác định theo quyền hiện tại: Giảng viên, Giảng viên kiêm GVCN hoặc Quản trị viên. Quản trị viên xác định thêm nhóm chuyên môn để hệ thống thống kê số giảng viên thuộc chuyên ngành khác Công nghệ thông tin trong chỉ tiêu nghiệm thu.
+  <strong>Nguyên tắc quản lý:</strong> Họ tên và nhóm chuyên môn do giảng viên tự khai báo khi đăng nhập lần đầu. Chức vụ được hệ thống xác định theo quyền hiện tại: Giảng viên, Giảng viên kiêm GVCN hoặc Quản trị viên. Hệ thống sử dụng nhóm chuyên môn đã khai báo để thống kê các giảng viên khác CNTT.
 </div>
 
 <div class="card shadow-sm">
@@ -35,20 +35,14 @@
         {% set u = row.user %}
         <tr>
           <td>
-            {% if u.role == 'admin' %}
-              <span class="text-muted">Không áp dụng</span>
-            {% elif u.lecturer_code %}
-              <strong>{{ u.lecturer_code }}</strong>
-            {% else %}
-              <span class="text-muted">Chưa được cấp</span>
-            {% endif %}
+            {% if u.lecturer_code %}<strong>{{ u.lecturer_code }}</strong>{% else %}<span class="text-muted">Chưa hoàn tất khai báo</span>{% endif %}
           </td>
           <td><strong>{{ u.name or 'Chưa cập nhật họ tên' }}</strong></td>
           <td>{{ row.channel_name }}</td>
           <td class="text-nowrap">{{ u.email }}</td>
           <td><span class="badge {{ 'text-bg-danger' if u.role == 'admin' else ('text-bg-primary' if row.position == 'Giảng viên kiêm GVCN' else 'text-bg-secondary') }}">{{ row.position }}</span></td>
           <td>
-            {% if u.role == 'lecturer' %}
+            {% if u.profile_completed %}
             <form method="post" action="{{ url_for('update_lecturer_professional_group', lecturer_id=u.id) }}" class="d-flex gap-1">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <select class="form-select form-select-sm" name="professional_group" aria-label="Nhóm chuyên môn của giảng viên">
@@ -65,10 +59,6 @@
           <td>
             <div class="d-flex flex-wrap gap-2">
               {% if u.role == 'lecturer' %}
-                <form method="post" action="{{ url_for('assign_lecturer_code_admin', lecturer_id=u.id) }}">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button class="btn btn-sm btn-outline-primary" {{ 'disabled' if u.lecturer_code else '' }}>{{ 'Đã cấp mã' if u.lecturer_code else 'Cấp mã GV' }}</button>
-                </form>
                 <form method="post" action="{{ url_for('delete_lecturer_account', lecturer_id=u.id) }}" onsubmit="return confirm('Bạn có chắc chắn muốn xóa giảng viên {{ (u.name or u.email)|e }} khỏi Web App?') && confirm('Xác nhận lần cuối: toàn bộ dữ liệu thuộc giảng viên này như kết nối YouTube, môn học/ mô đun, QR, lượt quét/xem và dữ liệu thử nghiệm sẽ bị xóa. Thao tác này không thể hoàn tác nếu chưa có bản sao lưu.');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="btn btn-sm btn-outline-danger">Xóa giảng viên</button>
