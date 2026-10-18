@@ -179,6 +179,43 @@ def resolve_student_class_for_qr(student_code: str, qr: QrCode, on_date: date | 
     return student, enrollments[0].school_class, None
 
 
+
+def eligible_classes_for_qr(qr: QrCode):
+    """Chỉ cho người quét chọn lớp đang áp dụng cho môn học/mô đun của QR."""
+    query = SchoolClass.query.filter(SchoolClass.active.is_(True))
+    if qr.course_id:
+        query = query.join(CourseClass, CourseClass.school_class_id == SchoolClass.id).filter(
+            CourseClass.course_id == qr.course_id,
+            CourseClass.active.is_(True),
+        )
+    return query.distinct().order_by(SchoolClass.name, SchoolClass.id).all()
+
+
+def current_students_in_class(school_class: SchoolClass, on_date: date | None = None):
+    """Danh sách SV đang học, không lấy SV đã bảo lưu/nghỉ/chuyển lớp."""
+    on_date = on_date or utcnow().date()
+    rows = (Student.query.join(ClassEnrollment, ClassEnrollment.student_id == Student.id)
+            .filter(ClassEnrollment.school_class_id == school_class.id,
+                    ClassEnrollment.started_on <= on_date,
+                    or_(ClassEnrollment.ended_on.is_(None), ClassEnrollment.ended_on > on_date))
+            .distinct().all())
+    return sorted(rows, key=lambda item: ((item.full_name or "").casefold(), item.student_code))
+
+
+def validate_student_selection_for_qr(qr: QrCode, school_class_id: int, student_id: int, class_name: str):
+    """Đối chiếu lựa chọn với lớp, liên kết môn học và sĩ số tại thời điểm hiện tại."""
+    school_class = db.session.get(SchoolClass, school_class_id)
+    if not school_class or school_class.id not in {c.id for c in eligible_classes_for_qr(qr)}:
+        return None, None, "Lớp không thuộc môn học/mô đun của mã QR này. Vui lòng chọn lại lớp."
+    normalized = re.sub(r"\s+", " ", (class_name or "").strip()).casefold()
+    if normalized != re.sub(r"\s+", " ", school_class.name.strip()).casefold():
+        return None, None, "Tên lớp chưa khớp với lớp đã chọn. Vui lòng chọn lớp từ danh sách gợi ý."
+    student = db.session.get(Student, student_id)
+    if not student or student.id not in {row.id for row in current_students_in_class(school_class)}:
+        return None, None, "Sinh viên không còn trong danh sách đang học của lớp đã chọn. Vui lòng kiểm tra lại."
+    return student, school_class, None
+
+
 def role_label(role: str) -> str:
     return "Quản trị viên" if role == "admin" else "Giảng viên"
 
@@ -321,11 +358,16 @@ def ensure_schema_upgrades():
             test_columns = {c["name"] for c in inspector.get_columns("functional_test_runs")}
             if "source" not in test_columns:
                 conn.execute(text("ALTER TABLE functional_test_runs ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'manual'"))
+            if "participant_code" not in test_columns:
+                conn.execute(text("ALTER TABLE functional_test_runs ADD COLUMN participant_code VARCHAR(128)"))
+            if "participant_class_code" not in test_columns:
+                conn.execute(text("ALTER TABLE functional_test_runs ADD COLUMN participant_class_code VARCHAR(64)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_functional_test_runs_participant_code ON functional_test_runs (participant_code)"))
             # Cho phép ghi lỗi OAuth trước khi xác định được user. PostgreSQL hỗ trợ trực tiếp.
             if db.engine.dialect.name == "postgresql":
                 conn.execute(text("ALTER TABLE functional_test_runs ALTER COLUMN owner_id DROP NOT NULL"))
 
-def record_functional_test(case_code, case_name, passed, owner_id=None, note="", source="automatic"):
+def record_functional_test(case_code, case_name, passed, owner_id=None, note="", source="automatic", participant_code=None, participant_class_code=None):
     """Ghi bằng chứng kiểm thử phát sinh từ hoạt động thật của hệ thống.
 
     Hàm chỉ thêm bản ghi vào session hiện tại; caller chủ động commit cùng giao dịch nghiệp vụ.
@@ -337,6 +379,8 @@ def record_functional_test(case_code, case_name, passed, owner_id=None, note="",
         passed=bool(passed),
         source=(source or "automatic")[:16],
         note=(note or "")[:4000],
+        participant_code=(participant_code or None),
+        participant_class_code=(participant_class_code or None),
     ))
 
 
@@ -785,7 +829,7 @@ def register_routes(app):
             "create_course_qrs_bulk": "courses", "create_course_playlist_qrs_bulk": "courses", "download_course_qrs": "courses",
             "qr_page": "qr", "create_playlist_qr": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr", "delete_all_qrs": "qr",
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
-            "classes_page": "class_admin", "my_classes_page": "homeroom", "teaching_classes_page":"teaching_classes", "add_teaching_class":"teaching_classes", "create_school_class": "class_admin", "assign_homeroom_teacher": "class_admin",
+            "classes_page": "class_admin", "my_classes_page": "homeroom", "teaching_classes_page":"teaching_classes", "create_school_class": "class_admin", "assign_homeroom_teacher": "class_admin",
             "upload_class_students": "homeroom", "add_class_student": "homeroom", "change_student_status": "homeroom", "delete_class_student": "homeroom",
             "lecturers_page": "lecturers", "assign_lecturer_code_admin": "lecturers", "update_lecturer_professional_group": "lecturers", "delete_lecturer_account": "lecturers",
             "research_page": "research",
@@ -2067,25 +2111,38 @@ def register_routes(app):
             viewer_identity = "Quản trị viên"
             tracking_enabled = False
         else:
-            # Sinh viên không đăng nhập hệ thống quản trị. Chỉ nhập mã sinh viên do Nhà trường cấp;
-            # hệ thống tự xác định lớp theo dữ liệu GVCN và thời điểm quét.
+            # Mỗi lượt mở QR mới cần SV tự chọn lớp và tên để hạn chế dùng nhầm
+            # phiên người xem trên thiết bị dùng chung. Bước chuyển về từ biểu mẫu
+            # nhận diện được đánh dấu một lần trong phiên, không dùng cho QR khác.
             session_code = session.get("participant_code") if session.get("participant_role") == "SV" else None
-            if session_code:
-                _, resolved_class, resolve_error = resolve_student_class_for_qr(session_code, qr)
-                if resolve_error:
-                    for key in ("participant_code", "participant_role", "participant_class_code"):
-                        session.pop(key, None)
+            just_identified = (session.pop("identified_for_qr", None) == slug)
+            resolved_class = None
+            if session_code and just_identified:
+                school_class = SchoolClass.query.filter_by(code=session.get("participant_class_code"), active=True).first()
+                student = Student.query.filter_by(student_code=normalize_student_code(session_code)).first()
+                if school_class and student:
+                    _, resolved_class, resolve_error = validate_student_selection_for_qr(
+                        qr, school_class.id, student.id, school_class.name)
+                    if resolve_error:
+                        session_code = None
+                else:
                     session_code = None
+            else:
+                session_code = None
             if not session_code:
                 session["identify_next"] = url_for("public_qr", slug=slug)
                 session["identify_qr_slug"] = slug
                 message = session.pop("identify_error", None)
-                return render_template("identify.html", qr=qr, message=message)
+                classes = eligible_classes_for_qr(qr)
+                class_choices = [{"id": cls.id, "name": cls.name} for cls in classes]
+                return render_template("identify.html", qr=qr, message=message,
+                                       class_choices=class_choices)
             pcode = normalize_student_code(session_code)
             role = "SV"
             class_code = resolved_class.code
             viewer_identity = pcode
             session["participant_class_code"] = class_code
+            session["participant_qr_slug"] = slug
 
         if qr.is_playlist:
             playlist = qr.playlist
@@ -2107,7 +2164,10 @@ def register_routes(app):
                     ))
                     record_functional_test(
                         "QR_PLAYLIST_SCAN", "Quét mã QR playlist và mở học liệu", success, owner_id=qr.owner_id,
-                        note=f"QR {qr.slug}; playlist: {playlist.title if playlist else 'không có'}; vai trò {role}."
+                        note=(f"{playlist.title if playlist else qr.title} – "
+                              f"{qr.course.name if qr.course else 'Chưa xác định môn học/mô đun'}"),
+                        participant_code=pcode if role == "SV" else None,
+                        participant_class_code=class_code if role == "SV" else None,
                     )
                     db.session.commit()
             if not playlist:
@@ -2141,7 +2201,10 @@ def register_routes(app):
                 ))
                 record_functional_test(
                     "QR_SCAN", "Quét mã QR và mở học liệu", success, owner_id=qr.owner_id,
-                    note=f"QR {qr.slug}; vai trò {role}; trạng thái video: {video.status_label if video else 'không có video'}."
+                    note=(f"{video.title if video else qr.title} – "
+                          f"{qr.course.name if qr.course else 'Chưa xác định môn học/mô đun'}"),
+                    participant_code=pcode if role == "SV" else None,
+                    participant_class_code=class_code if role == "SV" else None,
                 )
                 db.session.commit()
 
@@ -2163,25 +2226,49 @@ def register_routes(app):
         )
 
 
+    @app.get("/q/<slug>/students")
+    def qr_class_students(slug):
+        """Chỉ trả họ tên, mã SV đang học của một lớp được gán cho QR hợp lệ."""
+        qr = QrCode.query.filter_by(slug=slug, active=True).first_or_404()
+        class_id = request.args.get("class_id", type=int)
+        allowed_ids = {row.id for row in eligible_classes_for_qr(qr)}
+        if not class_id or class_id not in allowed_ids:
+            response = jsonify({"students": [], "error": "Lớp không thuộc học liệu được giao."})
+            response.status_code = 400
+        else:
+            school_class = db.session.get(SchoolClass, class_id)
+            students = current_students_in_class(school_class)
+            response = jsonify({"students": [
+                {"id": student.id, "name": student.full_name, "code": student.student_code}
+                for student in students
+            ]})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.post("/identify")
     def identify():
-        code = normalize_student_code(request.form.get("participant_code", ""))
         nxt = session.get("identify_next") or url_for("index")
         slug = session.get("identify_qr_slug")
         qr = QrCode.query.filter_by(slug=slug, active=True).first() if slug else None
-        if not code:
-            session["identify_error"] = "Vui lòng nhập mã sinh viên do Nhà trường cấp."
-            return redirect(nxt)
         if not qr:
             session["identify_error"] = "Không xác định được mã QR đang truy cập. Vui lòng quét lại mã QR."
             return redirect(nxt)
-        student, school_class, error = resolve_student_class_for_qr(code, qr)
+        class_id = request.form.get("school_class_id", type=int)
+        student_id = request.form.get("student_id", type=int)
+        class_name = request.form.get("class_name", "")
+        if not class_id or not student_id:
+            session["identify_error"] = "Vui lòng chọn tên lớp và họ tên sinh viên trong danh sách."
+            return redirect(nxt)
+        student, school_class, error = validate_student_selection_for_qr(
+            qr, class_id, student_id, class_name)
         if error:
             session["identify_error"] = error
             return redirect(nxt)
         session["participant_code"] = student.student_code
         session["participant_role"] = "SV"
         session["participant_class_code"] = school_class.code
+        session["participant_qr_slug"] = slug
+        session["identified_for_qr"] = slug
         session.pop("identify_qr_slug", None)
         session.pop("identify_error", None)
         session.pop("identify_next", None)
@@ -2189,7 +2276,8 @@ def register_routes(app):
 
     @app.post("/participant/reset")
     def participant_reset():
-        for k in ("participant_code", "participant_role", "participant_class_code"):
+        for k in ("participant_code", "participant_role", "participant_class_code",
+                  "participant_qr_slug", "identified_for_qr"):
             session.pop(k, None)
         return redirect(request.referrer or url_for("index"))
 
@@ -2200,6 +2288,8 @@ def register_routes(app):
         qr = QrCode.query.filter_by(slug=slug, active=True).first_or_404()
         if not session.get("participant_code"):
             return jsonify({"error": "missing_participant_or_video"}), 400
+        if session.get("participant_role") == "SV" and session.get("participant_qr_slug") != slug:
+            return jsonify({"error": "Vui lòng xác nhận lại lớp và tên sinh viên cho mã QR này."}), 403
 
         if qr.is_playlist:
             video_id = data.get("video_id")
@@ -2290,52 +2380,140 @@ def register_routes(app):
     @app.get("/analytics")
     @login_required
     def analytics():
+        """Bảng theo dõi SV và danh sách chưa quét/chưa xem hoàn thành theo QR được giao."""
         user = current_user()
+        course_q = Course.query.filter(Course.active.is_(True))
+        qr_q = QrCode.query.filter(QrCode.active.is_(True), QrCode.course_id.isnot(None))
         scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
         watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
         if user.role != "admin":
+            course_q = course_q.filter(Course.owner_id == user.id)
+            qr_q = qr_q.filter(QrCode.owner_id == user.id)
             scan_q = scan_q.filter(QrCode.owner_id == user.id)
             watch_q = watch_q.filter(QrCode.owner_id == user.id)
+        course_options = course_q.order_by(Course.name).all()
+        qr_options = qr_q.order_by(QrCode.course_id, QrCode.title).all()
+        if user.role == "admin":
+            class_options = SchoolClass.query.filter(SchoolClass.active.is_(True)).order_by(SchoolClass.name).all()
+        else:
+            class_options = (SchoolClass.query.join(CourseClass, CourseClass.school_class_id == SchoolClass.id)
+                             .join(Course, CourseClass.course_id == Course.id)
+                             .filter(Course.owner_id == user.id, Course.active.is_(True),
+                                     CourseClass.active.is_(True), SchoolClass.active.is_(True))
+                             .distinct().order_by(SchoolClass.name).all())
+        class_name_map = {c.code: c.name for c in SchoolClass.query.all()}
+        for legacy in ClassGroup.query.all():
+            class_name_map.setdefault(legacy.code, legacy.name)
 
         participant = request.args.get("participant", "").strip()
         class_code = request.args.get("class_code", "").strip()
-        qr_slug = request.args.get("qr", "").strip()
+        course_id = request.args.get("course_id", type=int)
+        qr_id = request.args.get("qr_id", type=int)
+        status = request.args.get("status", "all")
+        if status not in {"all", "not_scanned", "not_completed"}:
+            status = "all"
+        selected_course = next((c for c in course_options if c.id == course_id), None)
+        selected_qr = next((q for q in qr_options if q.id == qr_id), None)
+        # Lọc history độc lập với danh sách SV chưa tham gia; cần có QR thuộc đúng phạm vi.
         if participant:
             scan_q = scan_q.filter(ScanLog.participant_code.ilike(f"%{participant}%"))
             watch_q = watch_q.filter(WatchSession.participant_code.ilike(f"%{participant}%"))
         if class_code:
             scan_q = scan_q.filter(ScanLog.class_code == class_code)
             watch_q = watch_q.filter(WatchSession.class_code == class_code)
-        if qr_slug:
-            scan_q = scan_q.filter(QrCode.slug == qr_slug)
-            watch_q = watch_q.filter(QrCode.slug == qr_slug)
+        if course_id:
+            if selected_course is None:
+                scan_q = scan_q.filter(ScanLog.id == -1)
+                watch_q = watch_q.filter(WatchSession.id == -1)
+            else:
+                scan_q = scan_q.filter(ScanLog.course_id == course_id)
+                watch_q = watch_q.filter(WatchSession.course_id == course_id)
+        if qr_id:
+            if selected_qr is None:
+                scan_q = scan_q.filter(ScanLog.id == -1)
+                watch_q = watch_q.filter(WatchSession.id == -1)
+            else:
+                scan_q = scan_q.filter(ScanLog.qr_id == qr_id)
+                watch_q = watch_q.filter(WatchSession.qr_id == qr_id)
 
-        scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(500).all()
-        watches = watch_q.order_by(WatchSession.started_at.desc()).limit(500).all()
-
-        # Bộ lọc lớp dùng danh mục lớp dùng chung. Với giảng viên chỉ hiển thị lớp gắn với môn học/ mô đun mình phụ trách.
-        if user.role == "admin":
-            all_classes = SchoolClass.query.order_by(SchoolClass.name).all()
-        else:
-            all_classes = (SchoolClass.query.join(CourseClass, CourseClass.school_class_id == SchoolClass.id)
-                           .join(Course, CourseClass.course_id == Course.id)
-                           .filter(Course.owner_id == user.id)
-                           .distinct().order_by(SchoolClass.name).all())
-        class_options = [c for c in all_classes if c.active]
-        class_name_map = {c.code: c.name for c in SchoolClass.query.all()}
-        # Dữ liệu thử nghiệm cũ vẫn được hiển thị đúng tên nếu còn dùng mã lớp phiên bản trước.
-        for legacy in ClassGroup.query.all():
-            class_name_map.setdefault(legacy.code, legacy.name)
-
-        day_q = db.session.query(func.date(ScanLog.scanned_at), func.count(ScanLog.id)).join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
-        if user.role != "admin":
-            day_q = day_q.filter(QrCode.owner_id == user.id)
-        by_day = day_q.group_by(func.date(ScanLog.scanned_at)).order_by(func.date(ScanLog.scanned_at)).limit(30).all()
-        chart_labels = [str(x[0]) for x in by_day]
-        chart_values = [x[1] for x in by_day]
+        pending_rows, pending_notice, participant_stats = [], "", None
+        if status != "all":
+            selected_class = next((c for c in class_options if c.code == class_code), None)
+            if not selected_class or not selected_qr:
+                pending_notice = "Vui lòng chọn Lớp và mã QR để xác định chính xác danh sách sinh viên chưa tham gia."
+            elif not selected_qr.course_id:
+                pending_notice = "Mã QR chưa thuộc môn học/mô đun nên chưa xác định được danh sách lớp áp dụng."
+            elif selected_course and selected_qr.course_id != selected_course.id:
+                pending_notice = "Mã QR không thuộc môn học/mô đun đang chọn."
+            elif not CourseClass.query.filter_by(course_id=selected_qr.course_id,
+                                                  school_class_id=selected_class.id, active=True).first():
+                pending_notice = "Lớp chưa được gán cho môn học/mô đun của mã QR đã chọn."
+            else:
+                today = utcnow().date()
+                roster = (db.session.query(Student).join(ClassEnrollment, ClassEnrollment.student_id == Student.id)
+                          .filter(ClassEnrollment.school_class_id == selected_class.id,
+                                  ClassEnrollment.started_on <= today,
+                                  or_(ClassEnrollment.ended_on.is_(None), ClassEnrollment.ended_on > today))
+                          .distinct().order_by(Student.student_code).all())
+                roster_codes = [s.student_code for s in roster]
+                valid_scan_codes = set()
+                completed_pairs = set()
+                if roster_codes:
+                    valid_scan_codes = {r[0] for r in (db.session.query(ScanLog.participant_code)
+                        .filter(ScanLog.role == "SV", ScanLog.qr_id == selected_qr.id,
+                                ScanLog.class_code == selected_class.code,
+                                ScanLog.success.is_(True), ScanLog.participant_code.in_(roster_codes)).distinct().all())}
+                    completed_pairs = {(r[0], r[1]) for r in (db.session.query(WatchSession.participant_code, WatchSession.video_id)
+                        .filter(WatchSession.role == "SV", WatchSession.qr_id == selected_qr.id,
+                                WatchSession.class_code == selected_class.code,
+                                WatchSession.completed.is_(True), WatchSession.participant_code.in_(roster_codes)).distinct().all())}
+                target_video_names = {}
+                if selected_qr.is_playlist:
+                    for pv in PlaylistVideo.query.filter_by(playlist_id=selected_qr.playlist_id).all():
+                        if video_is_usable(pv.video):
+                            target_video_names[pv.video_id] = pv.video.title
+                    target_video_ids = list(target_video_names)
+                else:
+                    video = active_video_for_qr(selected_qr)
+                    target_video_ids = [video.id] if video and video_is_usable(video) else []
+                    if target_video_ids:
+                        target_video_names[video.id] = video.title
+                complete_count = sum(1 for code in roster_codes
+                                     if code in valid_scan_codes and target_video_ids
+                                     and all((code, vid) in completed_pairs for vid in target_video_ids))
+                participant_stats = {"roster": len(roster), "scanned": len(valid_scan_codes),
+                                     "not_scanned": len(roster) - len(valid_scan_codes),
+                                     "completed": complete_count,
+                                     "not_completed": max(0, len(valid_scan_codes) - complete_count),
+                                     "video_total": len(target_video_ids)}
+                if status == "not_completed" and not target_video_ids:
+                    pending_notice = "Học liệu hiện không có video khả dụng; chưa thể xác định tình trạng hoàn thành."
+                else:
+                    for student in roster:
+                        scanned = student.student_code in valid_scan_codes
+                        count_completed = sum((student.student_code, vid) in completed_pairs for vid in target_video_ids)
+                        if status == "not_scanned" and not scanned:
+                            pending_rows.append({"student": student, "class_name": selected_class.name,
+                                                 "course_name": selected_qr.course.name if selected_qr.course else "—",
+                                                 "qr_title": selected_qr.title, "status": "Chưa quét thành công"})
+                        elif status == "not_completed" and scanned and count_completed < len(target_video_ids):
+                            missing = [target_video_names[vid] for vid in target_video_ids
+                                       if (student.student_code, vid) not in completed_pairs]
+                            pending_rows.append({"student": student, "class_name": selected_class.name,
+                                                 "course_name": selected_qr.course.name if selected_qr.course else "—",
+                                                 "qr_title": selected_qr.title,
+                                                 "missing_videos": missing,
+                                                 "status": f"Đã hoàn thành {count_completed}/{len(target_video_ids)} video"})
+                    if participant:
+                        pending_rows = [r for r in pending_rows if participant.lower() in r["student"].student_code.lower()
+                                        or participant.lower() in r["student"].full_name.lower()]
+        scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(500).all() if status == "all" else []
+        watches = watch_q.order_by(WatchSession.started_at.desc()).limit(500).all() if status == "all" else []
         return render_template("analytics.html", scans=scans, watches=watches,
-                               chart_labels=chart_labels, chart_values=chart_values,
-                               class_options=class_options, class_name_map=class_name_map)
+                               class_options=class_options, class_name_map=class_name_map,
+                               course_options=course_options, qr_options=qr_options,
+                               status=status, pending_rows=pending_rows,
+                               pending_notice=pending_notice, participant_stats=participant_stats)
 
     @app.get("/exports/scans.csv")
     @login_required
@@ -2378,61 +2556,18 @@ def register_routes(app):
                  .distinct().order_by(SchoolClass.name).all())
         class_rows = []
         for cls in taught:
-            if cls.homeroom_teacher_id == user.id:
-                continue
-            class_rows.append({"class":cls, "current_size":class_size_at(cls),
-                               "student_rows":[], "can_seed":can_seed_school_class(user,cls)})
-        teaching_courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
-        available_classes = SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all()
+            taught_courses = (Course.query.join(CourseClass, CourseClass.course_id == Course.id)
+                .filter(CourseClass.school_class_id == cls.id, CourseClass.active.is_(True),
+                        Course.owner_id == user.id, Course.active.is_(True))
+                .order_by(Course.name).all())
+            class_rows.append({"class": cls, "current_size": class_size_at(cls),
+                               "course_names": [c.name for c in taught_courses],
+                               "student_rows": [],
+                               "can_seed": (ClassEnrollment.query.filter_by(school_class_id=cls.id).first() is None
+                                            and can_seed_school_class(user, cls))})
         return render_template("classes.html", class_rows=class_rows, lecturers=[],
-                               teaching_courses=teaching_courses, available_classes=available_classes,
                                status_labels=STUDENT_STATUS_LABELS, today=utcnow().date(),
                                own_classes=True, teaching_only=True)
-
-    @app.post("/classes/teaching/add")
-    @login_required
-    def add_teaching_class():
-        """GV bộ môn tự khai báo lớp đang dạy; lớp dùng chung, không tạo bản ghi trùng."""
-        user = current_user()
-        course_id = request.form.get("course_id", type=int)
-        course = db.session.get(Course, course_id) if course_id else None
-        if not course or not course.active or course.owner_id != user.id:
-            flash("Vui lòng chọn môn học/Mô đun do bạn phụ trách.", "warning")
-            return redirect(url_for("teaching_classes_page"))
-        existing_class_id = request.form.get("existing_class_id", type=int)
-        new_class_name = re.sub(r"\s+", " ", (request.form.get("new_class_name") or "").strip())
-        if bool(existing_class_id) == bool(new_class_name):
-            flash("Chỉ chọn một lớp đã có hoặc nhập tên một lớp mới.", "warning")
-            return redirect(url_for("teaching_classes_page"))
-        try:
-            if new_class_name:
-                school_class, created = create_or_find_school_class(new_class_name, user)
-            else:
-                school_class = db.session.get(SchoolClass, existing_class_id)
-                if not school_class or not school_class.active:
-                    raise ValueError("Lớp được chọn không còn khả dụng.")
-                created = False
-            link = CourseClass.query.filter_by(course_id=course.id, school_class_id=school_class.id).first()
-            if link:
-                link.active = True
-            else:
-                db.session.add(CourseClass(course_id=course.id, school_class_id=school_class.id,
-                                           added_by=user.id, active=True))
-            db.session.commit()
-            if created:
-                flash(f"Đã tạo lớp “{school_class.name}” và liên kết với môn học “{course.name}”.", "success")
-            else:
-                flash(f"Đã liên kết lớp “{school_class.name}” với môn học “{course.name}”.", "success")
-            if school_class.homeroom_teacher_id == user.id:
-                flash("Bạn là GVCN của lớp này. Vui lòng mở Lớp chủ nhiệm để quản lý danh sách sinh viên.", "info")
-                return redirect(url_for("my_classes_page") + f"#lop-{school_class.id}")
-            if can_seed_school_class(user, school_class):
-                flash("Lớp chưa có danh sách sinh viên. Bạn có thể tải Excel hoặc thêm sinh viên ban đầu tại mục lớp bên dưới.", "info")
-            return redirect(url_for("teaching_classes_page") + f"#lop-{school_class.id}")
-        except Exception as exc:
-            db.session.rollback()
-            flash(f"Không thêm được lớp đang dạy: {exc}", "danger")
-            return redirect(url_for("teaching_classes_page"))
 
     @app.get("/my-classes")
     @login_required
@@ -2823,6 +2958,10 @@ def register_routes(app):
             ScanLog.query.filter_by(
                 participant_code=code, class_code=school_class.code
             ).delete(synchronize_session=False)
+            # Bản ghi kiểm thử quét QR của SV nhập nhầm cũng phải được trừ khỏi nghiệm thu.
+            FunctionalTestRun.query.filter_by(
+                participant_code=code, participant_class_code=school_class.code
+            ).delete(synchronize_session=False)
 
             # Xóa lịch sử SV thuộc lớp bị nhập nhầm.
             ClassEnrollment.query.filter_by(
@@ -2841,6 +2980,7 @@ def register_routes(app):
                     WatchEvent.query.filter(WatchEvent.watch_session_id.in_(remaining_watch_ids)).delete(synchronize_session=False)
                     WatchSession.query.filter(WatchSession.id.in_(remaining_watch_ids)).delete(synchronize_session=False)
                 ScanLog.query.filter_by(participant_code=code).delete(synchronize_session=False)
+                FunctionalTestRun.query.filter_by(participant_code=code).delete(synchronize_session=False)
                 Participant.query.filter_by(participant_code=code).delete(synchronize_session=False)
                 db.session.delete(student)
                 removed_master = True
@@ -2902,7 +3042,56 @@ def register_routes(app):
             return redirect(url_for("research_page"))
 
         metrics = acceptance_metrics(user)
+        # Lấy 200 ca mới nhất rồi nhóm theo chức năng, mỗi nhóm sắp xếp mới nhất trước.
+        # Không sắp xếp trước khi LIMIT vì như vậy chỉ xuất hiện các chức năng đầu bảng chữ cái.
         tests = FunctionalTestRun.query.filter_by(source="automatic").order_by(FunctionalTestRun.created_at.desc()).limit(200).all()
+        tests = sorted(tests, key=lambda x: (x.case_name.casefold(), -(x.created_at.timestamp() if x.created_at else 0)))
+        students_by_code = {s.student_code: s.full_name for s in Student.query.all()}
+        class_name_map = {c.code: c.name for c in SchoolClass.query.all()}
+        # Với log cũ chưa có mã SV: chỉ suy ra nếu có đúng một lượt quét
+        # khớp mã QR và thời gian rất gần; không đoán khi có nhiều sinh viên quét cùng lúc.
+        legacy_qr_slugs = set()
+        for test in tests:
+            if test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"} and not test.participant_code:
+                match = re.search(r"\bQR\s+([A-Za-z0-9_-]+)", test.note or "")
+                if match:
+                    legacy_qr_slugs.add(match.group(1))
+        legacy_scans = {}
+        if legacy_qr_slugs:
+            for scan in (ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
+                         .filter(QrCode.slug.in_(legacy_qr_slugs), ScanLog.role == "SV")
+                         .order_by(ScanLog.scanned_at.desc()).limit(2500).all()):
+                if scan.qr:
+                    legacy_scans.setdefault(scan.qr.slug, []).append(scan)
+        test_rows = []
+        for test in tests:
+            actor_code, actor_class = test.participant_code, test.participant_class_code
+            related_scan = None
+            if not actor_code and test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"}:
+                match = re.search(r"\bQR\s+([A-Za-z0-9_-]+)", test.note or "")
+                if match and test.created_at:
+                    candidates = [s for s in legacy_scans.get(match.group(1), [])
+                                  if abs((s.scanned_at.replace(tzinfo=None) - test.created_at.replace(tzinfo=None)).total_seconds()) <= 5]
+                    if len(candidates) == 1:
+                        related_scan = candidates[0]
+                        actor_code, actor_class = related_scan.participant_code, related_scan.class_code
+            if actor_code:
+                full_name = students_by_code.get(actor_code, "Sinh viên chưa có hồ sơ")
+                classroom = class_name_map.get(actor_class, actor_class or "Chưa xác định lớp")
+                actor = f"{full_name} ({actor_code} - {classroom})"
+            elif test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"} and "vai trò SV" in (test.note or ""):
+                actor = "Sinh viên (nhật ký cũ chưa xác định được mã)"
+            elif test.owner:
+                actor = f"{test.owner.name or 'Giảng viên'} ({test.owner.email})"
+            else:
+                actor = "Chưa xác định"
+            evidence = test.note or "—"
+            if related_scan and related_scan.qr:
+                q = related_scan.qr
+                title = (q.playlist.title if q.is_playlist and q.playlist else
+                         related_scan.video.title if related_scan.video else q.title)
+                evidence = f"{title} – {related_scan.course.name if related_scan.course else 'Chưa xác định môn học/mô đun'}"
+            test_rows.append({"test": test, "actor": actor, "evidence": evidence})
         tests_total = FunctionalTestRun.query.filter_by(source="automatic").count()
         tests_pass = FunctionalTestRun.query.filter_by(source="automatic", passed=True).count()
         tests_fail = max(0, tests_total - tests_pass)
@@ -2968,6 +3157,7 @@ def register_routes(app):
             "research.html",
             metrics=metrics,
             tests=tests,
+            test_rows=test_rows,
             tests_total=tests_total,
             tests_pass=tests_pass,
             tests_fail=tests_fail,

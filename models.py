@@ -433,6 +433,10 @@ class FunctionalTestRun(db.Model):
     passed = db.Column(db.Boolean, nullable=False)
     source = db.Column(db.String(16), nullable=False, default="automatic")
     note = db.Column(db.Text, nullable=True)
+    # Danh tính người quét là sinh viên, không phải chủ sở hữu mã QR.
+    # Mã SV và mã lớp lưu tại thời điểm quét để giữ ý nghĩa lịch sử.
+    participant_code = db.Column(db.String(128), nullable=True, index=True)
+    participant_class_code = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     owner = db.relationship("User")
 

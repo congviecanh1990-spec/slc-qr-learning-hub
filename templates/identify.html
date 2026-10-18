@@ -10,7 +10,7 @@
 <body class="viewer-bg">
 <div class="container py-5">
   <div class="row justify-content-center">
-    <div class="col-md-6 col-lg-5">
+    <div class="col-md-7 col-lg-6">
       <div class="card shadow">
         <div class="card-body p-4">
           <div class="text-center mb-3">
@@ -18,18 +18,92 @@
             <div class="fw-bold mt-2">{{ school_name }}</div>
           </div>
           <h3>Truy cập học liệu</h3>
-          <p class="text-muted">Bạn đang truy cập học liệu bằng mã QR do giảng viên cung cấp. <strong>Không cần đăng nhập hệ thống.</strong> Chỉ cần nhập đúng mã sinh viên do Nhà trường cấp; hệ thống sẽ tự xác định lớp đang học theo dữ liệu của giảng viên chủ nhiệm.</p>
-          {% if message %}<div class="alert alert-warning py-2">{{ message }}</div>{% endif %}
-          <form method="post" action="{{ url_for('identify') }}">
+          <p class="text-muted">Sinh viên không cần đăng nhập. Hãy nhập tên lớp và chọn đúng họ tên của mình (kèm mã sinh viên) để xem học liệu do giảng viên cung cấp.</p>
+          <p class="small text-muted">Chỉ chọn thông tin của chính mình. Lượt quét và quá trình xem sẽ được thống kê theo mã sinh viên đã chọn.</p>
+          {% if message %}<div class="alert alert-warning py-2" role="alert">{{ message }}</div>{% endif %}
+          {% if not class_choices %}
+          <div class="alert alert-warning" role="alert">Học liệu chưa có lớp áp dụng trong hệ thống. Vui lòng liên hệ giảng viên phụ trách để được hướng dẫn.</div>
+          {% else %}
+          <form method="post" action="{{ url_for('identify') }}" id="identify-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <label class="form-label fw-bold">Mã sinh viên</label>
-            <input class="form-control mb-3" name="participant_code" required autofocus placeholder="Nhập mã sinh viên do Nhà trường cấp">
-            <button class="btn btn-primary w-100">Tiếp tục xem học liệu</button>
+            <input type="hidden" name="school_class_id" id="school-class-id" value="">
+            <label for="school-class-name" class="form-label fw-bold">1. Nhập tên lớp</label>
+            <input class="form-control mb-1" name="class_name" id="school-class-name" list="school-class-options"
+                   maxlength="255" autocomplete="off" placeholder="Nhập hoặc chọn tên lớp" required autofocus>
+            <datalist id="school-class-options">
+              {% for cls in class_choices %}<option value="{{ cls.name }}"></option>{% endfor %}
+            </datalist>
+            <div class="form-text mb-3">Chọn đúng tên lớp trong danh sách gợi ý.</div>
+            <label for="student-select" class="form-label fw-bold">2. Chọn họ tên sinh viên</label>
+            <select class="form-select mb-2" name="student_id" id="student-select" required disabled>
+              <option value="">Nhập tên lớp để hiển thị sinh viên</option>
+            </select>
+            <div class="form-text mb-3" id="student-notice" role="status" aria-live="polite"></div>
+            <button class="btn btn-primary w-100" id="submit-identify" disabled>Tiếp tục xem học liệu</button>
           </form>
+          {% endif %}
         </div>
       </div>
     </div>
   </div>
 </div>
+{% if class_choices %}
+<script id="class-options-data" type="application/json">{{ class_choices | tojson }}</script>
+<script>
+(function () {
+  'use strict';
+  const classes = JSON.parse(document.getElementById('class-options-data').textContent);
+  const input = document.getElementById('school-class-name');
+  const hidden = document.getElementById('school-class-id');
+  const select = document.getElementById('student-select');
+  const notice = document.getElementById('student-notice');
+  const submit = document.getElementById('submit-identify');
+  const endpoint = {{ url_for('qr_class_students', slug=qr.slug) | tojson }};
+  let requestNumber = 0;
+  const normalized = (value) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi');
+  const showOption = (label) => {
+    select.replaceChildren(new Option(label, ''));
+    select.disabled = true;
+    submit.disabled = true;
+  };
+  async function updateStudents() {
+    const seq = ++requestNumber;
+    const matched = classes.find(item => normalized(item.name) === normalized(input.value));
+    hidden.value = matched ? String(matched.id) : '';
+    if (!matched) {
+      showOption('Vui lòng chọn tên lớp trong danh sách gợi ý');
+      notice.textContent = '';
+      return;
+    }
+    showOption('Đang tải danh sách sinh viên…');
+    notice.textContent = '';
+    try {
+      const response = await fetch(endpoint + '?class_id=' + encodeURIComponent(matched.id), {
+        credentials: 'same-origin', cache: 'no-store'
+      });
+      if (!response.ok) throw new Error('Không tải được danh sách sinh viên.');
+      const data = await response.json();
+      if (seq !== requestNumber) return;
+      select.replaceChildren(new Option('Chọn họ tên (mã sinh viên)', ''));
+      for (const student of data.students || []) {
+        select.add(new Option(student.name + ' (' + student.code + ')', String(student.id)));
+      }
+      select.disabled = !data.students || !data.students.length;
+      if (select.disabled) notice.textContent = 'Lớp này chưa có sinh viên đang học trong danh sách. Vui lòng liên hệ giảng viên.';
+    } catch (_error) {
+      if (seq !== requestNumber) return;
+      showOption('Không tải được danh sách sinh viên');
+      notice.textContent = 'Không thể tải danh sách. Vui lòng thử chọn lại lớp.';
+    }
+  }
+  input.addEventListener('input', updateStudents);
+  input.addEventListener('change', updateStudents);
+  select.addEventListener('change', () => { submit.disabled = !hidden.value || !select.value; });
+  document.getElementById('identify-form').addEventListener('submit', (event) => {
+    if (!hidden.value || !select.value) event.preventDefault();
+  });
+})();
+</script>
+{% endif %}
 </body>
 </html>

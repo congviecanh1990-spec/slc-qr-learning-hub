@@ -70,35 +70,52 @@
 {% else %}
   {% if teaching_only %}
   <div class="card shadow-sm mb-4">
-    <div class="card-header fw-bold">Thêm lớp đang dạy</div>
-    <div class="card-body">
-      <form method="post" action="{{ url_for('add_teaching_class') }}" class="row g-3 align-items-end">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="col-lg-4">
-          <label class="form-label fw-bold" for="teaching-course">Môn học/Mô đun phụ trách</label>
-          <select class="form-select" name="course_id" id="teaching-course" required>
-            <option value="">Chọn môn học/Mô đun</option>
-            {% for course in teaching_courses %}<option value="{{ course.id }}">{{ course.name }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="col-lg-4">
-          <label class="form-label fw-bold" for="teaching-existing-class">Chọn lớp đã có</label>
-          <select class="form-select" name="existing_class_id" id="teaching-existing-class">
-            <option value="">Chưa chọn lớp</option>
-            {% for option in available_classes %}<option value="{{ option.id }}">{{ option.name }} ({{ option.code }})</option>{% endfor %}
-          </select>
-        </div>
-        <div class="col-lg-3">
-          <label class="form-label fw-bold" for="teaching-new-class">Hoặc nhập tên lớp mới</label>
-          <input class="form-control" name="new_class_name" id="teaching-new-class" maxlength="255" placeholder="Nếu lớp chưa có trong hệ thống">
-        </div>
-        <div class="col-lg-1"><button class="btn btn-primary w-100" {{ 'disabled' if not teaching_courses else '' }}>Thêm</button></div>
-      </form>
-      {% if not teaching_courses %}<div class="small text-muted mt-2">Bạn cần <a href="{{ url_for('courses_page') }}">tạo môn học/Mô đun</a> trước khi bổ sung lớp đang dạy.</div>{% endif %}
-      <div class="small text-muted mt-2">Sau khi thêm lớp, bạn có thể tải danh sách sinh viên ban đầu nếu lớp chưa có dữ liệu. Khi lớp đã có danh sách, việc cập nhật thuộc quyền GVCN.</div>
+    <div class="card-header fw-bold">Danh sách lớp đang dạy</div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Mã lớp</th>
+            <th>Tên lớp</th>
+            <th>Môn học/Mô đun đang dạy</th>
+            <th class="text-center">Sĩ số đang học</th>
+            <th style="min-width:290px">Danh sách sinh viên</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for item in class_rows %}
+        {% set cls = item.class %}
+          <tr id="lop-{{ cls.id }}">
+            <td><strong>{{ cls.code }}</strong></td>
+            <td>{{ cls.name }}</td>
+            <td>{{ item.course_names | join(', ') }}</td>
+            <td class="text-center">{{ item.current_size }}</td>
+            <td>
+              {% if item.can_seed %}
+              <details>
+                <summary class="text-primary fw-semibold">Tải danh sách SV ban đầu từ Excel</summary>
+                <form method="post" enctype="multipart/form-data" action="{{ url_for('upload_class_students', class_id=cls.id) }}" class="mt-2 d-grid gap-2">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <label class="form-label mb-0 small fw-semibold">Tệp Excel (.xlsx)</label>
+                  <input class="form-control form-control-sm" type="file" name="student_file" accept=".xlsx" required>
+                  <label class="form-label mb-0 small fw-semibold">Ngày bắt đầu có hiệu lực</label>
+                  <input class="form-control form-control-sm" type="date" name="effective_date" value="{{ today.isoformat() }}" required>
+                  <button class="btn btn-primary btn-sm">Tải danh sách lên</button>
+                </form>
+              </details>
+              {% else %}
+              <span class="text-muted small">GVCN quản lý danh sách SV</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-center text-muted py-4">Chưa có lớp đang dạy. Bạn có thể liên kết lớp trong mục Môn học/Mô đun.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
-  {% endif %}
+  {% else %}
   {% for item in class_rows %}
   {% set cls = item.class %}
   <div class="card shadow-sm mb-4" id="lop-{{ cls.id }}">
@@ -191,5 +208,6 @@
   {% else %}
   <div class="text-muted">Chưa có lớp phù hợp với quyền của tài khoản này.</div>
   {% endfor %}
+  {% endif %}
 {% endif %}
 {% endblock %}

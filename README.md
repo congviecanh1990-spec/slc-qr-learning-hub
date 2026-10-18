@@ -37,7 +37,7 @@
 - Khi sinh viên bảo lưu, nghỉ học, chuyển trường/chuyển lớp..., GVCN chỉ thay đổi trạng thái và **ngày có hiệu lực**; dữ liệu lịch sử trước đó không bị sửa.
 - Lịch sử lớp lưu theo khoảng thời gian, nhờ đó lượt quét cũ vẫn giữ đúng lớp tại thời điểm phát sinh, còn sĩ số hiện tại thay đổi theo biến động mới.
 - Giảng viên bộ môn chỉ chọn lớp dùng chung cho học phần; không tải lại danh sách sinh viên.
-- Sinh viên quét QR **chỉ nhập mã sinh viên**; hệ thống tự xác định lớp đang học và kiểm tra lớp có được gán cho học phần hay không.
+- Sinh viên quét QR **nhập tên lớp và chọn họ tên kèm mã SV** từ danh sách SV đang học của lớp đó. Hệ thống kiểm tra quan hệ lớp–môn học/mô đun của QR trước khi ghi lượt quét; mỗi lượt mở QR của SV cần xác nhận lại danh tính để tránh nhầm trên thiết bị dùng chung.
 - Giao diện **Quản lý học phần** được thu gọn: chỉ giữ số video/QR, playlist/QR, số lớp và khu vực chọn lớp áp dụng.
 - Giao diện **Mã QR động** đưa hai chức năng tạo QR một video/một playlist xuống khu vực **Tạo QR riêng lẻ**; quy trình chính ưu tiên tạo theo học phần.
 - Thông báo đăng nhập và lỗi quyền truy cập được chuẩn hóa bằng tiếng Việt; tài khoản giảng viên truy cập nhầm trang quản trị được đưa về giao diện phù hợp thay vì hiện trang lỗi 403 thô.
@@ -325,3 +325,23 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - QR playlist tự cập nhật nội dung khi GV đồng bộ; QR video cảnh báo nếu bị mất liên hệ môn sau chuyển playlist; video riêng tư/xóa không phát; QR bị xóa mềm trả thông báo dừng sử dụng, không xóa lịch sử thống kê.
 - Sao lưu hỗ trợ bảng kết nối bổ sung, lịch sử bàn giao GVCN, lịch sử hiệu chỉnh.
 - Khi dùng tính năng kết nối YouTube khác, cấu hình Google OAuth redirect URI `/youtube/connect-callback` bên cạnh `/auth/callback`.
+
+
+## Cập nhật v4.3.2 — Theo dõi nghiệm thu và sinh viên
+
+- Bảng cuối mục 1 Đánh giá nghiệm thu: nhóm theo **Chức năng** (200 bản ghi mới nhất), cột **Người thực hiện** hiển thị tên GV (email) hoặc tên SV (mã SV - lớp).
+- Lượt quét QR của SV được gắn mã SV + mã lớp ngay tại thời điểm quét, **không coi chủ sở hữu QR là người quét**. Minh chứng lượt quét hiển thị **tên video/playlist – tên môn học/mô đun**.
+- Dữ liệu kiểm thử cũ không bị sửa. Nếu có một lượt quét khớp duy nhất với log cũ, hệ thống hiển thị danh tính SV; nếu thiếu thông tin hoặc không chắc chắn thì hiển thị rõ chưa xác định, không đoán.
+- Thống kê khai thác: bỏ biểu đồ, giữ hai bảng lịch sử quét và phiên xem; bổ sung bộ lọc môn học/mô đun, lớp, QR, mã SV và tình trạng cần theo dõi.
+- Bộ lọc **Chưa quét QR** lấy danh sách SV đang học đối chiếu với các lượt quét QR **thành công**. **Chưa hoàn thành video** dành cho SV đã quét thành công nhưng chưa xem đủ các video hiện khả dụng của QR (với playlist: xét từng video).
+- Danh sách cần theo dõi phải chọn một lớp và một QR; số liệu lớp hiện hành không được dùng để tính ngược lịch sử quét các đợt trước.
+- CSDL bổ sung 2 trường nullable vào nhật ký kiểm thử; nâng cấp tự động, không xóa PostgreSQL. Bản sao lưu tự chứa 2 trường mới nhờ cơ chế serialize tự động.
+
+
+## Điểm mới v4.3.3
+- Bỏ hoàn toàn khu vực **Thêm lớp đang dạy** và đường dẫn xử lý thêm lớp tại trang **Danh sách lớp đang dạy**. Việc chọn lớp đã có hoặc tạo lớp mới và liên kết với môn học/mô đun chỉ thực hiện tại trang **Môn học/Mô đun**.
+- Trang Danh sách lớp đang dạy chỉ có bảng: mã lớp, tên lớp, các môn đang dạy, sĩ số đang học, và tải Excel danh sách ban đầu khi lớp chưa có sinh viên.
+- Trang công khai sau khi SV quét QR: **nhập tên lớp từ danh sách gợi ý → chọn họ tên kèm mã SV → xem học liệu**. Tải danh sách tên SV đang học theo lớp được chọn, không yêu cầu đăng nhập Google hay gõ mã SV.
+- Máy chủ xác thực lớp được gán cho môn học/mô đun và sinh viên còn thuộc lớp tại thời điểm quét; dữ liệu ghi log vẫn dùng mã SV Nhà trường và mã lớp. Bổ sung nút **Đổi sinh viên** trong trang xem; lượt mở QR mới trên cùng trình duyệt yêu cầu chọn lại để tránh nhầm lẫn.
+- Quy trình chọn tên chỉ là nhận diện tự khai báo phục vụ thống kê, **không phải xác thực danh tính chắc chắn**. Người có mã QR có thể nhìn thấy tên/mã của SV được liệt kê trong lớp. Cần thông báo người học và cân nhắc quyền riêng tư khi đưa vào sử dụng chính thức.
+- Không thay đổi cấu trúc PostgreSQL, có thể cập nhật từ v4.3.2 mà không xóa dữ liệu.

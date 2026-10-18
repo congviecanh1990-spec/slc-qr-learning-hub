@@ -22,7 +22,7 @@
           <h2 class="h4 mb-1">{{ playlist.title }}</h2>
           <div class="text-muted small">{{ qr.course.name if qr.course else 'Học liệu video' }}</div>
         </div>
-        <span class="badge text-bg-light border">{{ viewer_identity }}</span>
+        <div class="d-flex flex-column align-items-end gap-2"><span class="badge text-bg-light border">{{ viewer_identity }}</span>{% if not preview_mode and not me %}<form method="post" action="{{ url_for('participant_reset') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-outline-secondary btn-sm">Đổi sinh viên</button></form>{% endif %}</div>
       </div>
 
       <div class="row g-3">
