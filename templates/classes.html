@@ -8,7 +8,7 @@
     {% elif teaching_only %}
       <div class="text-muted">Giảng viên đang dạy lớp được bổ sung danh sách sinh viên ban đầu nếu lớp chưa có danh sách. Khi đã có danh sách, GVCN quản lý các thay đổi.</div>
     {% else %}
-      <div class="text-muted">Quản lý danh sách sinh viên của lớp chủ nhiệm. Mã sinh viên sử dụng đúng mã do Nhà trường cấp; biến động được lưu theo ngày có hiệu lực để bảo toàn lịch sử.</div>
+      <div class="text-muted">Quản lý sinh viên lớp chủ nhiệm bằng mã sinh viên do Nhà trường cấp.</div>
     {% endif %}
   </div>
   {% if me.role != 'admin' or own_classes %}
@@ -68,6 +68,37 @@
 </div>
 
 {% else %}
+  {% if teaching_only %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold">Thêm lớp đang dạy</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('add_teaching_class') }}" class="row g-3 align-items-end">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="col-lg-4">
+          <label class="form-label fw-bold" for="teaching-course">Môn học/Mô đun phụ trách</label>
+          <select class="form-select" name="course_id" id="teaching-course" required>
+            <option value="">Chọn môn học/Mô đun</option>
+            {% for course in teaching_courses %}<option value="{{ course.id }}">{{ course.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label fw-bold" for="teaching-existing-class">Chọn lớp đã có</label>
+          <select class="form-select" name="existing_class_id" id="teaching-existing-class">
+            <option value="">Chưa chọn lớp</option>
+            {% for option in available_classes %}<option value="{{ option.id }}">{{ option.name }} ({{ option.code }})</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-3">
+          <label class="form-label fw-bold" for="teaching-new-class">Hoặc nhập tên lớp mới</label>
+          <input class="form-control" name="new_class_name" id="teaching-new-class" maxlength="255" placeholder="Nếu lớp chưa có trong hệ thống">
+        </div>
+        <div class="col-lg-1"><button class="btn btn-primary w-100" {{ 'disabled' if not teaching_courses else '' }}>Thêm</button></div>
+      </form>
+      {% if not teaching_courses %}<div class="small text-muted mt-2">Bạn cần <a href="{{ url_for('courses_page') }}">tạo môn học/Mô đun</a> trước khi bổ sung lớp đang dạy.</div>{% endif %}
+      <div class="small text-muted mt-2">Sau khi thêm lớp, bạn có thể tải danh sách sinh viên ban đầu nếu lớp chưa có dữ liệu. Khi lớp đã có danh sách, việc cập nhật thuộc quyền GVCN.</div>
+    </div>
+  </div>
+  {% endif %}
   {% for item in class_rows %}
   {% set cls = item.class %}
   <div class="card shadow-sm mb-4" id="lop-{{ cls.id }}">
@@ -88,7 +119,6 @@
         <div class="col-lg-7">
           <div class="border rounded p-3 h-100">
             <div class="fw-bold mb-2">Tải danh sách sinh viên từ Excel</div>
-            <div class="small text-muted mb-3">Lần đầu dùng để nhập danh sách lớp; các đợt tuyển sinh sau dùng để bổ sung sinh viên mới. Hệ thống không xóa sinh viên cũ chỉ vì không có trong tệp mới. Trong Excel nên đặt cột Mã sinh viên ở định dạng Văn bản để giữ nguyên các số 0 ở đầu mã.</div>
             <form method="post" enctype="multipart/form-data" action="{{ url_for('upload_class_students', class_id=cls.id) }}" class="row g-2">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <div class="col-md-7"><label class="form-label fw-bold">Tệp Excel</label><input class="form-control form-control-sm" type="file" name="student_file" accept=".xlsx" required></div>

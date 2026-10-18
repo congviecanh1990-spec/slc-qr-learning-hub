@@ -1,3 +1,20 @@
+# CẬP NHẬT WEB APP v4.3.1 (TỪ v4.3.0)
+
+Bản này hiệu chỉnh thông báo, trạng thái menu và luồng **Danh sách lớp đang dạy**. Không thay đổi cấu trúc PostgreSQL; không dùng chức năng xóa dữ liệu.
+
+**Các bước cập nhật:** Giải nén ZIP, tải các tệp và thư mục ở thư mục gốc lên repository GitHub hiện tại, commit vào nhánh `main`; kiểm tra Render tự deploy thành công rồi tải lại trang (Ctrl+F5).
+
+**Kiểm tra với tài khoản GV bộ môn:**
+1. Mở **Danh sách lớp đang dạy**; chọn một môn học/mô đun bạn đã tạo.
+2. Nếu lớp chưa có trên Web App, nhập tên lớp mới; nếu đã có, chọn lớp trong danh sách. Chỉ thực hiện một trong hai lựa chọn rồi bấm **Thêm**.
+3. Mở thẻ lớp bên dưới. Nếu lớp chưa có SV, tải Excel có cột `Mã sinh viên` và `Họ và tên` hoặc thêm một SV.
+4. Nếu lớp đã có danh sách SV, tài khoản GV không phải GVCN chỉ được xem thông báo; GVCN tiếp tục quản lý.
+5. Kiểm tra menu đang chọn và dòng mô tả kết nối YouTube.
+
+Lưu ý: mới kiểm tra cú pháp Python/Jinja và thử kết xuất màn hình bằng dữ liệu mô phỏng. Chưa kiểm thử tích hợp đăng nhập Google và PostgreSQL trong Render.
+
+---
+
 # HƯỚNG DẪN CẬP NHẬT v4.3.0
 
 **Không xóa dịch vụ Render, PostgreSQL hay repository hiện tại.** Nên sao lưu dữ liệu bằng menu **Sao lưu & khôi phục** trước khi cập nhật.

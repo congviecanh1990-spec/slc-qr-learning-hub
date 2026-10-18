@@ -129,15 +129,18 @@ def class_management_url(user, school_class):
     anchor = f"#lop-{school_class.id}"
     if school_class.homeroom_teacher_id == user.id:
         return url_for("my_classes_page") + anchor
-    if user.role == "admin":
-        return url_for("classes_page")
-    return url_for("teaching_classes_page") + anchor
+    if db.session.query(CourseClass).join(Course, Course.id == CourseClass.course_id).filter(
+        CourseClass.school_class_id == school_class.id, CourseClass.active.is_(True),
+        Course.owner_id == user.id, Course.active.is_(True)).first():
+        return url_for("teaching_classes_page") + anchor
+    return url_for("classes_page") if user.role == "admin" else url_for("teaching_classes_page") + anchor
 
 
 def can_seed_school_class(user, school_class):
     """GV dạy lớp có thể nhập danh sách BAN ĐẦU, nếu lớp chưa có bất cứ SV nào."""
-    if can_manage_school_class(user, school_class):
+    if school_class.homeroom_teacher_id == user.id:
         return True
+    # GV bộ môn (kể cả tài khoản quản trị đang giảng dạy) chỉ được nhập danh sách ban đầu.
     return (ClassEnrollment.query.filter_by(school_class_id=school_class.id).first() is None and
             db.session.query(CourseClass).join(Course, Course.id == CourseClass.course_id)
             .filter(CourseClass.school_class_id == school_class.id, CourseClass.active.is_(True),
@@ -782,13 +785,13 @@ def register_routes(app):
             "create_course_qrs_bulk": "courses", "create_course_playlist_qrs_bulk": "courses", "download_course_qrs": "courses",
             "qr_page": "qr", "create_playlist_qr": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr", "delete_all_qrs": "qr",
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
-            "classes_page": "classes", "my_classes_page": "classes", "teaching_classes_page":"classes", "create_school_class": "classes", "assign_homeroom_teacher": "classes",
-            "upload_class_students": "classes", "add_class_student": "classes", "change_student_status": "classes", "delete_class_student": "classes",
+            "classes_page": "class_admin", "my_classes_page": "homeroom", "teaching_classes_page":"teaching_classes", "add_teaching_class":"teaching_classes", "create_school_class": "class_admin", "assign_homeroom_teacher": "class_admin",
+            "upload_class_students": "homeroom", "add_class_student": "homeroom", "change_student_status": "homeroom", "delete_class_student": "homeroom",
             "lecturers_page": "lecturers", "assign_lecturer_code_admin": "lecturers", "update_lecturer_professional_group": "lecturers", "delete_lecturer_account": "lecturers",
             "research_page": "research",
             "error_logs_page": "errors",
             "data_management": "data_admin",
-            "update_display_name": "", "edit_student_name":"classes", "add_school_class_to_course":"courses", "rename_shared_catalog":"lecturers", "reset_lecturer_data": "lecturers", "profile_setup": "", "sync_wait": "",
+            "update_display_name": "", "edit_student_name":"homeroom", "add_school_class_to_course":"courses", "rename_shared_catalog":"lecturers", "reset_lecturer_data": "lecturers", "profile_setup": "", "sync_wait": "",
             "backup_zip": "data_admin",
             "restore_backup": "data_admin",
         }
@@ -2379,9 +2382,57 @@ def register_routes(app):
                 continue
             class_rows.append({"class":cls, "current_size":class_size_at(cls),
                                "student_rows":[], "can_seed":can_seed_school_class(user,cls)})
+        teaching_courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
+        available_classes = SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all()
         return render_template("classes.html", class_rows=class_rows, lecturers=[],
+                               teaching_courses=teaching_courses, available_classes=available_classes,
                                status_labels=STUDENT_STATUS_LABELS, today=utcnow().date(),
                                own_classes=True, teaching_only=True)
+
+    @app.post("/classes/teaching/add")
+    @login_required
+    def add_teaching_class():
+        """GV bộ môn tự khai báo lớp đang dạy; lớp dùng chung, không tạo bản ghi trùng."""
+        user = current_user()
+        course_id = request.form.get("course_id", type=int)
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or course.owner_id != user.id:
+            flash("Vui lòng chọn môn học/Mô đun do bạn phụ trách.", "warning")
+            return redirect(url_for("teaching_classes_page"))
+        existing_class_id = request.form.get("existing_class_id", type=int)
+        new_class_name = re.sub(r"\s+", " ", (request.form.get("new_class_name") or "").strip())
+        if bool(existing_class_id) == bool(new_class_name):
+            flash("Chỉ chọn một lớp đã có hoặc nhập tên một lớp mới.", "warning")
+            return redirect(url_for("teaching_classes_page"))
+        try:
+            if new_class_name:
+                school_class, created = create_or_find_school_class(new_class_name, user)
+            else:
+                school_class = db.session.get(SchoolClass, existing_class_id)
+                if not school_class or not school_class.active:
+                    raise ValueError("Lớp được chọn không còn khả dụng.")
+                created = False
+            link = CourseClass.query.filter_by(course_id=course.id, school_class_id=school_class.id).first()
+            if link:
+                link.active = True
+            else:
+                db.session.add(CourseClass(course_id=course.id, school_class_id=school_class.id,
+                                           added_by=user.id, active=True))
+            db.session.commit()
+            if created:
+                flash(f"Đã tạo lớp “{school_class.name}” và liên kết với môn học “{course.name}”.", "success")
+            else:
+                flash(f"Đã liên kết lớp “{school_class.name}” với môn học “{course.name}”.", "success")
+            if school_class.homeroom_teacher_id == user.id:
+                flash("Bạn là GVCN của lớp này. Vui lòng mở Lớp chủ nhiệm để quản lý danh sách sinh viên.", "info")
+                return redirect(url_for("my_classes_page") + f"#lop-{school_class.id}")
+            if can_seed_school_class(user, school_class):
+                flash("Lớp chưa có danh sách sinh viên. Bạn có thể tải Excel hoặc thêm sinh viên ban đầu tại mục lớp bên dưới.", "info")
+            return redirect(url_for("teaching_classes_page") + f"#lop-{school_class.id}")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thêm được lớp đang dạy: {exc}", "danger")
+            return redirect(url_for("teaching_classes_page"))
 
     @app.get("/my-classes")
     @login_required
@@ -2607,6 +2658,8 @@ def register_routes(app):
         try:
             effective_date = date.fromisoformat(effective_text) if effective_text else utcnow().date()
             rows = read_students_from_excel(upload)
+            if not rows:
+                raise ValueError("Tệp Excel không có sinh viên hợp lệ. Vui lòng kiểm tra cột Mã sinh viên và Họ và tên.")
             added = already = conflict = 0
             conflicts = []
             for code, name in rows:

@@ -1,3 +1,13 @@
+# Bổ sung v4.3.1 — hiệu chỉnh giao diện và bổ sung lớp đang dạy
+
+- Trang **Lớp chủ nhiệm** bỏ các câu giải thích dài đã được yêu cầu loại bỏ; giữ các thao tác Excel, thêm SV, sửa tên, trạng thái và xóa nhập nhầm.
+- Trang **Kênh YouTube** thay mô tả kết nối thêm kênh thành: **“Liên kết với tài khoản Google khác để tích hợp thêm video học liệu”**.
+- Thanh menu có trạng thái chọn **độc lập** cho Lớp chủ nhiệm, Danh sách lớp đang dạy và Quản lý lớp; Kho video học liệu vẫn dùng trạng thái riêng.
+- Trang **Danh sách lớp đang dạy** có thêm biểu mẫu chọn môn học/mô đun đang phụ trách, chọn lớp đã lưu hoặc nhập lớp mới. Khi lớp chưa có danh sách sinh viên, GV bộ môn được tải tệp Excel hoặc thêm SV ban đầu trực tiếp trong trang này. Khi lớp đã có SV, chỉ GVCN được tiếp tục cập nhật.
+- Không đổi cấu trúc cơ sở dữ liệu PostgreSQL; nâng cấp trực tiếp từ v4.3.0, không yêu cầu xóa dữ liệu hoặc tạo lại mã GV/lớp.
+
+---
+
 # TẠO MÃ QR TỰ ĐỘNG TỪ VIDEO YOUTUBE — v4.1
 
 ## Điểm mới v4.1
