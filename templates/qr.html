@@ -14,7 +14,7 @@
         <div class="col-xl-6">
           <div class="border rounded p-3 h-100">
             <div class="fw-semibold">{{ item.course.name }}</div>
-            <div class="small text-muted mt-2"><b>Video:</b> {{ '%02d'|format(item.total) }}; <b>Đã có mã QR:</b> {{ '%02d'|format(item.has_qr) }}; <b>Chưa có mã QR:</b> {{ '%02d'|format(item.missing) }}</div>
+            <div class="small text-muted mt-2"><b>Video:</b> {{ item.total }}; <b>Đã có mã QR:</b> {{ item.has_qr }}; <b>Chưa có mã QR:</b> {{ item.missing }}</div>
             {% if item.needs_retarget %}<div class="small text-danger mt-1"><b>{{ item.needs_retarget }} QR video cần đổi video đích</b></div>{% endif %}
             <div class="d-flex gap-2 flex-wrap mt-2">
               <form method="post" action="{{ url_for('create_course_qrs_bulk', course_id=item.course.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="return_to" value="qr"><button class="btn btn-primary btn-sm" {{ 'disabled' if item.missing == 0 else '' }}>Tạo {{ item.missing }} QR video còn thiếu</button></form>
@@ -117,7 +117,7 @@
     <div class="card mb-3 shadow-sm">
       <div class="card-body">
         <div class="d-flex flex-wrap justify-content-between gap-3">
-          <div><div class="badge text-bg-light border mb-2">QR video</div><h5 class="mb-1">{{ q.title }}</h5><div class="small text-muted">Môn học/ mô đun: {{ q.course.name if q.course else 'Không gán môn học/ mô đun' }}</div><div class="small text-muted">Mã định danh QR: {{ q.slug }}</div><div class="mt-2">Video hiện tại: <b>{{ t.video.title if t else 'Chưa gán' }}</b></div>{% if not usable %}<div class="text-danger small mt-1"><b>Cần cập nhật video đích</b> — video hiện tại đã bị xóa, chuyển riêng tư hoặc không cho phép phát nhúng.</div>{% endif %}</div>
+          <div><div class="badge text-bg-light border mb-2">QR video</div><h5 class="mb-1">{{ q.title }}</h5><div class="small text-muted">Môn học/ mô đun: {{ q.course.name if q.course else 'Không gán môn học/ mô đun' }}</div><div class="small text-muted">Mã định danh QR: {{ q.slug }}</div><div class="mt-2">Video hiện tại: <b>{{ t.video.title if t else 'Chưa gán' }}</b></div>{% if q.id in qr_needs_review %}<div class="alert alert-warning small mt-2 mb-1"><strong>Mã QR cần rà soát:</strong> video đã rời môn học/mô đun sau khi chuyển playlist. Có thể gán video trực tiếp vào môn học để giữ QR, hoặc ngừng sử dụng QR. Mã QR đã in và lịch sử vẫn được giữ.</div>{% endif %}{% if not usable %}<div class="text-danger small mt-1"><b>Cần cập nhật video đích</b> — video hiện tại đã bị xóa, chuyển riêng tư hoặc không cho phép phát nhúng.</div>{% endif %}</div>
           <div class="text-end"><a class="btn btn-outline-secondary btn-sm" href="{{ url_for('qr_png', qr_id=q.id) }}">Tải PNG có logo</a><a class="btn btn-outline-primary btn-sm" target="_blank" href="{{ url_for('public_qr', slug=q.slug, preview=1) }}" title="Mở thử không ghi dữ liệu thống kê">Mở thử</a></div>
         </div>
         <hr>

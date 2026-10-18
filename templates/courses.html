@@ -17,6 +17,7 @@
           </div>
         </div>
       </div>
+      <div class="col-lg-3"><label class="form-label fw-bold">Hoặc thêm lớp chưa có</label><input class="form-control" name="new_class_name" maxlength="255" placeholder="Tên lớp mới (nếu chưa có)"></div>
       <div class="col-lg-1"><button class="btn btn-primary w-100">Thêm</button></div>
     </form>
   </div>
@@ -25,7 +26,7 @@
   <div class="card-header fw-bold">Danh sách môn học/ mô đun đã tạo</div>
   <div class="table-responsive" style="overflow:visible">
     <table class="table table-hover align-middle mb-0">
-      <thead><tr><th>Môn học/ mô đun</th><th>Bộ môn – Khoa</th><th>Video của môn học/ mô đun</th><th>Playlist của môn học/ mô đun</th><th>Số lớp</th><th style="min-width:210px">Lớp của môn học/ mô đun</th></tr></thead>
+      <thead><tr><th>Môn học/ mô đun</th><th>Bộ môn – Khoa</th><th>Video của môn học/ mô đun</th><th>Playlist của môn học/ mô đun</th><th>Số lớp</th><th style="min-width:210px">Lớp của môn học/ mô đun</th><th>Chỉnh sửa</th></tr></thead>
       <tbody>
       {% for c in courses %}
         {% set ns = namespace(video_qr=0, playlist_total=0, playlist_qr=0, class_total=0) %}
@@ -51,9 +52,22 @@
               </div>
               <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not available_school_classes else '' }}>Lưu</button>
             </form>
+            <form method="post" action="{{ url_for('add_school_class_to_course', course_id=c.id) }}" class="d-flex mt-2 gap-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input class="form-control form-control-sm" name="new_class_name" placeholder="Thêm lớp mới" maxlength="255" required>
+              <button class="btn btn-outline-success btn-sm text-nowrap">Thêm</button>
+            </form>
           </td>
+          <td><details><summary class="btn btn-outline-primary btn-sm">Chỉnh sửa</summary>
+            <form method="post" action="{{ url_for('update_course_info',course_id=c.id) }}" class="mt-2" style="min-width:250px">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label class="small fw-bold">Tên môn học/Mô đun</label><input class="form-control form-control-sm mb-1" name="course_name" value="{{ c.name }}" required maxlength="255">
+              <label class="small fw-bold">Bộ môn</label><input class="form-control form-control-sm mb-1" name="department_name" value="{{ c.department_name or '' }}" list="department-options" required maxlength="255">
+              <label class="small fw-bold">Khoa</label><input class="form-control form-control-sm mb-2" name="faculty_name" value="{{ c.faculty_name or c.unit_name or '' }}" list="faculty-options" required maxlength="255">
+              <button class="btn btn-primary btn-sm">Lưu thông tin</button>
+            </form></details></td>
         </tr>
-      {% else %}<tr><td colspan="6" class="text-center text-muted py-4">Chưa có môn học/ mô đun.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="7" class="text-center text-muted py-4">Chưa có môn học/ mô đun.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

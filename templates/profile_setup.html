@@ -16,14 +16,21 @@
       <div class="form-check form-check-inline"><input class="form-check-input" type="radio" id="hr-yes" name="is_homeroom" value="yes"><label class="form-check-label" for="hr-yes">Có</label></div>
     </fieldset>
     <div id="homeroom-fields" class="border rounded p-3 bg-body-tertiary mb-3" hidden>
-      <div class="mb-3"><label class="form-label fw-bold">Tên lớp chủ nhiệm</label>
-        <input class="form-control" name="homeroom_class_name" maxlength="255" placeholder="Ví dụ: Cao đẳng CNTT K66A"></div>
+      <div class="mb-3"><label class="form-label fw-bold">Chọn lớp chủ nhiệm đã có</label>
+        <select class="form-select" name="homeroom_class_id" id="homeroom-select">
+          <option value="">— Lớp chưa có trong hệ thống —</option>
+          {% for cls in available_classes %}
+            <option value="{{ cls.id }}" {{ 'disabled' if cls.homeroom_teacher_id and cls.homeroom_teacher_id != me.id else '' }}>{{ cls.name }}{% if cls.homeroom_teacher_id and cls.homeroom_teacher_id != me.id %} (đã có GVCN){% endif %}</option>
+          {% endfor %}
+        </select></div>
+      <div class="mb-3"><label class="form-label fw-bold">Hoặc nhập tên lớp mới</label>
+        <input class="form-control" name="homeroom_class_name" id="homeroom-new" maxlength="255" placeholder="Chỉ nhập khi chưa có lớp trong danh sách"></div>
       <div><label class="form-label fw-bold">Sĩ số lớp khai báo</label>
         <input class="form-control" type="number" name="declared_size" min="1" max="1000" placeholder="Ví dụ: 20">
         <div class="form-text">Sĩ số khai báo chỉ để đối chiếu với danh sách SV thực tế sau khi tải Excel lên; thống kê tham gia dùng danh sách SV hợp lệ.</div>
       </div>
     </div>
-    <div class="alert alert-info small">Nếu lớp đã tồn tại trên hệ thống, hãy liên hệ Quản trị viên để tránh trùng tên lớp hoặc nhầm giảng viên chủ nhiệm.</div>
+    <div class="alert alert-info small">Ưu tiên chọn lớp đã có. Lớp đang có GVCN khác phải được Quản trị viên chuyển giao; không tự tạo lớp trùng hoặc thay quyền chủ nhiệm.</div>
     <button class="btn btn-primary">Lưu thông tin và tiếp tục</button>
   </form>
 </div></div>
@@ -32,7 +39,10 @@
 (() => {
  const radios=document.querySelectorAll('input[name="is_homeroom"]'), area=document.getElementById('homeroom-fields');
  const fields=area.querySelectorAll('input');
- const update=()=>{const yes=document.getElementById('hr-yes').checked;area.hidden=!yes;fields.forEach(f=>f.required=yes)};
+ const existing=document.getElementById('homeroom-select'), fresh=document.getElementById('homeroom-new');
+ const update=()=>{const yes=document.getElementById('hr-yes').checked;area.hidden=!yes;
+ fresh.required=yes && !existing.value; area.querySelector('input[name="declared_size"]').required=yes;};
+ existing.addEventListener('change',update);
  radios.forEach(x=>x.addEventListener('change',update));update();
 })();
 </script>{% endblock %}

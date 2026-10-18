@@ -30,6 +30,44 @@ class User(db.Model):
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
 
+class ConnectedGoogleAccount(db.Model):
+    """Tài khoản YouTube bổ sung của cùng một giảng viên (không tạo hồ sơ GV thứ hai)."""
+    __tablename__ = "connected_google_accounts"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    google_sub = db.Column(db.String(255), nullable=False, unique=True)
+    email = db.Column(db.String(255), nullable=False)
+    token_encrypted = db.Column(db.Text, nullable=False)
+    scopes = db.Column(db.Text)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    user = db.relationship("User", backref=db.backref("extra_google_accounts", cascade="all,delete"))
+
+
+class HomeroomChange(db.Model):
+    """Lịch sử bàn giao GVCN; lớp và sinh viên giữ nguyên khi đổi giáo viên."""
+    __tablename__ = "homeroom_changes"
+    id = db.Column(db.Integer, primary_key=True)
+    school_class_id = db.Column(db.Integer, db.ForeignKey("school_classes.id", ondelete="CASCADE"), nullable=False)
+    previous_teacher_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    new_teacher_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    effective_on = db.Column(db.Date, nullable=False)
+    changed_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class EditHistory(db.Model):
+    """Nhật ký thay đổi thông tin mô tả, không ảnh hưởng khóa và lịch sử QR."""
+    __tablename__ = "edit_history"
+    id = db.Column(db.Integer, primary_key=True)
+    entity_kind = db.Column(db.String(32), nullable=False)
+    entity_id = db.Column(db.Integer, nullable=False)
+    field = db.Column(db.String(64), nullable=False)
+    old_value = db.Column(db.String(500))
+    new_value = db.Column(db.String(500))
+    changed_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    changed_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class OAuthAccount(db.Model):
     __tablename__ = "oauth_accounts"
     id = db.Column(db.Integer, primary_key=True)
@@ -46,6 +84,7 @@ class YouTubeChannel(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     channel_id = db.Column(db.String(64), nullable=False)
+    connected_account_id = db.Column(db.Integer, db.ForeignKey("connected_google_accounts.id", ondelete="SET NULL"), nullable=True)
     title = db.Column(db.String(255), nullable=False, default="")
     uploads_playlist_id = db.Column(db.String(128), nullable=True)
     thumbnail_url = db.Column(db.Text, nullable=True)

@@ -1,17 +1,16 @@
-# HƯỚNG DẪN CẬP NHẬT WEB APP v4.2.0
+# HƯỚNG DẪN CẬP NHẬT v4.3.0
 
-Phiên bản v4.2.0 nâng cấp từ v4.1.1, không tạo database PostgreSQL mới và không yêu cầu thay đổi thông số OAuth Google.
+**Không xóa dịch vụ Render, PostgreSQL hay repository hiện tại.** Nên sao lưu dữ liệu bằng menu **Sao lưu & khôi phục** trước khi cập nhật.
 
-## Cập nhật
-1. Giải nén tệp ZIP, tải các tệp/thư mục bên trong lên nhánh `main` của repository GitHub đang sử dụng; ghi đè tệp có sẵn và Commit.
-2. Chờ dịch vụ Render triển khai và báo **Live**. Không xóa cơ sở dữ liệu cũ.
-3. Mở Web App, đăng nhập bằng một tài khoản Google giảng viên. Lần đầu trên bản mới, xác nhận họ tên, chọn nhóm chuyên môn, có/không chủ nhiệm lớp. Nếu có, nhập tên lớp và sĩ số khai báo.
-4. Quan sát trang “Chờ trong giây lát để hệ thống đồng bộ kênh YouTube…”. Khi thành công hệ thống tự chuyển trang. Nếu thất bại, có thể vào hệ thống và bấm đồng bộ lại trên trang Kênh YouTube.
-5. Kiểm tra mã GV được cấp tự động; GVCN kiểm tra mã lớp và tải danh sách Excel. Vào trang Môn học/ mô đun, thêm môn học và chọn lớp; kiểm tra bảng môn học và các bộ đếm không thêm số 0 đầu.
+1. Giải nén ZIP; mở repository GitHub `congviecanh1990-spec/slc-qr-learning-hub` (nhánh `main`). Tải toàn bộ nội dung *bên trong* thư mục vừa giải nén lên GitHub, giữ đúng cấu trúc tệp.
+2. Chọn **Commit changes**. Chờ Render tự triển khai đến trạng thái **Live**.
+3. **Quan trọng cho tính năng kết nối thêm tài khoản YouTube**: vào Google Cloud Console > Google Auth Platform > Clients > ứng dụng OAuth đang sử dụng, bổ sung URI điều hướng được ủy quyền:
+   `https://slc-qr-learning-hub.onrender.com/youtube/connect-callback`
+   Giữ nguyên URI cũ `https://slc-qr-learning-hub.onrender.com/auth/callback`.
+   Nếu chưa thêm URI mới, chức năng kết nối kênh phụ sẽ chưa hoạt động, các chức năng còn lại vẫn dùng được.
+4. Dùng trình duyệt nhấn Ctrl+F5, đăng nhập; kiểm tra: Tổng quan, Môn học/Mô đun, Lớp chủ nhiệm, Danh sách lớp đang dạy, Kênh YouTube, Mã QR động.
+5. Thử nghiệm với dữ liệu mẫu: GV bộ môn tạo lớp khi chưa có; GVCN nhận lớp đã có; tạo môn rồi sửa tên; upload Excel; thử sửa họ tên SV; chuyển một video giữa playlist và bấm **Đồng bộ lại**; thử ngừng sử dụng một QR đã có rồi quét lại.
 
-## Lưu ý quan trọng
-- Những tài khoản đã đăng nhập trước đây vẫn phải xác nhận họ tên và nhóm chuyên môn **một lần** khi sử dụng bản mới.
-- Sĩ số khai báo của GVCN **không** thay thế số SV thực tế; phải tải Excel theo đúng mã SV của Nhà trường để sử dụng quét QR và thống kê.
-- Nếu tên lớp đã tồn tại của giảng viên khác, hệ thống từ chối tạo trùng. Quản trị viên có thể kiểm tra và chuyển giao GVCN ở danh sách lớp.
-- Tự đồng bộ cần quyền YouTube đọc dữ liệu, kết nối mạng và hạn mức API. Trên Render miễn phí, quá trình khởi động/đồng bộ có thể chậm. Nút “Vào hệ thống” không làm mất quyền đăng nhập.
-- Chưa chạy kiểm thử tích hợp với dịch vụ Google/Render trong môi trường tạo tệp. Cần nghiệm thu các thao tác thực tế sau triển khai.
+**Không có cron job đồng bộ định kỳ trả phí.** Đồng bộ chỉ chạy lúc đăng nhập, khi GV bấm Đồng bộ lại và từ WebSub đối với sự kiện được YouTube hỗ trợ. 
+
+**Lưu ý**: Các thử nghiệm Google OAuth, YouTube Data API và PostgreSQL thực cần kiểm tra trên Render; kiểm tra cục bộ tại nơi đóng gói chỉ gồm cú pháp Python, template và liên kết.

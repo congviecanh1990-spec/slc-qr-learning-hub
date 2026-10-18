@@ -2,9 +2,16 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
   <div><h2 class="mb-1">Kết nối và đồng bộ kênh YouTube</h2><div class="text-muted">Kết nối kênh YouTube, cập nhật danh sách video và tự động theo dõi các thay đổi của học liệu.</div></div>
-  <form method="post" action="{{ url_for('youtube_sync') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-primary">Đồng bộ dữ liệu từ YouTube</button></form>
+  <form method="post" action="{{ url_for('youtube_sync') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-primary">Đồng bộ lại</button></form>
 </div>
-<div class="alert alert-info">Hệ thống nhận thông báo cập nhật từ YouTube và thực hiện kiểm tra định kỳ để phát hiện video bị xóa, chuyển sang chế độ riêng tư hoặc không cho phép phát nhúng.</div>
+<div class="alert alert-info">Web App tự đồng bộ khi giảng viên đăng nhập. Khi thêm, chuyển hoặc xóa video trong playlist hay thay đổi quyền riêng tư trên YouTube, hãy bấm <b>Đồng bộ lại</b> để cập nhật. Hệ thống không chạy lịch đồng bộ mất phí.</div>
+<div class="card mb-3"><div class="card-body">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2"><div><strong>Kết nối nhiều kênh YouTube</strong><div class="small text-muted">Liên kết tài khoản Google khác để lấy học liệu nhiều kênh vào cùng một hồ sơ GV. Không cần đăng xuất.</div></div>
+  <a class="btn btn-outline-primary btn-sm" href="{{ url_for('connect_another_youtube') }}">Kết nối kênh YouTube khác</a></div>
+  {% for account in extra_accounts %}<div class="d-flex flex-wrap justify-content-between align-items-center border-top mt-2 pt-2"><span>{{ account.email }}</span>
+    <form method="post" action="{{ url_for('disconnect_youtube_account',connection_id=account.id) }}" onsubmit="return confirm('Ngắt kết nối tài khoản bổ sung này? Dữ liệu học liệu và QR đã đồng bộ sẽ được giữ lại.');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm">Ngắt kết nối</button></form>
+  </div>{% endfor %}
+</div></div>
 {% for c in channels %}
 <div class="card mb-3 shadow-sm"><div class="card-body">
   <div class="d-flex flex-wrap justify-content-between gap-3">

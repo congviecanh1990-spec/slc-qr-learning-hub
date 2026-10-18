@@ -1,8 +1,12 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="mb-4">
-  <h2 class="mb-1">Tổng quan hệ thống</h2>
+  <h2 class="mb-1">Tổng quan {{ 'toàn hệ thống' if whole_system else 'của tôi' }}</h2>
   <div class="text-muted">{{ app_tagline }}</div>
+  {% if me and me.role == 'admin' %}
+  <div class="d-flex gap-2 mt-3"><a href="{{ url_for('index') }}" class="btn btn-sm {{ 'btn-primary' if not whole_system else 'btn-outline-primary' }}">Dữ liệu của tôi</a>
+  <a href="{{ url_for('index',scope='all') }}" class="btn btn-sm {{ 'btn-primary' if whole_system else 'btn-outline-primary' }}">Toàn hệ thống</a></div>
+  {% endif %}
 </div>
 
 {% if me %}
@@ -14,12 +18,11 @@
         <div class="small mb-2"><strong>Họ và tên hiện tại:</strong> {{ me.name or 'Chưa cập nhật' }}</div>
         <form method="post" action="{{ url_for('update_display_name') }}" autocomplete="off">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <label class="form-label fw-bold">Nhập lại họ tên hiển thị</label>
+          <label class="form-label fw-bold">Chỉnh sửa họ tên hiển thị</label>
           <div class="input-group">
             <input class="form-control" name="display_name" value="" required maxlength="255" autocomplete="off" placeholder="Nhập họ và tên chính xác">
-            <button class="btn btn-outline-primary">Lưu họ tên</button>
+            <button class="btn btn-outline-primary">Lưu</button>
           </div>
-          <div class="form-text">Ô nhập không lưu/gợi lại nội dung đã gõ trước đó trên giao diện. Họ tên sau khi lưu vẫn được hệ thống sử dụng làm tên hiển thị chính thức.</div>
         </form>
       </div>
       <div class="col-lg-6">
@@ -32,9 +35,11 @@
 {% endif %}
 
 <div class="row g-3 mb-4">
+  {% if me.role == 'admin' %}
+  <div class="col-6 col-md-4 col-xl-3"><div class="card shadow-sm h-100 metric-card"><div class="card-body"><div class="text-muted small">Giảng viên toàn hệ thống</div><div class="display-6 fw-semibold">{{ lecturer_count }}</div></div></div></div>
+  {% endif %}
   {% for label, value in [
-    ('Giảng viên', lecturer_count),
-    ('Lớp', class_count),
+    ('Lớp đang quản lý' if whole_system else 'Lớp chủ nhiệm', class_count),
     ('Video học liệu', videos),
     ('Môn học/ mô đun', courses),
     ('Mã QR đã tạo', qrs),

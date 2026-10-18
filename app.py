@@ -31,10 +31,10 @@ from models import (
     db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ClassGroup,
     SchoolClass, Student, ClassEnrollment, CourseClass, Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
     HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
-    ResearchSetting, SurveyResult, utcnow
+    ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, utcnow
 )
-from security import encrypt_json
-from services.youtube import sync_my_channel, sync_video_ids, reconcile_user
+from security import encrypt_json, decrypt_json
+from services.youtube import sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels
 from services.websub import subscribe_channel, verify_callback, parse_notification
 
 csrf = CSRFProtect()
@@ -92,6 +92,56 @@ def student_current_status_in_class(student: Student, school_class: SchoolClass,
     if rows:
         return (rows[0].end_status or "khac"), rows[0]
     return "khac", None
+
+
+def audit_edit(user, kind, entity_id, field, before, after):
+    previous, updated = str(before or ""), str(after or "")
+    if previous != updated:
+        db.session.add(EditHistory(entity_kind=kind, entity_id=entity_id, field=field,
+                                   old_value=previous[:500], new_value=updated[:500],
+                                   changed_by=user.id))
+
+
+def shared_class_by_name(name):
+    return SchoolClass.query.filter(
+        func.lower(func.trim(SchoolClass.name)) == name.strip().lower(),
+        SchoolClass.active.is_(True)).first()
+
+
+def create_or_find_school_class(name, user, declared_size=None):
+    name = re.sub(r"\s+", " ", (name or "").strip())
+    if not name or len(name) > 255:
+        raise ValueError("Tên lớp không hợp lệ.")
+    if db.engine.dialect.name == "postgresql":
+        db.session.execute(text("SELECT pg_advisory_xact_lock(48191271)"))
+    existing = shared_class_by_name(name)
+    if existing:
+        return existing, False
+    obj = SchoolClass(code=f"TMP-{secrets.token_hex(8)}", name=name,
+                      declared_size=declared_size)
+    db.session.add(obj)
+    db.session.flush()
+    assign_auto_school_class_code(obj)
+    return obj, True
+
+
+def class_management_url(user, school_class):
+    anchor = f"#lop-{school_class.id}"
+    if school_class.homeroom_teacher_id == user.id:
+        return url_for("my_classes_page") + anchor
+    if user.role == "admin":
+        return url_for("classes_page")
+    return url_for("teaching_classes_page") + anchor
+
+
+def can_seed_school_class(user, school_class):
+    """GV dạy lớp có thể nhập danh sách BAN ĐẦU, nếu lớp chưa có bất cứ SV nào."""
+    if can_manage_school_class(user, school_class):
+        return True
+    return (ClassEnrollment.query.filter_by(school_class_id=school_class.id).first() is None and
+            db.session.query(CourseClass).join(Course, Course.id == CourseClass.course_id)
+            .filter(CourseClass.school_class_id == school_class.id, CourseClass.active.is_(True),
+                    Course.owner_id == user.id, Course.active.is_(True)).first() is not None)
 
 
 def can_manage_school_class(user: User, school_class: SchoolClass) -> bool:
@@ -172,6 +222,14 @@ def create_app():
             client_kwargs={"scope": app.config["GOOGLE_SCOPES"]},
         )
 
+    if app.config["GOOGLE_CLIENT_ID"] and app.config["GOOGLE_CLIENT_SECRET"]:
+        oauth.register(
+            name="google_additional", client_id=app.config["GOOGLE_CLIENT_ID"],
+            client_secret=app.config["GOOGLE_CLIENT_SECRET"],
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": app.config["GOOGLE_SCOPES"]},
+        )
+
     register_routes(app)
 
     with app.app_context():
@@ -206,6 +264,10 @@ def ensure_schema_upgrades():
                 conn.execute(text("ALTER TABLE users ADD COLUMN professional_group VARCHAR(16)"))
             if "profile_completed" not in user_columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN profile_completed BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "youtube_channels" in tables:
+            channel_columns = {c["name"] for c in inspector.get_columns("youtube_channels")}
+            if "connected_account_id" not in channel_columns:
+                conn.execute(text("ALTER TABLE youtube_channels ADD COLUMN connected_account_id INTEGER"))
         if "school_classes" in tables:
             class_columns = {c["name"] for c in inspector.get_columns("school_classes")}
             if "declared_size" not in class_columns:
@@ -421,13 +483,12 @@ def video_is_usable(video: Video | None) -> bool:
 
 
 def course_owned_by_user(course: Course, user: User) -> bool:
-    return bool(user.role == "admin" or course.owner_id == user.id)
+    return bool(course.owner_id == user.id)
 
 
 def visible_video_query(user: User):
     q = Video.query.join(YouTubeChannel)
-    if user.role != "admin":
-        q = q.filter(YouTubeChannel.user_id == user.id)
+    q = q.filter(YouTubeChannel.user_id == user.id)
     return q
 
 
@@ -714,20 +775,20 @@ def register_routes(app):
     def inject_globals():
         endpoint = request.endpoint or ""
         section_map = {
-            "youtube_page": "youtube", "youtube_sync": "youtube", "youtube_websub_subscribe": "youtube",
+            "youtube_page": "youtube", "youtube_sync": "youtube", "youtube_websub_subscribe": "youtube", "connect_another_youtube":"youtube", "disconnect_youtube_account":"youtube",
             "videos_page": "videos", "assign_videos_to_course": "videos", "assign_playlists_from_library": "videos",
             "courses_page": "courses", "add_class": "courses", "set_course_school_classes": "courses", "update_course_info": "courses",
             "assign_playlists_to_course": "courses", "delete_course_playlist": "courses",
             "create_course_qrs_bulk": "courses", "create_course_playlist_qrs_bulk": "courses", "download_course_qrs": "courses",
             "qr_page": "qr", "create_playlist_qr": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr", "delete_all_qrs": "qr",
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
-            "classes_page": "classes", "my_classes_page": "classes", "create_school_class": "classes", "assign_homeroom_teacher": "classes",
+            "classes_page": "classes", "my_classes_page": "classes", "teaching_classes_page":"classes", "create_school_class": "classes", "assign_homeroom_teacher": "classes",
             "upload_class_students": "classes", "add_class_student": "classes", "change_student_status": "classes", "delete_class_student": "classes",
             "lecturers_page": "lecturers", "assign_lecturer_code_admin": "lecturers", "update_lecturer_professional_group": "lecturers", "delete_lecturer_account": "lecturers",
             "research_page": "research",
             "error_logs_page": "errors",
             "data_management": "data_admin",
-            "update_display_name": "", "reset_lecturer_data": "lecturers", "profile_setup": "", "sync_wait": "",
+            "update_display_name": "", "edit_student_name":"classes", "add_school_class_to_course":"courses", "rename_shared_catalog":"lecturers", "reset_lecturer_data": "lecturers", "profile_setup": "", "sync_wait": "",
             "backup_zip": "data_admin",
             "restore_backup": "data_admin",
         }
@@ -751,7 +812,7 @@ def register_routes(app):
         if not session.get("user_id"):
             return None
         if (request.endpoint in {"static", "login", "auth_callback", "logout", "profile_setup",
-                                 "sync_wait", "sync_run", "privacy_policy", "health"}
+                                 "sync_wait", "sync_run", "connect_youtube_callback", "privacy_policy", "health"}
                 or (request.endpoint or "").startswith("websub_")):
             return None
         user = current_user()
@@ -776,14 +837,15 @@ def register_routes(app):
         user = current_user()
         if not user:
             return render_template("landing.html")
-        videos = visible_video_query(user).count()
-        qrs = QrCode.query.filter_by(owner_id=user.id, active=True).count() if user.role != "admin" else QrCode.query.filter_by(active=True).count()
-        courses = Course.query.filter_by(owner_id=user.id, active=True).count() if user.role != "admin" else Course.query.filter_by(active=True).count()
-
-        # Giao diện thống kê chỉ đánh giá hoạt động quét/xem của sinh viên.
+        whole_system = user.role == "admin" and request.args.get("scope") == "all"
+        videos = Video.query.count() if whole_system else visible_video_query(user).count()
+        qrs = (QrCode.query.filter_by(active=True).count() if whole_system else
+               QrCode.query.filter_by(owner_id=user.id, active=True).count())
+        courses = (Course.query.filter_by(active=True).count() if whole_system else
+                   Course.query.filter_by(owner_id=user.id, active=True).count())
         scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
         watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
-        if user.role != "admin":
+        if not whole_system:
             scan_q = scan_q.filter(QrCode.owner_id == user.id)
             watch_q = watch_q.filter(QrCode.owner_id == user.id)
         scans = scan_q.count()
@@ -792,11 +854,12 @@ def register_routes(app):
         completion_rate = round(100 * completed / watch, 1) if watch else 0
         recent_scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(10).all()
         lecturer_count = User.query.filter(User.last_login_at.isnot(None)).count()
-        class_count = SchoolClass.query.filter_by(active=True).count()
+        class_count = (SchoolClass.query.filter_by(active=True).count() if whole_system else
+                       SchoolClass.query.filter_by(active=True, homeroom_teacher_id=user.id).count())
         return render_template(
             "dashboard.html", videos=videos, courses=courses, qrs=qrs, scans=scans, watch=watch,
             completion_rate=completion_rate, recent_scans=recent_scans, lecturer_count=lecturer_count,
-            class_count=class_count,
+            class_count=class_count, whole_system=whole_system,
         )
 
     @app.get("/auth/login")
@@ -902,21 +965,19 @@ def register_routes(app):
             group = (request.form.get("professional_group") or "").strip()
             homeroom = request.form.get("is_homeroom") == "yes"
             class_name = re.sub(r"\s+", " ", (request.form.get("homeroom_class_name") or "").strip())
+            class_id = request.form.get("homeroom_class_id", type=int)
             declared_raw = (request.form.get("declared_size") or "").strip()
             if len(fullname) < 2 or len(fullname) > 255 or group not in {"it", "other"}:
                 flash("Vui lòng nhập họ tên đầy đủ và chọn nhóm chuyên môn.", "warning")
-                return render_template("profile_setup.html")
+                return render_template("profile_setup.html", available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all())
+            existing = db.session.get(SchoolClass, class_id) if homeroom and class_id else None
             if homeroom:
-                if not class_name or len(class_name) > 255 or not declared_raw.isdigit() or int(declared_raw) < 1 or int(declared_raw) > 1000:
-                    flash("Vui lòng nhập tên lớp chủ nhiệm và sĩ số dự kiến hợp lệ (1–1000).", "warning")
-                    return render_template("profile_setup.html")
-                # Chống trường hợp hai GVCN khai báo cùng một lớp đồng thời.
-                if db.engine.dialect.name == "postgresql":
-                    db.session.execute(text("SELECT pg_advisory_xact_lock(48191271)"))
-                existing = SchoolClass.query.filter(func.lower(SchoolClass.name) == class_name.lower(), SchoolClass.active.is_(True)).first()
-                if existing and existing.homeroom_teacher_id != user.id:
-                    flash("Tên lớp đã có trên hệ thống. Vui lòng liên hệ Quản trị viên để tránh tạo trùng hoặc chuyển giao chủ nhiệm lớp.", "warning")
-                    return render_template("profile_setup.html")
+                if (not existing and (not class_name or len(class_name) > 255)) or not declared_raw.isdigit() or not (1 <= int(declared_raw) <= 1000):
+                    flash("Vui lòng chọn hoặc nhập tên lớp và sĩ số khai báo hợp lệ.", "warning")
+                    return render_template("profile_setup.html", available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all())
+                if existing and existing.homeroom_teacher_id not in (None, user.id):
+                    flash("Lớp đã có GVCN. Quản trị viên cần bàn giao lớp trước khi bạn nhận chủ nhiệm.", "warning")
+                    return render_template("profile_setup.html", available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all())
             try:
                 user.name = fullname
                 user.professional_group = group
@@ -924,10 +985,14 @@ def register_routes(app):
                     if existing:
                         school_class = existing
                     else:
-                        school_class = SchoolClass(code=f"TMP-{secrets.token_hex(8)}", name=class_name, homeroom_teacher_id=user.id)
-                        db.session.add(school_class)
-                        db.session.flush()
-                        assign_auto_school_class_code(school_class)
+                        school_class, _ = create_or_find_school_class(class_name, user, int(declared_raw))
+                    if school_class.homeroom_teacher_id not in (None, user.id):
+                        raise ValueError("Lớp đã có giảng viên chủ nhiệm; không thể tự thay thế.")
+                    if school_class.homeroom_teacher_id is None:
+                        db.session.add(HomeroomChange(school_class_id=school_class.id,
+                                                      new_teacher_id=user.id, changed_by=user.id,
+                                                      effective_on=utcnow().date()))
+                    school_class.homeroom_teacher_id = user.id
                     school_class.declared_size = int(declared_raw)
                 allocate_lecturer_code(user)
                 user.profile_completed = True
@@ -937,7 +1002,7 @@ def register_routes(app):
             except Exception as exc:
                 db.session.rollback()
                 flash(f"Không thể hoàn tất khai báo: {exc}", "danger")
-        return render_template("profile_setup.html")
+        return render_template("profile_setup.html", available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all())
 
     @app.get("/auth/sync-wait")
     @login_required
@@ -953,12 +1018,12 @@ def register_routes(app):
         if not user.profile_completed:
             return jsonify({"ok": False, "message": "Bạn chưa hoàn tất thông tin giảng viên."}), 400
         try:
-            channels = sync_my_channel(user)
+            channels, sync_errors = sync_all_connected_channels(user)
             video_count = sum(len(c.videos) for c in channels)
             record_functional_test("YT_SYNC", "Đồng bộ kênh/video YouTube", True, owner_id=user.id,
                                    note=f"Tự đồng bộ {len(channels)} kênh và {video_count} video sau đăng nhập.")
             db.session.commit()
-            return jsonify({"ok": True, "message": f"Đã đồng bộ {len(channels)} kênh YouTube và {video_count} video."})
+            return jsonify({"ok": bool(channels), "message": f"Đã đồng bộ {len(channels)} kênh YouTube và {video_count} video." + (" Một số kênh cần kiểm tra: " + "; ".join(sync_errors) if sync_errors else "")})
         except Exception as exc:
             db.session.rollback()
             db.session.add(ErrorLog(module="youtube", action="Tự động đồng bộ sau đăng nhập", course_module="Hệ thống",
@@ -992,7 +1057,7 @@ def register_routes(app):
         channels = YouTubeChannel.query.filter_by(user_id=user.id).all()
         channel_ids = [c.id for c in channels]
         hub_events = HubEvent.query.filter(HubEvent.channel_id.in_(channel_ids)).order_by(HubEvent.received_at.desc()).limit(20).all() if channel_ids else []
-        return render_template("youtube.html", channels=channels, hub_events=hub_events)
+        return render_template("youtube.html", channels=channels, hub_events=hub_events, extra_accounts=ConnectedGoogleAccount.query.filter_by(user_id=user.id).all())
 
     @app.post("/youtube/sync")
     @login_required
@@ -1000,7 +1065,7 @@ def register_routes(app):
         user = current_user()
         t0 = time.perf_counter()
         try:
-            channels = sync_my_channel(user)
+            channels, sync_errors = sync_all_connected_channels(user)
             # sync_my_channel đã đồng bộ uploads, các playlist do GV tạo và trạng thái
             # video hiện có; không gọi đối soát lần hai để tránh tiêu tốn hạn mức API.
             checked = sum(len(c.videos) for c in channels)
@@ -1010,7 +1075,7 @@ def register_routes(app):
                 note=f"Đồng bộ {len(channels)} kênh; đối soát {checked} video."
             )
             db.session.commit()
-            flash(f"Đã đồng bộ {len(channels)} kênh YouTube và kiểm tra trạng thái {checked} video.", "success")
+            flash(f"Đã đồng bộ {len(channels)} kênh YouTube, kiểm tra {checked} video." + (" Lỗi kênh khác: " + "; ".join(sync_errors) if sync_errors else ""), "success" if channels else "warning")
         except Exception as exc:
             db.session.rollback()
             elapsed = time.perf_counter() - t0
@@ -1023,6 +1088,78 @@ def register_routes(app):
             )
             db.session.commit()
             flash(f"Đồng bộ thất bại: {exc}", "danger")
+        return redirect(url_for("youtube_page"))
+
+    @app.get("/youtube/connect-another")
+    @login_required
+    def connect_another_youtube():
+        """Kết nối YouTube của tài khoản Google khác, vẫn giữ phiên GV hiện tại."""
+        session["extra_youtube_owner_id"] = current_user().id
+        return oauth.google_additional.authorize_redirect(
+            f"{base_url()}/youtube/connect-callback",
+            access_type="offline", prompt="select_account consent",
+            include_granted_scopes="true",
+        )
+
+    @app.get("/youtube/connect-callback")
+    @login_required
+    def connect_youtube_callback():
+        user = current_user()
+        if session.pop("extra_youtube_owner_id", None) != user.id:
+            flash("Phiên kết nối YouTube đã hết hạn. Vui lòng thử lại.", "warning")
+            return redirect(url_for("youtube_page"))
+        try:
+            token = oauth.google_additional.authorize_access_token()
+            r = requests.get("https://openidconnect.googleapis.com/v1/userinfo",
+                             headers={"Authorization": f"Bearer {token['access_token']}"}, timeout=20)
+            r.raise_for_status()
+            info = r.json()
+            sub = info.get("sub")
+            email = (info.get("email") or "").strip().lower()
+            if not sub or not email:
+                raise ValueError("Google không cung cấp danh tính tài khoản kết nối.")
+            primary_user = User.query.filter_by(google_sub=sub).first()
+            if primary_user and primary_user.id != user.id:
+                raise ValueError("Tài khoản Google này đã là tài khoản đăng nhập chính của giảng viên khác.")
+            existing = ConnectedGoogleAccount.query.filter_by(google_sub=sub).first()
+            if existing and existing.user_id != user.id:
+                raise ValueError("Tài khoản YouTube này đã liên kết với giảng viên khác.")
+            if primary_user and primary_user.id == user.id:
+                flash("Đây là tài khoản Google đang dùng để đăng nhập; kênh đã được quản lý ở kết nối chính.", "info")
+                return redirect(url_for("youtube_page"))
+            if not existing:
+                existing = ConnectedGoogleAccount(user_id=user.id, google_sub=sub, email=email, token_encrypted="")
+                db.session.add(existing)
+            old_refresh = None
+            if existing.token_encrypted:
+                try:
+                    old_refresh = decrypt_json(existing.token_encrypted).get("refresh_token")
+                except Exception:
+                    pass
+            if old_refresh and not token.get("refresh_token"):
+                token["refresh_token"] = old_refresh
+            existing.token_encrypted = encrypt_json(token)
+            existing.scopes = token.get("scope") or current_app.config["GOOGLE_SCOPES"]
+            db.session.commit()
+            flash(f"Đã kết nối tài khoản YouTube bổ sung {email}. Bấm Đồng bộ lại để tải học liệu.", "success")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thể kết nối thêm kênh YouTube: {exc}", "danger")
+        return redirect(url_for("youtube_page"))
+
+    @app.post("/youtube/disconnect/<int:connection_id>")
+    @login_required
+    def disconnect_youtube_account(connection_id):
+        user = current_user()
+        conn = db.session.get(ConnectedGoogleAccount, connection_id) or abort(404)
+        if conn.user_id != user.id:
+            abort(403)
+        # Để bảo toàn học liệu, QR và thống kê, chỉ ngắt token; các video đã lưu vẫn giữ.
+        for channel in YouTubeChannel.query.filter_by(user_id=user.id, connected_account_id=conn.id).all():
+            channel.connected_account_id = None
+        db.session.delete(conn)
+        db.session.commit()
+        flash("Đã ngắt liên kết tài khoản YouTube bổ sung. Dữ liệu video và QR cũ vẫn được giữ.", "success")
         return redirect(url_for("youtube_page"))
 
     @app.post("/youtube/websub/<int:channel_pk>/subscribe")
@@ -1257,7 +1394,16 @@ def register_routes(app):
                     db.session.add(course)
                     db.session.flush()
                     assign_auto_course_code(course)
+                    new_class_name = (request.form.get("new_class_name") or "").strip()
+                    added_class_id = None
+                    if new_class_name:
+                        new_class, was_created = create_or_find_school_class(new_class_name, user)
+                        added_class_id = new_class.id
+                        if not was_created:
+                            flash("Lớp đã tồn tại nên hệ thống sử dụng lớp chung, không tạo lớp trùng.", "info")
                     selected_ids = {int(x) for x in request.form.getlist("school_class_ids") if x.isdigit()}
+                    if added_class_id:
+                        selected_ids.add(added_class_id)
                     allowed_ids = {cl.id for cl in SchoolClass.query.filter(SchoolClass.active.is_(True), SchoolClass.id.in_(selected_ids)).all()} if selected_ids else set()
                     for class_id in allowed_ids:
                         db.session.add(CourseClass(course_id=course.id, school_class_id=class_id, added_by=user.id, active=True))
@@ -1284,6 +1430,28 @@ def register_routes(app):
             available_school_classes=available_school_classes,
         )
 
+    @app.post("/courses/<int:course_id>/classes/new")
+    @login_required
+    def add_school_class_to_course(course_id):
+        user = current_user()
+        course = db.session.get(Course, course_id) or abort(404)
+        if not course.active or course.owner_id != user.id:
+            abort(403)
+        name = (request.form.get("new_class_name") or "").strip()
+        try:
+            school_class, created = create_or_find_school_class(name, user)
+            link = CourseClass.query.filter_by(course_id=course.id, school_class_id=school_class.id).first()
+            if link:
+                link.active = True
+            else:
+                db.session.add(CourseClass(course_id=course.id, school_class_id=school_class.id, added_by=user.id))
+            db.session.commit()
+            flash(("Đã thêm lớp mới" if created else "Đã chọn lớp có sẵn") + f" “{school_class.name}” cho môn học.", "success")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không thêm được lớp: {exc}", "danger")
+        return redirect(url_for("courses_page"))
+
     @app.post("/courses/<int:course_id>/info")
     @login_required
     def update_course_info(course_id):
@@ -1291,16 +1459,22 @@ def register_routes(app):
         course = db.session.get(Course, course_id) or abort(404)
         if not course.active or not course_owned_by_user(course, user):
             abort(403)
-        faculty = request.form.get("faculty_name", "").strip()
-        department = request.form.get("department_name", "").strip()
-        if not faculty or not department:
-            flash("Vui lòng nhập đầy đủ tên khoa và bộ môn quản lý môn học/ mô đun.", "warning")
+        name = re.sub(r"\s+", " ", request.form.get("course_name", "").strip())
+        faculty = re.sub(r"\s+", " ", request.form.get("faculty_name", "").strip())
+        department = re.sub(r"\s+", " ", request.form.get("department_name", "").strip())
+        if not name or not faculty or not department or max(len(name), len(faculty), len(department)) > 255:
+            flash("Vui lòng nhập đầy đủ tên môn học/mô đun, khoa và bộ môn hợp lệ.", "warning")
             return redirect(url_for("courses_page"))
+        for field, before, after in (("name", course.name, name),
+                                     ("faculty_name", course.faculty_name, faculty),
+                                     ("department_name", course.department_name, department)):
+            audit_edit(user, "course", course.id, field, before, after)
+        course.name = name
         course.faculty_name = faculty
         course.department_name = department
-        course.unit_name = faculty  # giữ tương thích với dữ liệu cũ
+        course.unit_name = faculty
         db.session.commit()
-        flash(f"Đã cập nhật khoa và bộ môn cho môn học/ mô đun “{course.name}”.", "success")
+        flash("Đã lưu thông tin môn học/mô đun. Mã môn, lớp, QR và thống kê không thay đổi.", "success")
         return redirect(url_for("courses_page"))
 
     @app.post("/courses/<int:course_id>/playlists")
@@ -1676,8 +1850,14 @@ def register_routes(app):
             for link in plinks:
                 if link.playlist and link.playlist.is_available:
                     course_playlist_options.append(link)
+        qr_needs_review = set()
+        for q in qrs:
+            if q.course_id and not q.is_playlist:
+                target = active_video_for_qr(q)
+                if target and not CourseVideo.query.filter_by(course_id=q.course_id, video_id=target.id).first():
+                    qr_needs_review.add(q.id)
         return render_template(
-            "qr.html", qrs=qrs, videos=videos, courses=courses, course_stats=course_stats,
+            "qr.html", qr_needs_review=qr_needs_review, qrs=qrs, videos=videos, courses=courses, course_stats=course_stats,
             playlist_stats=playlist_stats, course_playlist_options=course_playlist_options,
         )
 
@@ -1707,7 +1887,7 @@ def register_routes(app):
     def qr_retarget(qr_id):
         qr = db.session.get(QrCode, qr_id) or abort(404)
         user = current_user()
-        if user.role != "admin" and qr.owner_id != user.id:
+        if qr.owner_id != user.id:
             abort(403)
         if not qr.active:
             abort(404)
@@ -1722,6 +1902,22 @@ def register_routes(app):
             flash("Video mới chưa đủ điều kiện sử dụng.", "warning")
             return redirect(url_for("qr_page"))
         linked = CourseVideo.query.filter_by(qr_id=qr.id).first()
+        if qr.course_id and not linked:
+            course = db.session.get(Course, qr.course_id)
+            if not course or course.owner_id != user.id:
+                abort(403)
+            target_link = CourseVideo.query.filter_by(course_id=course.id, video_id=video.id).first()
+            if not target_link:
+                target_link = CourseVideo(course_id=course.id, video_id=video.id,
+                                          added_by=user.id, manual_added=True)
+                db.session.add(target_link)
+                db.session.flush()
+            if target_link.qr_id and target_link.qr_id != qr.id:
+                flash("Video đích đã có QR riêng ở môn học này.", "warning")
+                return redirect(url_for("qr_page"))
+            target_link.manual_added = True
+            target_link.qr_id = qr.id
+            linked = target_link
         if linked and linked.video_id != video.id:
             duplicate = CourseVideo.query.filter_by(course_id=linked.course_id, video_id=video.id).first()
             if duplicate and duplicate.id != linked.id:
@@ -1731,6 +1927,7 @@ def register_routes(app):
                 db.session.delete(duplicate)
                 db.session.flush()
             linked.video_id = video.id
+            linked.manual_added = True  # GV đã chọn đích thủ công; không tự xóa khi playlist thay đổi.
         now = utcnow()
         old = qr.current_target
         if old:
@@ -1751,7 +1948,7 @@ def register_routes(app):
         """Ngừng sử dụng một QR nhưng giữ log/lịch sử để phục vụ nghiên cứu."""
         qr = db.session.get(QrCode, qr_id) or abort(404)
         user = current_user()
-        if user.role != "admin" and qr.owner_id != user.id:
+        if qr.owner_id != user.id:
             abort(403)
         if not qr.active:
             flash("Mã QR này đã được xóa khỏi danh sách sử dụng.", "info")
@@ -1794,7 +1991,7 @@ def register_routes(app):
     def qr_png(qr_id):
         qr = db.session.get(QrCode, qr_id) or abort(404)
         user = current_user()
-        if user.role != "admin" and qr.owner_id != user.id:
+        if qr.owner_id != user.id:
             abort(403)
         if not qr.active:
             abort(404)
@@ -1808,7 +2005,7 @@ def register_routes(app):
     @login_required
     def qr_download_all():
         user = current_user()
-        qrs = QrCode.query.filter_by(active=True).all() if user.role == "admin" else QrCode.query.filter_by(owner_id=user.id, active=True).all()
+        qrs = QrCode.query.filter_by(owner_id=user.id, active=True).all()
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1827,7 +2024,10 @@ def register_routes(app):
 
     @app.get("/q/<slug>")
     def public_qr(slug):
-        qr = QrCode.query.filter_by(slug=slug, active=True).first_or_404()
+        qr = QrCode.query.filter_by(slug=slug).first_or_404()
+        if not qr.active:
+            return render_template("viewer_error.html", qr=qr,
+                message="Mã QR này đã ngừng sử dụng. Vui lòng liên hệ giảng viên để nhận học liệu mới."), 410
         signed_in_user = current_user()
 
         # "Mở thử" dành cho GV/Quản trị viên đã đăng nhập: bỏ qua màn hình nhận diện
@@ -1844,16 +2044,11 @@ def register_routes(app):
             role = "GV"
             class_code = None
             viewer_identity = "Chế độ xem thử"
-        elif signed_in_user and signed_in_user.role == "lecturer":
-            # GV đăng nhập không phải nhập lại mã. Mã GV do quản trị viên cấp và
-            # được dùng thống nhất trong dữ liệu thực nghiệm khi GV thực sự quét QR.
+        elif signed_in_user and signed_in_user.lecturer_code:
+            # Quản trị viên đồng thời là GV. Lượt quét của GV không đưa vào thống kê SV.
             if not signed_in_user.lecturer_code:
-                return render_template(
-                    "viewer_error.html", qr=qr,
-                    message=("Tài khoản giảng viên chưa được quản trị viên cấp Mã GV. "
-                             "Hãy liên hệ quản trị viên để được cấp mã. Nếu chỉ cần kiểm tra học liệu, "
-                             "hãy dùng nút “Mở thử” trong giao diện Mã QR động."),
-                ), 403
+                return render_template("viewer_error.html", qr=qr,
+                                       message="Vui lòng hoàn tất thông tin giảng viên để được cấp mã định danh tự động."), 403
             pcode = signed_in_user.lecturer_code
             role = "GV"
             class_code = None
@@ -2168,6 +2363,26 @@ def register_routes(app):
         return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=watch_sessions.csv"})
 
 
+    @app.get("/classes/teaching")
+    @login_required
+    def teaching_classes_page():
+        """GV bộ môn được tải danh sách ban đầu của lớp đang dạy, khi chưa có SV."""
+        user = current_user()
+        taught = (SchoolClass.query.join(CourseClass, CourseClass.school_class_id == SchoolClass.id)
+                 .join(Course, Course.id == CourseClass.course_id)
+                 .filter(Course.owner_id == user.id, Course.active.is_(True),
+                         CourseClass.active.is_(True), SchoolClass.active.is_(True))
+                 .distinct().order_by(SchoolClass.name).all())
+        class_rows = []
+        for cls in taught:
+            if cls.homeroom_teacher_id == user.id:
+                continue
+            class_rows.append({"class":cls, "current_size":class_size_at(cls),
+                               "student_rows":[], "can_seed":can_seed_school_class(user,cls)})
+        return render_template("classes.html", class_rows=class_rows, lecturers=[],
+                               status_labels=STUDENT_STATUS_LABELS, today=utcnow().date(),
+                               own_classes=True, teaching_only=True)
+
     @app.get("/my-classes")
     @login_required
     def my_classes_page():
@@ -2244,6 +2459,25 @@ def register_routes(app):
             status_labels=STUDENT_STATUS_LABELS, today=today,
         )
 
+    @app.post("/classes/<int:class_id>/rename")
+    @login_required
+    def rename_school_class(class_id):
+        user = current_user()
+        school_class = db.session.get(SchoolClass, class_id) or abort(404)
+        if not can_manage_school_class(user, school_class):
+            abort(403)
+        new_name = re.sub(r"\s+", " ", (request.form.get("class_name") or "").strip())
+        if not new_name or len(new_name) > 255:
+            flash("Tên lớp không hợp lệ.", "warning")
+        elif (other := shared_class_by_name(new_name)) and other.id != school_class.id:
+            flash("Tên lớp này đã có trong hệ thống. Hãy chọn lớp có sẵn để tránh trùng dữ liệu.", "warning")
+        else:
+            audit_edit(user, "school_class", school_class.id, "name", school_class.name, new_name)
+            school_class.name = new_name
+            db.session.commit()
+            flash("Đã cập nhật tên lớp; mã lớp, danh sách SV và thống kê giữ nguyên.", "success")
+        return redirect(url_for("my_classes_page") if school_class.homeroom_teacher_id == user.id else url_for("classes_page"))
+
     @app.post("/admin/classes/create")
     @login_required
     def create_school_class():
@@ -2256,8 +2490,11 @@ def register_routes(app):
         if not name:
             flash("Vui lòng nhập tên lớp.", "warning")
             return redirect(url_for("classes_page"))
+        if shared_class_by_name(name):
+            flash("Lớp đã có trên hệ thống; không tạo trùng.", "warning")
+            return redirect(url_for("classes_page"))
         teacher = db.session.get(User, homeroom_id) if homeroom_id else None
-        if teacher and teacher.role != "lecturer":
+        if teacher and teacher.role not in {"lecturer", "admin"}:
             teacher = None
         school_class = SchoolClass(code=f"TMP-{secrets.token_hex(8)}", name=name[:255], homeroom_teacher_id=teacher.id if teacher else None)
         db.session.add(school_class)
@@ -2277,9 +2514,23 @@ def register_routes(app):
         school_class = db.session.get(SchoolClass, class_id) or abort(404)
         teacher_id = request.form.get("homeroom_teacher_id", type=int)
         teacher = db.session.get(User, teacher_id) if teacher_id else None
-        if teacher and teacher.role != "lecturer":
+        if teacher and teacher.role not in {"lecturer", "admin"}:
             flash("Tài khoản được chọn không phải là giảng viên.", "warning")
             return redirect(url_for("classes_page"))
+        effective_text = (request.form.get("effective_date") or "").strip()
+        try:
+            effective = date.fromisoformat(effective_text) if effective_text else utcnow().date()
+        except ValueError:
+            flash("Ngày chuyển giao không hợp lệ.", "warning")
+            return redirect(url_for("classes_page"))
+        if effective > utcnow().date():
+            flash("Vui lòng chọn ngày có hiệu lực không muộn hơn hôm nay để chuyển giao ngay.", "warning")
+            return redirect(url_for("classes_page"))
+        if school_class.homeroom_teacher_id != (teacher.id if teacher else None):
+            db.session.add(HomeroomChange(school_class_id=school_class.id,
+                         previous_teacher_id=school_class.homeroom_teacher_id,
+                         new_teacher_id=teacher.id if teacher else None,
+                         effective_on=effective, changed_by=user.id))
         school_class.homeroom_teacher_id = teacher.id if teacher else None
         db.session.commit()
         flash(f"Đã cập nhật giảng viên chủ nhiệm cho lớp “{school_class.name}”.", "success")
@@ -2332,8 +2583,7 @@ def register_routes(app):
             student = Student(student_code=code, full_name=name)
             db.session.add(student)
             db.session.flush()
-        elif name and student.full_name != name:
-            student.full_name = name
+        # Không tự ghi đè tên đã được GVCN hiệu chỉnh bởi lần tải Excel khác.
         for e in active_enrollments_for_student(student, effective_date):
             if e.school_class_id == school_class.id:
                 return "already"
@@ -2346,14 +2596,14 @@ def register_routes(app):
     def upload_class_students(class_id):
         user = current_user()
         school_class = db.session.get(SchoolClass, class_id) or abort(404)
-        if not can_manage_school_class(user, school_class):
-            flash("Bạn chỉ được quản lý danh sách sinh viên của lớp mình chủ nhiệm.", "warning")
-            return redirect(url_for("classes_page"))
+        if not can_seed_school_class(user, school_class):
+            flash("Chỉ GVCN được cập nhật danh sách đã có. GV dạy lớp chỉ được nhập danh sách ban đầu nếu lớp chưa có SV.", "warning")
+            return redirect(url_for("my_classes_page") if SchoolClass.query.filter_by(homeroom_teacher_id=user.id).first() else url_for("teaching_classes_page"))
         upload = request.files.get("student_file")
         effective_text = (request.form.get("effective_date") or "").strip()
         if not upload or not upload.filename:
             flash("Vui lòng chọn tệp Excel danh sách sinh viên.", "warning")
-            return redirect(url_for("classes_page"))
+            return redirect(class_management_url(user, school_class))
         try:
             effective_date = date.fromisoformat(effective_text) if effective_text else utcnow().date()
             rows = read_students_from_excel(upload)
@@ -2376,22 +2626,22 @@ def register_routes(app):
         except Exception as exc:
             db.session.rollback()
             flash(f"Không đọc được danh sách sinh viên: {exc}", "danger")
-        return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+        return redirect(class_management_url(user, school_class))
 
     @app.post("/classes/<int:class_id>/students/add")
     @login_required
     def add_class_student(class_id):
         user = current_user()
         school_class = db.session.get(SchoolClass, class_id) or abort(404)
-        if not can_manage_school_class(user, school_class):
-            flash("Bạn chỉ được quản lý danh sách sinh viên của lớp mình chủ nhiệm.", "warning")
-            return redirect(url_for("classes_page"))
+        if not can_seed_school_class(user, school_class):
+            flash("Chỉ GVCN được cập nhật danh sách đã có. GV dạy lớp chỉ được nhập danh sách ban đầu nếu lớp chưa có SV.", "warning")
+            return redirect(url_for("my_classes_page") if SchoolClass.query.filter_by(homeroom_teacher_id=user.id).first() else url_for("teaching_classes_page"))
         code = normalize_student_code(request.form.get("student_code", ""))
         name = (request.form.get("full_name") or "").strip()
         effective_text = (request.form.get("effective_date") or "").strip()
         if not code or not name:
             flash("Vui lòng nhập mã sinh viên và họ tên.", "warning")
-            return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+            return redirect(class_management_url(user, school_class))
         try:
             effective_date = date.fromisoformat(effective_text) if effective_text else utcnow().date()
             result = add_student_to_school_class(school_class, code, name, effective_date)
@@ -2402,7 +2652,27 @@ def register_routes(app):
         except Exception as exc:
             db.session.rollback()
             flash(f"Không thêm được sinh viên: {exc}", "danger")
-        return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+        return redirect(class_management_url(user, school_class))
+
+    @app.post("/classes/<int:class_id>/students/<int:student_id>/edit")
+    @login_required
+    def edit_student_name(class_id, student_id):
+        user = current_user()
+        school_class = db.session.get(SchoolClass, class_id) or abort(404)
+        student = db.session.get(Student, student_id) or abort(404)
+        if school_class.homeroom_teacher_id != user.id:
+            abort(403)
+        if not ClassEnrollment.query.filter_by(school_class_id=class_id, student_id=student_id).first():
+            abort(404)
+        name = re.sub(r"\s+", " ", (request.form.get("full_name") or "").strip())
+        if len(name) < 2 or len(name) > 255:
+            flash("Họ tên sinh viên không hợp lệ.", "warning")
+        else:
+            audit_edit(user, "student", student.id, "full_name", student.full_name, name)
+            student.full_name = name
+            db.session.commit()
+            flash("Đã sửa họ tên sinh viên. Mã SV và lịch sử quét/xem giữ nguyên.", "success")
+        return redirect(url_for("my_classes_page") + f"#lop-{class_id}")
 
     @app.post("/classes/<int:class_id>/students/<int:student_id>/status")
     @login_required
@@ -2418,14 +2688,14 @@ def register_routes(app):
         note = (request.form.get("note") or "").strip()
         if status not in STUDENT_STATUS_LABELS:
             flash("Vui lòng chọn trạng thái hợp lệ.", "warning")
-            return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+            return redirect(class_management_url(user, school_class))
         try:
             effective_date = date.fromisoformat(effective_text) if effective_text else utcnow().date()
             active_here = next((e for e in student.enrollments if e.school_class_id == school_class.id and enrollment_active_on(e, effective_date)), None)
             if status == "dang_hoc":
                 if active_here:
                     flash("Sinh viên đang ở trạng thái Đang học trong lớp tại ngày này.", "info")
-                    return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+                    return redirect(class_management_url(user, school_class))
                 for e in active_enrollments_for_student(student, effective_date):
                     if e.school_class_id != school_class.id:
                         raise ValueError(f"Sinh viên đang thuộc lớp {e.school_class.name} tại ngày hiệu lực.")
@@ -2444,7 +2714,7 @@ def register_routes(app):
         except Exception as exc:
             db.session.rollback()
             flash(f"Không cập nhật được trạng thái: {exc}", "danger")
-        return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+        return redirect(class_management_url(user, school_class))
 
     @app.post("/classes/<int:class_id>/students/<int:student_id>/delete")
     @login_required
@@ -2460,7 +2730,7 @@ def register_routes(app):
 
         # Chỉ GVCN của chính lớp được xóa SV khỏi danh sách. Quản trị viên không thao tác
         # danh sách chi tiết SV trên giao diện quản trị lớp.
-        if user.role == "admin" or school_class.homeroom_teacher_id != user.id:
+        if school_class.homeroom_teacher_id != user.id:
             flash("Bạn chỉ được xóa sinh viên khỏi lớp mình đang chủ nhiệm.", "warning")
             return redirect(url_for("classes_page"))
 
@@ -2469,7 +2739,7 @@ def register_routes(app):
         ).all()
         if not enrollments:
             flash("Sinh viên không có trong danh sách của lớp này.", "warning")
-            return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+            return redirect(class_management_url(user, school_class))
 
         code = student.student_code
         try:
@@ -2533,7 +2803,7 @@ def register_routes(app):
             db.session.rollback()
             flash(f"Không xóa được sinh viên: {exc}", "danger")
 
-        return redirect(url_for("classes_page") + f"#lop-{school_class.id}")
+        return redirect(class_management_url(user, school_class))
 
     @app.route("/research", methods=["GET", "POST"])
     @login_required
@@ -2657,6 +2927,28 @@ def register_routes(app):
             survey_links=survey_links,
         )
 
+    @app.post("/admin/catalog/rename")
+    @login_required
+    def rename_shared_catalog():
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        field = (request.form.get("field") or "").strip()
+        old = (request.form.get("old_value") or "").strip()
+        new = re.sub(r"\s+", " ", (request.form.get("new_value") or "").strip())
+        if field not in {"department_name", "faculty_name"} or not old or not new or len(new) > 255:
+            flash("Thông tin chuẩn hóa khoa/bộ môn không hợp lệ.", "warning")
+            return redirect(url_for("lecturers_page"))
+        matched = Course.query.filter(getattr(Course, field) == old).all()
+        for course in matched:
+            audit_edit(user, "course", course.id, field, old, new)
+            setattr(course, field, new)
+            if field == "faculty_name":
+                course.unit_name = new
+        db.session.commit()
+        flash(f"Đã chuẩn hóa {len(matched)} môn học/mô đun theo tên mới.", "success")
+        return redirect(url_for("lecturers_page"))
+
     @app.get("/admin/lecturers")
     @login_required
     def lecturers_page():
@@ -2670,7 +2962,9 @@ def register_routes(app):
             channels = YouTubeChannel.query.filter_by(user_id=account.id).order_by(YouTubeChannel.created_at.asc()).all()
             channel_names = [c.title.strip() for c in channels if (c.title or "").strip()]
             if account.role == "admin":
-                position = "Quản trị viên"
+                position = ("Quản trị viên kiêm GVCN" if
+                            SchoolClass.query.filter_by(homeroom_teacher_id=account.id, active=True).first()
+                            else "Quản trị viên kiêm giảng viên")
             elif SchoolClass.query.filter_by(homeroom_teacher_id=account.id, active=True).first():
                 position = "Giảng viên kiêm GVCN"
             else:
@@ -2773,6 +3067,8 @@ def register_routes(app):
             # HubSubscription/Playlist/Video/PlaylistVideo được xóa theo cascade khi xóa kênh.
         YouTubeChannel.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
 
+        ConnectedGoogleAccount.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
+        EditHistory.query.filter_by(changed_by=lecturer.id).delete(synchronize_session=False)
         ExperimentRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
         FunctionalTestRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
         SurveyResult.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
@@ -2954,12 +3250,14 @@ def register_routes(app):
 
 
 
-BACKUP_VERSION = "3.0"
+BACKUP_VERSION = "4.3"
 
 def backup_table_specs():
+    """Thứ tự từ bảng cha đến bảng con, dùng chung cho sao lưu, khôi phục, xóa sạch."""
     return [
         ("users", User),
         ("oauth_accounts", OAuthAccount),
+        ("connected_google_accounts", ConnectedGoogleAccount),
         ("youtube_channels", YouTubeChannel),
         ("playlists", Playlist),
         ("videos", Video),
@@ -2967,6 +3265,7 @@ def backup_table_specs():
         ("courses", Course),
         ("class_groups", ClassGroup),
         ("school_classes", SchoolClass),
+        ("homeroom_changes", HomeroomChange),
         ("students", Student),
         ("class_enrollments", ClassEnrollment),
         ("course_classes", CourseClass),
@@ -2985,6 +3284,7 @@ def backup_table_specs():
         ("functional_test_runs", FunctionalTestRun),
         ("research_settings", ResearchSetting),
         ("survey_results", SurveyResult),
+        ("edit_history", EditHistory),
     ]
 
 def build_backup_zip():
@@ -3012,14 +3312,14 @@ def restore_from_zip(fileobj):
         if "manifest.json" not in names:
             raise ValueError("Không có manifest.json; đây không phải backup hợp lệ.")
         manifest = json.loads(zf.read("manifest.json"))
-        if manifest.get("backup_version") not in {"2.0", "2.1", BACKUP_VERSION}:
+        if manifest.get("backup_version") not in {"2.0", "2.1", "3.0", BACKUP_VERSION}:
             raise ValueError("Phiên bản backup không tương thích.")
         payload = {}
         for name, model in backup_table_specs():
             fn = f"{name}.json"
             if fn not in names:
                 # Các bảng bổ sung ở phiên bản sau là tùy chọn để backup cũ vẫn khôi phục được.
-                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes"}:
+                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes", "connected_google_accounts", "homeroom_changes", "edit_history"}:
                     payload[name] = []
                     continue
                 raise ValueError(f"Thiếu {fn} trong backup.")
@@ -3124,11 +3424,13 @@ def acceptance_metrics(user):
     participant_base = db.session.query(ScanLog.participant_code).join(QrCode, ScanLog.qr_id == QrCode.id)
     if user.role != "admin":
         participant_base = participant_base.filter(QrCode.owner_id == user.id)
-    # Giảng viên tham gia được tính theo tài khoản giảng viên đã đăng nhập vào Web App.
-    # Số trong ngoặc là số giảng viên được quản trị viên xác định thuộc nhóm chuyên môn khác CNTT.
+    # Chỉ tính GV đã thực sự tạo môn học/QR hoặc gán học liệu, không tính đăng nhập
+    # quản trị thuần túy. Mỗi GV được tính tối đa một lần kể cả kiêm Admin/GVCN.
     # Sinh viên tham gia được tính theo mã SV thực tế đã quét QR.
     if user.role == "admin":
-        participating_lecturers_q = User.query.filter(User.last_login_at.isnot(None), User.profile_completed.is_(True))
+        teacher_ids = {x[0] for x in db.session.query(Course.owner_id).all()}
+        teacher_ids.update(x[0] for x in db.session.query(QrCode.owner_id).all())
+        participating_lecturers_q = User.query.filter(User.profile_completed.is_(True), User.id.in_(teacher_ids))
         gv_count = participating_lecturers_q.count()
         gv_non_it_count = participating_lecturers_q.filter(User.professional_group == "other").count()
     else:

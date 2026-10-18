@@ -302,3 +302,16 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Thêm môn học/mô đun có thể chọn ngay lớp; danh sách môn học trình bày dạng bảng với bộ chọn nhiều lớp; số lượng không đệm 0.
 - Sĩ số khai báo không thay thế số SV đang học (lấy từ danh sách SV GVCN tải Excel).
 - Nâng schema thêm users.profile_completed và school_classes.declared_size; không xóa dữ liệu cũ.
+
+
+## Bổ sung v4.3.0
+- Quản trị viên là giảng viên và có thể chủ nhiệm; Tổng quan chuyển phạm vi dữ liệu của tôi/toàn hệ thống.
+- Giữ tự đồng bộ khi đăng nhập, nút Đồng bộ lại chủ động; không tạo cron 6 giờ tính phí.
+- Kết nối thêm một/một số tài khoản Google YouTube bằng OAuth riêng vào cùng hồ sơ GV, không đăng xuất.
+- GV có thể chọn lớp có sẵn hoặc tạo lớp chưa có khi thêm môn học/mô đun; dữ liệu lớp dùng chung.
+- GV bộ môn được nạp danh sách SV đầu tiên khi lớp chưa có SV; sau đó chỉ GVCN quản lý.
+- Chuyển giao GVCN với ngày hiệu lực, không đổi mã lớp; lưu lịch sử bàn giao.
+- Chỉnh sửa tên môn, bộ môn, khoa, tên lớp, họ tên SV (không đổi khóa định danh); quản trị viên chuẩn hóa danh mục khoa/bộ môn; lưu lịch sử chỉnh sửa.
+- QR playlist tự cập nhật nội dung khi GV đồng bộ; QR video cảnh báo nếu bị mất liên hệ môn sau chuyển playlist; video riêng tư/xóa không phát; QR bị xóa mềm trả thông báo dừng sử dụng, không xóa lịch sử thống kê.
+- Sao lưu hỗ trợ bảng kết nối bổ sung, lịch sử bàn giao GVCN, lịch sử hiệu chỉnh.
+- Khi dùng tính năng kết nối YouTube khác, cấu hình Google OAuth redirect URI `/youtube/connect-callback` bên cạnh `/auth/callback`.

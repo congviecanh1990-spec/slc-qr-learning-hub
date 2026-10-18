@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import requests
 from flask import current_app
 
-from models import db, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ErrorLog, utcnow
+from models import db, OAuthAccount, ConnectedGoogleAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ErrorLog, utcnow
 from security import decrypt_json, encrypt_json
 
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
@@ -16,8 +16,8 @@ def _log_error(module, message, details=None):
     db.session.commit()
 
 
-def _token_for_user(user):
-    account = OAuthAccount.query.filter_by(user_id=user.id).first()
+def _token_for_user(user, credential=None):
+    account = credential or OAuthAccount.query.filter_by(user_id=user.id).first()
     if not account:
         raise RuntimeError("Tài khoản chưa có token Google/YouTube.")
     token = decrypt_json(account.token_encrypted)
@@ -48,17 +48,17 @@ def _token_for_user(user):
     return token["access_token"]
 
 
-def _get(user, path, params):
-    access = _token_for_user(user)
+def _get(user, path, params, credential=None):
+    access = _token_for_user(user, credential)
     headers = {"Authorization": f"Bearer {access}"}
     resp = requests.get(f"{YOUTUBE_API}/{path}", params=params, headers=headers, timeout=30)
     if resp.status_code == 401:
-        account = OAuthAccount.query.filter_by(user_id=user.id).first()
+        account = credential or OAuthAccount.query.filter_by(user_id=user.id).first()
         token = decrypt_json(account.token_encrypted)
         token["expires_at"] = 0
         account.token_encrypted = encrypt_json(token)
         db.session.commit()
-        access = _token_for_user(user)
+        access = _token_for_user(user, credential)
         headers = {"Authorization": f"Bearer {access}"}
         resp = requests.get(f"{YOUTUBE_API}/{path}", params=params, headers=headers, timeout=30)
     if not resp.ok:
@@ -84,8 +84,8 @@ def _thumb(snippet):
     return None
 
 
-def sync_my_channel(user):
-    data = _get(user, "channels", {"part": "snippet,contentDetails", "mine": "true", "maxResults": 50})
+def sync_my_channel(user, credential=None):
+    data = _get(user, "channels", {"part": "snippet,contentDetails", "mine": "true", "maxResults": 50}, credential)
     items = data.get("items", [])
     if not items:
         raise RuntimeError("Không tìm thấy kênh YouTube thuộc tài khoản này.")
@@ -95,22 +95,31 @@ def sync_my_channel(user):
         cid = item["id"]
         snippet = item.get("snippet", {})
         uploads = item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
+        existing_other = YouTubeChannel.query.filter_by(channel_id=cid).first()
+        if existing_other and existing_other.user_id != user.id:
+            raise RuntimeError("Kênh YouTube này đã được kết nối với hồ sơ giảng viên khác.")
         channel = YouTubeChannel.query.filter_by(user_id=user.id, channel_id=cid).first()
         if not channel:
             channel = YouTubeChannel(user_id=user.id, channel_id=cid)
             db.session.add(channel)
+        channel.connected_account_id = credential.id if isinstance(credential, ConnectedGoogleAccount) else None
         channel.title = snippet.get("title", cid)
         channel.uploads_playlist_id = uploads
         channel.thumbnail_url = _thumb(snippet)
         channel.last_synced_at = utcnow()
         db.session.flush()
-        playlists = sync_playlists(user, channel)
+        playlists = sync_playlists(user, channel, credential)
         # Đồng bộ nội dung của từng playlist do giảng viên tạo để Web App có thể
         # gán playlist vào học phần và tạo QR playlist động.
         for playlist in playlists:
-            sync_playlist_items(user, channel, playlist.youtube_playlist_id)
+            sync_playlist_items(user, channel, playlist.youtube_playlist_id, credential=credential)
         if uploads:
-            sync_playlist_items(user, channel, uploads, uploads_playlist=True)
+            sync_playlist_items(user, channel, uploads, uploads_playlist=True, credential=credential)
+        # Kiểm tra lại CẢ các video từng lưu nhưng không còn nằm trong playlist hiện tại;
+        # nhờ đó phát hiện video đã xóa/đổi quyền ngay khi GV bấm Đồng bộ lại.
+        stored_ids = [v.youtube_video_id for v in Video.query.filter_by(channel_id=channel.id).all()]
+        for i in range(0, len(stored_ids), 50):
+            sync_video_ids(user, channel, stored_ids[i:i+50], credential)
         synced.append(channel)
     # Sau khi đồng bộ YouTube, mọi playlist đã gán cho học phần được xem như
     # nguồn dữ liệu động: video mới tự vào học phần, video đã gỡ khỏi playlist
@@ -135,7 +144,7 @@ def _reconcile_course_playlist_assignments(user):
         for video_id, playlist_id in desired.items():
             link = existing.get(video_id)
             if link:
-                if not link.source_playlist_id:
+                if not link.manual_added:
                     link.source_playlist_id = playlist_id
                 continue
             db.session.add(CourseVideo(
@@ -149,15 +158,15 @@ def _reconcile_course_playlist_assignments(user):
         db.session.flush()
 
 
-def sync_playlists(user, channel):
+def sync_playlists(user, channel, credential=None):
     seen_ids = set()
     synced_playlists = []
     page = None
     while True:
-        params = {"part": "snippet,status", "mine": "true", "maxResults": 50}
+        params = {"part": "snippet,status", "channelId": channel.channel_id, "maxResults": 50}
         if page:
             params["pageToken"] = page
-        data = _get(user, "playlists", params)
+        data = _get(user, "playlists", params, credential)
         for item in data.get("items", []):
             pid = item["id"]
             seen_ids.add(pid)
@@ -190,7 +199,7 @@ def sync_playlists(user, channel):
     return synced_playlists
 
 
-def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=False):
+def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=False, credential=None):
     video_ids = []
     item_meta = {}
     page = None
@@ -202,7 +211,7 @@ def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=Fal
         }
         if page:
             params["pageToken"] = page
-        data = _get(user, "playlistItems", params)
+        data = _get(user, "playlistItems", params, credential)
         for item in data.get("items", []):
             vid = item.get("contentDetails", {}).get("videoId") or item.get("snippet", {}).get("resourceId", {}).get("videoId")
             if vid:
@@ -213,7 +222,7 @@ def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=Fal
             break
 
     for i in range(0, len(video_ids), 50):
-        sync_video_ids(user, channel, video_ids[i:i + 50])
+        sync_video_ids(user, channel, video_ids[i:i + 50], credential)
 
     playlist = Playlist.query.filter_by(youtube_playlist_id=playlist_youtube_id).first()
     if not playlist and uploads_playlist:
@@ -252,7 +261,9 @@ def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=Fal
     db.session.commit()
 
 
-def sync_video_ids(user, channel, video_ids):
+def sync_video_ids(user, channel, video_ids, credential=None):
+    if credential is None and channel.connected_account_id:
+        credential = db.session.get(ConnectedGoogleAccount, channel.connected_account_id)
     if not video_ids:
         return
     data = _get(
@@ -263,6 +274,7 @@ def sync_video_ids(user, channel, video_ids):
             "id": ",".join(video_ids),
             "maxResults": 50,
         },
+        credential,
     )
     returned = set()
     for item in data.get("items", []):
@@ -272,6 +284,8 @@ def sync_video_ids(user, channel, video_ids):
         status = item.get("status", {})
         content = item.get("contentDetails", {})
         video = Video.query.filter_by(youtube_video_id=vid).first()
+        if video and video.channel.user_id != user.id:
+            continue
         if not video:
             video = Video(channel_id=channel.id, youtube_video_id=vid)
             db.session.add(video)
@@ -296,18 +310,22 @@ def sync_video_ids(user, channel, video_ids):
     db.session.commit()
 
 
-def reconcile_user(user):
-    channels = YouTubeChannel.query.filter_by(user_id=user.id).all()
-    total = 0
-    for channel in channels:
-        # Đối soát cả cấu trúc playlist để QR playlist phản ánh đúng video vừa thêm/gỡ.
-        playlists = sync_playlists(user, channel)
-        for playlist in playlists:
-            sync_playlist_items(user, channel, playlist.youtube_playlist_id)
-        if channel.uploads_playlist_id:
-            sync_playlist_items(user, channel, channel.uploads_playlist_id, uploads_playlist=True)
+def sync_all_connected_channels(user):
+    """Đồng bộ kênh chính và các tài khoản Google bổ sung; trả về các lỗi riêng lẻ."""
+    channels, errors = [], []
+    credentials = [None] + ConnectedGoogleAccount.query.filter_by(user_id=user.id).all()
+    for credential in credentials:
+        try:
+            channels.extend(sync_my_channel(user, credential))
+        except Exception as exc:
+            db.session.rollback()
+            label = credential.email if credential is not None else user.email
+            errors.append(f"{label}: {exc}")
+    return channels, errors
 
-        total += len(channel.videos)
-        channel.last_synced_at = utcnow()
-    db.session.commit()
-    return total
+
+def reconcile_user(user):
+    channels, errors = sync_all_connected_channels(user)
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return sum(len(channel.videos) for channel in channels)

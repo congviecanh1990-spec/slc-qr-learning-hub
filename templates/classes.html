@@ -2,9 +2,11 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
   <div>
-    <h2 class="mb-1">{{ 'Quản lý lớp & sinh viên' if me.role == 'admin' and not own_classes else 'Lớp chủ nhiệm' }}</h2>
+    <h2 class="mb-1">{{ 'Quản lý lớp & sinh viên' if me.role == 'admin' and not own_classes else ('Danh sách lớp đang dạy' if teaching_only else 'Lớp chủ nhiệm') }}</h2>
     {% if me.role == 'admin' and not own_classes %}
       <div class="text-muted">Lớp được tạo tự động từ thông tin khai báo của GVCN; Quản trị viên theo dõi sĩ số thực tế. Danh sách sinh viên và biến động lớp do giảng viên chủ nhiệm quản lý.</div>
+    {% elif teaching_only %}
+      <div class="text-muted">Giảng viên đang dạy lớp được bổ sung danh sách sinh viên ban đầu nếu lớp chưa có danh sách. Khi đã có danh sách, GVCN quản lý các thay đổi.</div>
     {% else %}
       <div class="text-muted">Quản lý danh sách sinh viên của lớp chủ nhiệm. Mã sinh viên sử dụng đúng mã do Nhà trường cấp; biến động được lưu theo ngày có hiệu lực để bảo toàn lịch sử.</div>
     {% endif %}
@@ -37,7 +39,10 @@
           {% set cls = item.class %}
           <tr>
             <td><strong>{{ cls.code }}</strong></td>
-            <td>{{ cls.name }}</td>
+            <td>{{ cls.name }}<details class="small"><summary>Chỉnh sửa tên lớp</summary>
+              <form method="post" action="{{ url_for('rename_school_class',class_id=cls.id) }}" class="d-flex gap-1 mt-1">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input class="form-control form-control-sm" name="class_name" value="{{ cls.name }}" required><button class="btn btn-outline-primary btn-sm">Lưu</button>
+              </form></details></td>
             <td>{% if cls.homeroom_teacher %}{{ cls.homeroom_teacher.name or cls.homeroom_teacher.email }}{% else %}<span class="text-muted">Chưa giao</span>{% endif %}</td>
             <td>{% if cls.homeroom_teacher %}{{ cls.homeroom_teacher.email }}{% else %}—{% endif %}</td>
             <td class="text-center"><span class="badge text-bg-primary">{{ item.current_size }}</span></td>
@@ -48,6 +53,7 @@
                   <option value="">— Chưa giao —</option>
                   {% for u in lecturers %}<option value="{{ u.id }}" {{ 'selected' if cls.homeroom_teacher_id == u.id else '' }}>{{ u.name or u.email }} — {{ u.email }}</option>{% endfor %}
                 </select>
+                <input type="date" class="form-control form-control-sm" name="effective_date" value="{{ today.isoformat() }}" title="Ngày chuyển giao">
                 <button class="btn btn-outline-primary btn-sm text-nowrap">Lưu</button>
               </form>
             </td>
@@ -66,13 +72,18 @@
   {% set cls = item.class %}
   <div class="card shadow-sm mb-4" id="lop-{{ cls.id }}">
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-      <div><strong>{{ cls.name }}</strong> <span class="text-muted">({{ cls.code }})</span></div>
+      <div><strong>{{ cls.name }}</strong> <span class="text-muted">({{ cls.code }})</span>
+        {% if not teaching_only %}<details class="small"><summary>Chỉnh sửa tên lớp</summary>
+          <form method="post" action="{{ url_for('rename_school_class', class_id=cls.id) }}" class="d-flex gap-1 mt-2"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input class="form-control form-control-sm" name="class_name" value="{{ cls.name }}" required maxlength="255"><button class="btn btn-outline-primary btn-sm">Lưu</button></form>
+        </details>{% endif %}</div>
       <div class="d-flex flex-wrap gap-2 align-items-center small">
         <span class="badge text-bg-primary">Sĩ số đang học: {{ item.current_size }}</span>
         {% if cls.declared_size is not none %}<span class="text-muted">Sĩ số khai báo: {{ cls.declared_size }}</span>{% endif %}
       </div>
     </div>
     <div class="card-body">
+      {% if not teaching_only or item.can_seed %}
+      {% if teaching_only %}<div class="alert alert-info">Lớp chưa có danh sách SV. Là giảng viên đang dạy lớp, bạn được phép nhập danh sách ban đầu một lần; sau đó GVCN phụ trách cập nhật biến động.</div>{% endif %}
       <div class="row g-3 mb-4">
         <div class="col-lg-7">
           <div class="border rounded p-3 h-100">
@@ -100,14 +111,21 @@
         </div>
       </div>
 
+      {% endif %}
+      {% if teaching_only and not item.can_seed %}<div class="alert alert-secondary">Lớp đã có danh sách SV. Vui lòng liên hệ GVCN để bổ sung, xóa hoặc sửa thông tin sinh viên.</div>{% endif %}
+      {% if not teaching_only %}
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-0">
-          <thead><tr><th>Mã sinh viên</th><th>Họ và tên</th><th>Trạng thái hiện tại</th><th>Khoảng thời gian gần nhất</th><th style="min-width:310px">Thay đổi trạng thái</th><th class="text-center" style="width:70px">Lưu</th><th class="text-center" style="width:70px">Xóa</th></tr></thead>
+          <thead><tr><th>Mã sinh viên</th><th>Họ và tên / Chỉnh sửa</th><th>Trạng thái hiện tại</th><th>Khoảng thời gian gần nhất</th><th style="min-width:310px">Thay đổi trạng thái</th><th class="text-center" style="width:70px">Lưu</th><th class="text-center" style="width:70px">Xóa</th></tr></thead>
           <tbody>
             {% for row in item.student_rows %}
             <tr>
               <td><strong>{{ row.student.student_code }}</strong></td>
-              <td>{{ row.student.full_name }}</td>
+              <td>{{ row.student.full_name }}
+                <details class="small"><summary>Sửa tên</summary>
+                  <form method="post" action="{{ url_for('edit_student_name',class_id=cls.id,student_id=row.student.id) }}" class="d-flex gap-1 mt-1">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input class="form-control form-control-sm" name="full_name" value="{{ row.student.full_name }}" required maxlength="255"><button class="btn btn-outline-primary btn-sm">Lưu</button>
+                  </form></details></td>
               <td><span class="badge {{ 'text-bg-success' if row.status_key == 'dang_hoc' else 'text-bg-secondary' }}">{{ row.status_label }}</span></td>
               <td class="small">{% if row.reference %}Từ {{ row.reference.started_on.strftime('%d/%m/%Y') }}{% if row.reference.ended_on %} đến trước {{ row.reference.ended_on.strftime('%d/%m/%Y') }}{% endif %}{% else %}—{% endif %}</td>
               <td>
@@ -137,6 +155,7 @@
           </tbody>
         </table>
       </div>
+      {% endif %}
     </div>
   </div>
   {% else %}
