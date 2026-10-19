@@ -23,8 +23,9 @@ from flask import (
     render_template, request, send_file, session, url_for
 )
 from flask_wtf.csrf import CSRFProtect
-from sqlalchemy import func, text, DateTime, inspect, or_
+from sqlalchemy import func, text, DateTime, inspect, or_, and_, select, union_all, literal
 from werkzeug.middleware.proxy_fix import ProxyFix
+from sqlalchemy.orm import aliased
 
 from config import Config
 from models import (
@@ -367,6 +368,12 @@ def ensure_schema_upgrades():
                 conn.execute(text("ALTER TABLE error_logs ADD COLUMN action VARCHAR(128)"))
             if "course_module" not in error_columns:
                 conn.execute(text("ALTER TABLE error_logs ADD COLUMN course_module VARCHAR(255)"))
+        # Chỉ mục phục vụ thống kê phân trang và ghép lượt quét với phiên xem.
+        # Không thay đổi dữ liệu cũ; các chỉ mục chỉ được tạo nếu chưa có.
+        if "scan_logs" in tables:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_scan_logs_match_viewer ON scan_logs (qr_id, participant_code, class_code, scanned_at)"))
+        if "watch_sessions" in tables:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_watch_sessions_match_viewer ON watch_sessions (qr_id, participant_code, class_code, started_at)"))
         if "functional_test_runs" in tables:
             test_columns = {c["name"] for c in inspector.get_columns("functional_test_runs")}
             if "source" not in test_columns:
@@ -2410,70 +2417,140 @@ def register_routes(app):
     @app.get("/analytics")
     @login_required
     def analytics():
-        """Bảng theo dõi SV và danh sách chưa quét/chưa xem hoàn thành theo QR được giao."""
+        """Hoạt động GV/Quản trị viên và một bảng tổng hợp lượt quét - xem của SV.
+
+        Không nhân bản dữ liệu trong PostgreSQL; đối chiếu phiên xem với lượt quét
+        gần nhất trước thời điểm bắt đầu phiên của cùng SV, lớp và QR.
+        """
         user = current_user()
         course_q = Course.query.filter(Course.active.is_(True))
         qr_q = QrCode.query.filter(QrCode.active.is_(True), QrCode.course_id.isnot(None))
-        scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
-        watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
         if user.role != "admin":
             course_q = course_q.filter(Course.owner_id == user.id)
             qr_q = qr_q.filter(QrCode.owner_id == user.id)
-            scan_q = scan_q.filter(QrCode.owner_id == user.id)
-            watch_q = watch_q.filter(QrCode.owner_id == user.id)
         course_options = course_q.order_by(Course.name).all()
         qr_options = qr_q.order_by(QrCode.course_id, QrCode.title).all()
         if user.role == "admin":
             class_options = SchoolClass.query.filter(SchoolClass.active.is_(True)).order_by(SchoolClass.name).all()
         else:
             class_options = (SchoolClass.query.join(CourseClass, CourseClass.school_class_id == SchoolClass.id)
-                             .join(Course, CourseClass.course_id == Course.id)
-                             .filter(Course.owner_id == user.id, Course.active.is_(True),
-                                     CourseClass.active.is_(True), SchoolClass.active.is_(True))
-                             .distinct().order_by(SchoolClass.name).all())
+                .join(Course, CourseClass.course_id == Course.id)
+                .filter(Course.owner_id == user.id, Course.active.is_(True),
+                        CourseClass.active.is_(True), SchoolClass.active.is_(True))
+                .distinct().order_by(SchoolClass.name).all())
         class_name_map = {c.code: c.name for c in SchoolClass.query.all()}
         for legacy in ClassGroup.query.all():
             class_name_map.setdefault(legacy.code, legacy.name)
 
-        class_code = request.args.get("class_code", "").strip()
+        # Bộ lọc theo tên học liệu, lớp, môn học và thời gian; mã QR chỉ dùng nội bộ.
         course_id = request.args.get("course_id", type=int)
+        class_code = (request.args.get("class_code") or "").strip()
         qr_id = request.args.get("qr_id", type=int)
-        status = request.args.get("status", "all")
-        if status not in {"all", "not_scanned", "not_completed"}:
+        status = (request.args.get("status") or "all").strip()
+        if status not in {"all", "not_scanned", "not_completed", "unwatched", "completed", "failed"}:
             status = "all"
         selected_course = next((c for c in course_options if c.id == course_id), None)
         selected_qr = next((q for q in qr_options if q.id == qr_id), None)
-        # Tra cứu bằng tên học liệu; mã QR chỉ dùng nội bộ để đối chiếu từng học liệu.
-        if class_code:
-            scan_q = scan_q.filter(ScanLog.class_code == class_code)
-            watch_q = watch_q.filter(WatchSession.class_code == class_code)
-        if course_id:
-            if selected_course is None:
-                scan_q = scan_q.filter(ScanLog.id == -1)
-                watch_q = watch_q.filter(WatchSession.id == -1)
-            else:
-                scan_q = scan_q.filter(ScanLog.course_id == course_id)
-                watch_q = watch_q.filter(WatchSession.course_id == course_id)
-        if qr_id:
-            if selected_qr is None:
-                scan_q = scan_q.filter(ScanLog.id == -1)
-                watch_q = watch_q.filter(WatchSession.id == -1)
-            else:
-                scan_q = scan_q.filter(ScanLog.qr_id == qr_id)
-                watch_q = watch_q.filter(WatchSession.qr_id == qr_id)
+        selected_class = next((c for c in class_options if c.code == class_code), None)
+        media_search = (request.args.get("media_search") or "").strip()[:120]
+        sv_period = (request.args.get("sv_period") or "all").strip()
+        if sv_period not in {"all", "today", "7", "30", "custom"}:
+            sv_period = "30"
+        sv_from, sv_to = (request.args.get("sv_from") or "").strip(), (request.args.get("sv_to") or "").strip()
+        sv_start_at, sv_end_at = None, None
+        if sv_period == "today":
+            sv_start_at = datetime.combine(utcnow().date(), datetime.min.time())
+        elif sv_period in {"7", "30"}:
+            sv_start_at = utcnow() - timedelta(days=int(sv_period))
+        elif sv_period == "custom":
+            try:
+                sv_start_at = datetime.combine(date.fromisoformat(sv_from), datetime.min.time()) if sv_from else None
+                sv_end_at = datetime.combine(date.fromisoformat(sv_to) + timedelta(days=1), datetime.min.time()) if sv_to else None
+                if sv_start_at and sv_end_at and sv_end_at <= sv_start_at:
+                    raise ValueError("Ngày kết thúc phải từ ngày bắt đầu trở đi")
+            except ValueError:
+                flash("Khoảng ngày tra cứu của sinh viên không hợp lệ; vui lòng chọn lại.", "warning")
+                sv_period, sv_start_at, sv_end_at = "all", None, None
+        sv_page = max(1, request.args.get("sv_page", default=1, type=int))
+        if class_code and not selected_class:
+            # Không cho dùng mã lớp tùy ý ngoài quyền người dùng.
+            class_code = "__unauthorized__"
+        # Truy vấn tại máy chủ: chỉ tải 10 dòng đang xem, không đưa toàn bộ
+        # nhật ký toàn trường vào bộ nhớ hay vào trang HTML.
+        test_period = (request.args.get("sys_period") or "30").strip()
+        test_feature = (request.args.get("sys_feature") or "").strip()
+        test_result = (request.args.get("sys_result") or "all").strip()
+        test_search = (request.args.get("sys_search") or "").strip()[:120]
+        test_from = (request.args.get("sys_from") or "").strip()
+        test_to = (request.args.get("sys_to") or "").strip()
+        test_page = max(1, request.args.get("sys_page", 1, type=int))
+        test_query = FunctionalTestRun.query.filter_by(source="automatic").filter(
+            FunctionalTestRun.participant_code.is_(None),
+            ~FunctionalTestRun.case_code.in_(["QR_SCAN", "QR_PLAYLIST_SCAN"]),
+        )
+        if user.role != "admin":
+            test_query = test_query.filter(FunctionalTestRun.owner_id == user.id)
+        now = utcnow()
+        if test_period == "today":
+            test_query = test_query.filter(FunctionalTestRun.created_at >= datetime.combine(now.date(), datetime.min.time()))
+        elif test_period in {"7", "30"}:
+            test_query = test_query.filter(FunctionalTestRun.created_at >= now - timedelta(days=int(test_period)))
+        elif test_period == "custom":
+            try:
+                if test_from:
+                    test_query = test_query.filter(FunctionalTestRun.created_at >= datetime.combine(date.fromisoformat(test_from), datetime.min.time()))
+                if test_to:
+                    test_query = test_query.filter(FunctionalTestRun.created_at < datetime.combine(date.fromisoformat(test_to) + timedelta(days=1), datetime.min.time()))
+            except ValueError:
+                flash("Ngày lọc không hợp lệ; vui lòng chọn lại.", "warning")
+        elif test_period != "all":
+            test_period = "30"
+            test_query = test_query.filter(FunctionalTestRun.created_at >= now - timedelta(days=30))
+        if test_feature:
+            test_query = test_query.filter(FunctionalTestRun.case_name == test_feature)
+        if test_result == "pass":
+            test_query = test_query.filter(FunctionalTestRun.passed.is_(True))
+        elif test_result == "fail":
+            test_query = test_query.filter(FunctionalTestRun.passed.is_(False))
+        if test_search:
+            like = f"%{test_search}%"
+            matching_users = db.session.query(User.id).filter(or_(User.name.ilike(like), User.email.ilike(like)))
+            test_query = test_query.filter(or_(
+                FunctionalTestRun.case_name.ilike(like), FunctionalTestRun.note.ilike(like),
+                FunctionalTestRun.owner_id.in_(matching_users)))
+        tests_total = test_query.count()
+        tests_pass = test_query.filter(FunctionalTestRun.passed.is_(True)).count()
+        tests_fail = tests_total - tests_pass
+        test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
+        test_pages = max(1, (tests_total + 9) // 10)
+        test_page = min(test_page, test_pages)
+        tests = test_query.order_by(FunctionalTestRun.created_at.desc(), FunctionalTestRun.id.desc()).offset((test_page - 1) * 10).limit(10).all()
+        test_page_numbers = list(range(max(1, test_page-2), min(test_pages, test_page+2)+1))
+        test_feature_options = [row[0] for row in db.session.query(FunctionalTestRun.case_name)
+                                .filter(FunctionalTestRun.source == "automatic", FunctionalTestRun.participant_code.is_(None),
+                                        ~FunctionalTestRun.case_code.in_(["QR_SCAN", "QR_PLAYLIST_SCAN"]))
+                                .distinct().order_by(FunctionalTestRun.case_name).all()]
+        test_rows = [{"test": t, "actor": (f"{t.owner.name or 'Giảng viên'} ({t.owner.email})" if t.owner else "Chưa xác định"),
+                      "evidence": t.note or "—"} for t in tests]
+        test_filter_args = {"sys_period": test_period, "sys_feature": test_feature,
+                            "sys_result": test_result, "sys_search": test_search,
+                            "sys_from": test_from, "sys_to": test_to}
 
+        # Không tính bản ghi quét mã hoặc xem video của SV vào hoạt động hệ thống.
+        # Hai loại sự kiện này chỉ xuất hiện trong mục 2.
+        
         pending_rows, pending_notice, participant_stats = [], "", None
-        if status != "all":
+        if status in {"not_scanned", "not_completed"}:
             selected_class = next((c for c in class_options if c.code == class_code), None)
             if not selected_class or not selected_qr:
-                pending_notice = "Vui lòng chọn Lớp và mã QR để xác định chính xác danh sách sinh viên chưa tham gia."
+                pending_notice = "Vui lòng chọn lớp và tên học liệu để xác định chính xác danh sách sinh viên chưa tham gia."
             elif not selected_qr.course_id:
-                pending_notice = "Mã QR chưa thuộc môn học/mô đun nên chưa xác định được danh sách lớp áp dụng."
+                pending_notice = "Học liệu chưa thuộc môn học/mô đun nên chưa xác định được danh sách lớp áp dụng."
             elif selected_course and selected_qr.course_id != selected_course.id:
-                pending_notice = "Mã QR không thuộc môn học/mô đun đang chọn."
+                pending_notice = "Học liệu không thuộc môn học/mô đun đang chọn."
             elif not CourseClass.query.filter_by(course_id=selected_qr.course_id,
                                                   school_class_id=selected_class.id, active=True).first():
-                pending_notice = "Lớp chưa được gán cho môn học/mô đun của mã QR đã chọn."
+                pending_notice = "Lớp chưa được gán cho môn học/mô đun của học liệu đã chọn."
             else:
                 today = utcnow().date()
                 roster = (db.session.query(Student).join(ClassEnrollment, ClassEnrollment.student_id == Student.id)
@@ -2485,14 +2562,22 @@ def register_routes(app):
                 valid_scan_codes = set()
                 completed_pairs = set()
                 if roster_codes:
-                    valid_scan_codes = {r[0] for r in (db.session.query(ScanLog.participant_code)
-                        .filter(ScanLog.role == "SV", ScanLog.qr_id == selected_qr.id,
-                                ScanLog.class_code == selected_class.code,
-                                ScanLog.success.is_(True), ScanLog.participant_code.in_(roster_codes)).distinct().all())}
-                    completed_pairs = {(r[0], r[1]) for r in (db.session.query(WatchSession.participant_code, WatchSession.video_id)
-                        .filter(WatchSession.role == "SV", WatchSession.qr_id == selected_qr.id,
-                                WatchSession.class_code == selected_class.code,
-                                WatchSession.completed.is_(True), WatchSession.participant_code.in_(roster_codes)).distinct().all())}
+                    roster_scans = db.session.query(ScanLog.participant_code).filter(
+                        ScanLog.role == "SV", ScanLog.qr_id == selected_qr.id,
+                        ScanLog.class_code == selected_class.code,
+                        ScanLog.success.is_(True), ScanLog.participant_code.in_(roster_codes))
+                    roster_watches = db.session.query(WatchSession.participant_code, WatchSession.video_id).filter(
+                        WatchSession.role == "SV", WatchSession.qr_id == selected_qr.id,
+                        WatchSession.class_code == selected_class.code,
+                        WatchSession.completed.is_(True), WatchSession.participant_code.in_(roster_codes))
+                    if sv_start_at:
+                        roster_scans = roster_scans.filter(ScanLog.scanned_at >= sv_start_at)
+                        roster_watches = roster_watches.filter(WatchSession.started_at >= sv_start_at)
+                    if sv_end_at:
+                        roster_scans = roster_scans.filter(ScanLog.scanned_at < sv_end_at)
+                        roster_watches = roster_watches.filter(WatchSession.started_at < sv_end_at)
+                    valid_scan_codes = {r[0] for r in roster_scans.distinct().all()}
+                    completed_pairs = {(r[0], r[1]) for r in roster_watches.distinct().all()}
                 target_video_names = {}
                 if selected_qr.is_playlist:
                     for pv in PlaylistVideo.query.filter_by(playlist_id=selected_qr.playlist_id).all():
@@ -2530,25 +2615,137 @@ def register_routes(app):
                                                  "qr_title": selected_qr.title,
                                                  "missing_videos": missing,
                                                  "status": f"Đã hoàn thành {count_completed}/{len(target_video_ids)} video"})
-        scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(500).all() if status == "all" else []
-        watches = watch_q.order_by(WatchSession.started_at.desc()).limit(500).all() if status == "all" else []
-        # Giữ mã SV đầy đủ trong CSDL, chỉ rút gọn 3 số cuối trên giao diện.
-        participant_codes = {row.participant_code for row in [*scans, *watches] if row.participant_code}
-        participant_codes.update(r["student"].student_code for r in pending_rows)
-        student_names = {}
-        if participant_codes:
-            student_names = {st.student_code: st.full_name for st in
-                             Student.query.filter(Student.student_code.in_(participant_codes)).all()}
-        student_display_map = {
-            code: f"{student_names.get(code) or 'Chưa có hồ sơ SV'} ({student_code_tail(code)})"
-            for code in participant_codes
-        }
-        return render_template("analytics.html", scans=scans, watches=watches,
-                               class_options=class_options, class_name_map=class_name_map,
-                               course_options=course_options, qr_options=qr_options,
-                               student_display_map=student_display_map,
-                               status=status, pending_rows=pending_rows,
-                               pending_notice=pending_notice, participant_stats=participant_stats)
+
+        if status in {"not_scanned", "not_completed"} and media_search:
+            term = media_search.casefold()
+            pending_rows = [r for r in pending_rows if
+                            term in (r["qr_title"] or "").casefold() or
+                            any(term in video_name.casefold() for video_name in r.get("missing_videos", []))]
+        sv_rows = []
+        sv_total = 0
+        sv_pages = 1
+        if status in {"not_scanned", "not_completed"}:
+            sv_total = len(pending_rows)
+            sv_pages = max(1, (sv_total + 9) // 10)
+            sv_page = min(sv_page, sv_pages)
+            for r in pending_rows[(sv_page - 1)*10:sv_page*10]:
+                code = r["student"].student_code
+                sv_rows.append({
+                    "time": None, "student": f"{r['student'].full_name} ({student_code_tail(code)})",
+                    "class_name": r["class_name"], "course_name": r["course_name"],
+                    "media_name": ", ".join(r.get("missing_videos") or []) or r["qr_title"],
+                    "result": "Chưa quét" if status == "not_scanned" else "Đã mở học liệu",
+                    "watch_time": "00:00", "watch_status": r["status"],
+                    "success": status != "not_scanned",
+                })
+        else:
+            # Mỗi phiên xem ứng với một video thực tế. Một QR playlist có thể phát
+            # nhiều video nhưng chỉ có một bản ghi quét, không nhân lượt quét.
+            # Chỉ hiển thị lượt quét riêng khi chưa có phiên xem gắn với lượt đó.
+            scan_ref = aliased(ScanLog)
+            closest_scan_id = (select(scan_ref.id)
+                .where(scan_ref.role == "SV", scan_ref.qr_id == WatchSession.qr_id,
+                       scan_ref.participant_code == WatchSession.participant_code,
+                       or_(scan_ref.class_code == WatchSession.class_code,
+                           and_(scan_ref.class_code.is_(None), WatchSession.class_code.is_(None))),
+                       scan_ref.scanned_at <= WatchSession.started_at,
+                       scan_ref.scanned_at >= WatchSession.started_at - timedelta(days=1))
+                .order_by(scan_ref.scanned_at.desc(), scan_ref.id.desc()).limit(1)
+                .correlate(WatchSession).scalar_subquery())
+            scan_with_video = (select(ScanLog.id.label("scan_id"), WatchSession.id.label("watch_id"),
+                                      ScanLog.scanned_at.label("stamp"))
+                .select_from(ScanLog)
+                .outerjoin(WatchSession, and_(WatchSession.role == "SV", closest_scan_id == ScanLog.id))
+                .join(QrCode, ScanLog.qr_id == QrCode.id)
+                .where(ScanLog.role == "SV"))
+            orphan_video = (select(literal(None).label("scan_id"), WatchSession.id.label("watch_id"),
+                                   WatchSession.started_at.label("stamp"))
+                .select_from(WatchSession)
+                .outerjoin(ScanLog, ScanLog.id == closest_scan_id)
+                .join(QrCode, WatchSession.qr_id == QrCode.id)
+                .where(WatchSession.role == "SV", ScanLog.id.is_(None)))
+            if user.role != "admin":
+                scan_with_video = scan_with_video.where(QrCode.owner_id == user.id)
+                orphan_video = orphan_video.where(QrCode.owner_id == user.id)
+            events = union_all(scan_with_video, orphan_video).subquery("sv_events")
+            class_expr = func.coalesce(ScanLog.class_code, WatchSession.class_code)
+            course_expr = func.coalesce(ScanLog.course_id, WatchSession.course_id)
+            qr_expr = func.coalesce(ScanLog.qr_id, WatchSession.qr_id)
+            video_expr = func.coalesce(WatchSession.video_id, ScanLog.video_id)
+            sv_query = (db.session.query(events.c.scan_id, events.c.watch_id, events.c.stamp,
+                                         ScanLog, WatchSession, QrCode, Video)
+                .select_from(events).outerjoin(ScanLog, ScanLog.id == events.c.scan_id)
+                .outerjoin(WatchSession, WatchSession.id == events.c.watch_id)
+                .join(QrCode, QrCode.id == qr_expr)
+                .outerjoin(Video, Video.id == video_expr))
+            if class_code:
+                sv_query = sv_query.filter(class_expr == class_code)
+            if course_id:
+                sv_query = sv_query.filter(course_expr == course_id if selected_course else course_expr == -1)
+            if qr_id:
+                sv_query = sv_query.filter(qr_expr == qr_id if selected_qr else qr_expr == -1)
+            if media_search:
+                like = f"%{media_search}%"
+                sv_query = sv_query.filter(or_(Video.title.ilike(like), QrCode.title.ilike(like)))
+            if sv_start_at:
+                sv_query = sv_query.filter(events.c.stamp >= sv_start_at)
+            if sv_end_at:
+                sv_query = sv_query.filter(events.c.stamp < sv_end_at)
+            if status == "completed":
+                sv_query = sv_query.filter(WatchSession.completed.is_(True))
+            elif status == "unwatched":
+                sv_query = sv_query.filter(WatchSession.id.is_(None), ScanLog.success.is_(True))
+            elif status == "failed":
+                sv_query = sv_query.filter(ScanLog.success.is_(False))
+            sv_total = sv_query.order_by(None).count()
+            sv_pages = max(1, (sv_total + 9) // 10)
+            sv_page = min(sv_page, sv_pages)
+            selection = (sv_query.order_by(events.c.stamp.desc(), events.c.scan_id.desc(), events.c.watch_id.desc())
+                         .offset((sv_page - 1)*10).limit(10).all())
+            codes = {s.participant_code if s else w.participant_code for _, _, _, s, w, _, _ in selection}
+            students = {x.student_code: x.full_name for x in Student.query.filter(Student.student_code.in_(codes)).all()} if codes else {}
+            for scan_id, watch_id, stamp, scan, watch, qr, video in selection:
+                code = (scan.participant_code if scan else "") or (watch.participant_code if watch else "")
+                class_ref = (scan.class_code if scan else "") or (watch.class_code if watch else "")
+                course_ref = (scan.course if scan else None) or (watch.course if watch else None)
+                played_video = video.title if video else (qr.title if qr else "Không xác định")
+                if not watch and qr and qr.is_playlist:
+                    played_video = f"{qr.title} (chưa phát video)"
+                seconds = max(0, round(watch.estimated_watch_seconds)) if watch else 0
+                watch_time = f"{seconds//3600:02d}:{(seconds//60)%60:02d}:{seconds%60:02d}" if seconds >= 3600 else f"{seconds//60:02d}:{seconds%60:02d}"
+                success = scan.success if scan else None
+                sv_rows.append({
+                    "time": stamp, "student": f"{students.get(code, 'Chưa có hồ sơ SV')} ({student_code_tail(code)})",
+                    "class_name": class_name_map.get(class_ref, class_ref or "—"),
+                    "course_name": course_ref.name if course_ref else "—",
+                    "media_name": played_video,
+                    "result": ("Thành công" if success else "Không thành công") if success is not None else "Chưa có dữ liệu quét",
+                    "watch_time": watch_time,
+                    "watch_status": ("Hoàn thành" if watch.completed else "Chưa hoàn thành") if watch else ("Chưa xem" if success else "Không mở được"),
+                    "success": success,
+                })
+        sv_page_numbers = list(range(max(1, sv_page-2), min(sv_pages, sv_page+2)+1))
+        # Hai bộ lọc có tham số độc lập để chuyển trang hoặc lọc mục nào
+        # thì mục kia không mất lựa chọn hiện tại.
+        all_args = request.args.to_dict(flat=True)
+        sys_args = {k:v for k,v in all_args.items() if k.startswith("sys_")}
+        sv_args = {k:v for k,v in all_args.items() if not k.startswith("sys_")}
+        sys_nav = {**all_args, **test_filter_args}
+        sv_nav = dict(all_args)
+        return render_template("analytics.html",
+            course_options=course_options, class_options=class_options,
+            qr_options=qr_options, status=status, pending_notice=pending_notice,
+            participant_stats=participant_stats, sv_rows=sv_rows, sv_total=sv_total,
+            sv_page=sv_page, sv_pages=sv_pages, sv_page_numbers=sv_page_numbers,
+            sv_nav=sv_nav, sys_nav=sys_nav, sys_args=sys_args, sv_args=sv_args,
+            sv_period=sv_period, sv_from=sv_from, sv_to=sv_to, media_search=media_search,
+            test_rows=test_rows, tests_total=tests_total, tests_pass=tests_pass,
+            tests_fail=tests_fail, test_rate=test_rate, test_page=test_page,
+            test_pages=test_pages, test_page_numbers=test_page_numbers,
+            test_period=test_period, test_feature=test_feature,
+            test_feature_options=test_feature_options, test_result=test_result,
+            test_search=test_search, test_from=test_from, test_to=test_to,
+            test_filter_args=test_filter_args)
 
     @app.get("/exports/scans.csv")
     @login_required
@@ -3077,112 +3274,6 @@ def register_routes(app):
             return redirect(url_for("research_page"))
 
         metrics = acceptance_metrics(user)
-        # Truy vấn tại máy chủ: chỉ tải 10 dòng đang xem, không đưa toàn bộ
-        # nhật ký toàn trường vào bộ nhớ hay vào trang HTML.
-        test_period = (request.args.get("test_period") or "30").strip()
-        test_feature = (request.args.get("test_feature") or "").strip()
-        test_result = (request.args.get("test_result") or "all").strip()
-        test_search = (request.args.get("test_search") or "").strip()[:120]
-        test_from = (request.args.get("test_from") or "").strip()
-        test_to = (request.args.get("test_to") or "").strip()
-        test_page = max(1, request.args.get("test_page", 1, type=int))
-        test_query = FunctionalTestRun.query.filter_by(source="automatic")
-        now = utcnow()
-        if test_period == "today":
-            test_query = test_query.filter(FunctionalTestRun.created_at >= datetime.combine(now.date(), datetime.min.time()))
-        elif test_period in {"7", "30"}:
-            test_query = test_query.filter(FunctionalTestRun.created_at >= now - timedelta(days=int(test_period)))
-        elif test_period == "custom":
-            try:
-                if test_from:
-                    test_query = test_query.filter(FunctionalTestRun.created_at >= datetime.combine(date.fromisoformat(test_from), datetime.min.time()))
-                if test_to:
-                    test_query = test_query.filter(FunctionalTestRun.created_at < datetime.combine(date.fromisoformat(test_to) + timedelta(days=1), datetime.min.time()))
-            except ValueError:
-                flash("Ngày lọc không hợp lệ; vui lòng chọn lại.", "warning")
-        elif test_period != "all":
-            test_period = "30"
-            test_query = test_query.filter(FunctionalTestRun.created_at >= now - timedelta(days=30))
-        if test_feature:
-            test_query = test_query.filter(FunctionalTestRun.case_name == test_feature)
-        if test_result == "pass":
-            test_query = test_query.filter(FunctionalTestRun.passed.is_(True))
-        elif test_result == "fail":
-            test_query = test_query.filter(FunctionalTestRun.passed.is_(False))
-        if test_search:
-            like = f"%{test_search}%"
-            matching_users = db.session.query(User.id).filter(or_(User.name.ilike(like), User.email.ilike(like)))
-            matching_students = db.session.query(Student.student_code).filter(
-                or_(Student.full_name.ilike(like), Student.student_code.ilike(like)))
-            test_query = test_query.filter(or_(
-                FunctionalTestRun.case_name.ilike(like), FunctionalTestRun.note.ilike(like),
-                FunctionalTestRun.participant_code.ilike(like),
-                FunctionalTestRun.owner_id.in_(matching_users),
-                FunctionalTestRun.participant_code.in_(matching_students)))
-        tests_total = test_query.count()
-        tests_pass = test_query.filter(FunctionalTestRun.passed.is_(True)).count()
-        tests_fail = tests_total - tests_pass
-        test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
-        test_pages = max(1, (tests_total + 9) // 10)
-        test_page = min(test_page, test_pages)
-        tests = test_query.order_by(FunctionalTestRun.created_at.desc(), FunctionalTestRun.id.desc()).offset((test_page - 1) * 10).limit(10).all()
-        test_page_numbers = list(range(max(1, test_page-2), min(test_pages, test_page+2)+1))
-        test_feature_options = [row[0] for row in db.session.query(FunctionalTestRun.case_name)
-                                .filter(FunctionalTestRun.source == "automatic")
-                                .distinct().order_by(FunctionalTestRun.case_name).all()]
-        students_by_code = {s.student_code: s.full_name for s in Student.query.filter(
-            Student.student_code.in_({t.participant_code for t in tests if t.participant_code})).all()}
-        class_name_map = {c.code: c.name for c in SchoolClass.query.all()}
-        # Nhật ký cũ chưa có mã SV: chỉ đối chiếu nếu có một lượt quét khớp QR/thời điểm.
-        legacy_qr_slugs = set()
-        for test in tests:
-            if test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"} and not test.participant_code:
-                match = re.search(r"\bQR\s+([A-Za-z0-9_-]+)", test.note or "")
-                if match:
-                    legacy_qr_slugs.add(match.group(1))
-        legacy_scans = {}
-        if legacy_qr_slugs:
-            for scan in (ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
-                         .filter(QrCode.slug.in_(legacy_qr_slugs), ScanLog.role == "SV")
-                         .order_by(ScanLog.scanned_at.desc()).limit(200).all()):
-                if scan.qr:
-                    legacy_scans.setdefault(scan.qr.slug, []).append(scan)
-        test_rows = []
-        for test in tests:
-            actor_code, actor_class = test.participant_code, test.participant_class_code
-            related_scan = None
-            if not actor_code and test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"}:
-                match = re.search(r"\bQR\s+([A-Za-z0-9_-]+)", test.note or "")
-                if match and test.created_at:
-                    candidates = [x for x in legacy_scans.get(match.group(1), [])
-                                  if abs((x.scanned_at.replace(tzinfo=None) - test.created_at.replace(tzinfo=None)).total_seconds()) <= 5]
-                    if len(candidates) == 1:
-                        related_scan = candidates[0]
-                        actor_code, actor_class = related_scan.participant_code, related_scan.class_code
-            if actor_code:
-                full_name = students_by_code.get(actor_code)
-                if not full_name:
-                    student = Student.query.filter_by(student_code=actor_code).first()
-                    full_name = student.full_name if student else "Sinh viên chưa có hồ sơ"
-                classroom = class_name_map.get(actor_class, actor_class or "Chưa xác định lớp")
-                actor = f"{full_name} ({student_code_tail(actor_code)} - {classroom})"
-            elif test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"} and "vai trò SV" in (test.note or ""):
-                actor = "Sinh viên (nhật ký cũ chưa xác định được mã)"
-            elif test.owner:
-                actor = f"{test.owner.name or 'Giảng viên'} ({test.owner.email})"
-            else:
-                actor = "Chưa xác định"
-            evidence = test.note or "—"
-            if related_scan and related_scan.qr:
-                q = related_scan.qr
-                title = (q.playlist.title if q.is_playlist and q.playlist else
-                         related_scan.video.title if related_scan.video else q.title)
-                evidence = f"{title} – {related_scan.course.name if related_scan.course else 'Chưa xác định môn học/mô đun'}"
-            test_rows.append({"test": test, "actor": actor, "evidence": evidence})
-        test_filter_args = {"test_period": test_period, "test_feature": test_feature,
-                            "test_result": test_result, "test_search": test_search,
-                            "test_from": test_from, "test_to": test_to}
-
         experiments = ExperimentRun.query.order_by(ExperimentRun.created_at.desc()).limit(200).all()
         manual_runs = [x for x in experiments if x.mode == "manual"]
         webapp_runs = [x for x in experiments if x.mode == "webapp"]
@@ -3240,30 +3331,9 @@ def register_routes(app):
             "survey_results_url": research_setting("survey_results_url"),
         }
         return render_template(
-            "research.html",
-            metrics=metrics,
-            tests=tests,
-            test_rows=test_rows,
-            tests_total=tests_total,
-            tests_pass=tests_pass,
-            tests_fail=tests_fail,
-            test_rate=test_rate,
-            test_pages=test_pages,
-            test_page=test_page,
-            test_page_numbers=test_page_numbers,
-            test_period=test_period,
-            test_feature=test_feature,
-            test_feature_options=test_feature_options,
-            test_result=test_result,
-            test_search=test_search,
-            test_from=test_from,
-            test_to=test_to,
-            test_filter_args=test_filter_args,
-            experiments=experiments,
-            webapp_runs=webapp_runs,
-            manual_runs=manual_runs,
-            comparison_rows=comparison_rows,
-            task_catalog=task_catalog,
+            "research.html", metrics=metrics, experiments=experiments,
+            webapp_runs=webapp_runs, manual_runs=manual_runs,
+            comparison_rows=comparison_rows, task_catalog=task_catalog,
             survey_links=survey_links,
         )
 

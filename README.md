@@ -366,3 +366,16 @@ Thời lượng xem là giá trị ước tính từ trạng thái trình phát.
 - Máy chủ xác thực lớp được gán cho môn học/mô đun và sinh viên còn thuộc lớp tại thời điểm quét; dữ liệu ghi log vẫn dùng mã SV Nhà trường và mã lớp. Bổ sung nút **Đổi sinh viên** trong trang xem; lượt mở QR mới trên cùng trình duyệt yêu cầu chọn lại để tránh nhầm lẫn.
 - Quy trình chọn tên chỉ là nhận diện tự khai báo phục vụ thống kê, **không phải xác thực danh tính chắc chắn**. Người có mã QR có thể nhìn thấy tên/mã của SV được liệt kê trong lớp. Cần thông báo người học và cân nhắc quyền riêng tư khi đưa vào sử dụng chính thức.
 - Không thay đổi cấu trúc PostgreSQL, có thể cập nhật từ v4.3.2 mà không xóa dữ liệu.
+
+## Cập nhật v4.3.6 – Tập trung thống kê khai thác và nghiệm thu
+
+- **Đánh giá nghiệm thu:** giữ nguyên bảng **Theo dõi chỉ tiêu và kết quả nghiệm thu** (mục tiêu – thực tế – kết quả). Xóa khu vực nhật ký kiểm thử bị trùng; đánh số lại **1. Hiệu quả quy trình** và **2. Khảo sát người dùng**. Có liên kết sang Thống kê khai thác để xem minh chứng.
+- **Thống kê khai thác – mục 1:** nhật ký hoạt động tự động của giảng viên/quản trị viên, không liệt kê lượt quét QR hay xem video của SV. Có tổng hợp đạt/không đạt và bộ lọc thời gian, chức năng, kết quả, người thực hiện.
+- **Thống kê khai thác – mục 2:** một bảng 8 cột: thời gian; tên SV (3 số cuối mã); lớp; MH/MĐ; tên học liệu số; kết quả quét; thời lượng xem; trạng thái xem. Khi mở QR playlist, hiển thị tên **video thực sự đã phát** ở mỗi dòng; nếu quét nhưng chưa phát sẽ hiển thị trạng thái Chưa xem. Một lượt quét playlist vẫn chỉ có một bản ghi gốc trong `scan_logs`; các dòng xem video tham chiếu lượt quét đó, không tạo thêm scan log.
+- Hai mục sử dụng bộ lọc/phân trang **độc lập**, 10 dòng/trang, phân trang bằng số; chuyển trang giữ vị trí cuộn tại bảng tương ứng.
+- Có lọc SV chưa quét/chưa hoàn thành theo danh sách SV đang học ở lớp và QR được giao, không dựa đơn thuần vào những bản ghi đã tồn tại. Các khoảng ngày lọc cũng được áp dụng khi đối chiếu nhóm chưa tham gia.
+- Giữ đầy đủ mã SV trong PostgreSQL; chỉ rút gọn phần **hiển thị** còn ba số cuối. Các lượt quét, phiên xem, QR, dữ liệu nghiên cứu trước đó không bị xóa hoặc ghi đè.
+- Không thêm dịch vụ trả phí, không thiết lập cron định kỳ. Chỉ tạo thêm **chỉ mục** trong cơ sở dữ liệu nếu chưa có để tăng tốc truy vấn nhật ký.
+- Nhật ký kết quả hệ thống vẫn là bằng chứng hoạt động tự động; bảng theo dõi chỉ tiêu nghiệm thu giữ các tiêu chí và ngưỡng ban đầu. Số liệu kiểm thử thực tế không được tự tạo.
+
+**Lưu ý kiểm thử:** Có kiểm tra cú pháp và mô phỏng ghép nhật ký bằng SQLAlchemy/SQLite. Chưa chạy kiểm thử tích hợp Google OAuth, YouTube API và PostgreSQL trên Render trong môi trường tạo gói; cần kiểm thử sau khi deploy.

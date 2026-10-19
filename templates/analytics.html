@@ -1,80 +1,145 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
-  <div><h2 class="mb-1">Thống kê khai thác học liệu</h2>
-    <div class="text-muted">Lịch sử quét QR, quá trình xem video và danh sách sinh viên cần theo dõi.</div></div>
-  <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_scans') }}">Xuất lịch sử quét (CSV)</a>
-    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_watch') }}">Xuất quá trình xem (CSV)</a>
-  </div>
-</div>
-<div class="card shadow-sm mb-3">
-  <div class="card-header fw-semibold">Tra cứu kết quả sinh viên</div>
-  <div class="card-body">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-md-4 col-lg-3"><label class="form-label fw-semibold small">Môn học/Mô đun</label>
-        <select class="form-select form-select-sm" name="course_id" id="filterCourse">
-          <option value="">Tất cả môn học/mô đun</option>
-          {% for c in course_options %}<option value="{{ c.id }}" {{ 'selected' if request.args.get('course_id') == c.id|string else '' }}>{{ c.name }}</option>{% endfor %}
-        </select></div>
-      <div class="col-md-4 col-lg-2"><label class="form-label fw-semibold small">Lớp</label>
-        <select class="form-select form-select-sm" name="class_code"><option value="">Chọn lớp</option>
-          {% for c in class_options %}<option value="{{ c.code }}" {{ 'selected' if request.args.get('class_code') == c.code else '' }}>{{ c.name }}</option>{% endfor %}
-        </select></div>
-      <div class="col-md-4 col-lg-3"><label class="form-label fw-semibold small">Tên học liệu</label>
-        <select class="form-select form-select-sm" name="qr_id" id="filterQr"><option value="">Tất cả học liệu</option>
-          {% for q in qr_options %}<option value="{{ q.id }}" data-course="{{ q.course_id }}" {{ 'selected' if request.args.get('qr_id') == q.id|string else '' }}>{{ q.title }} — {{ q.course.name if q.course else 'Chưa gán môn học' }}</option>{% endfor %}
-        </select></div>
-      <div class="col-md-4 col-lg-2"><label class="form-label fw-semibold small">Tình trạng</label>
-        <select class="form-select form-select-sm" name="status">
-          <option value="all" {{ 'selected' if status == 'all' else '' }}>Tất cả lịch sử</option>
-          <option value="not_scanned" {{ 'selected' if status == 'not_scanned' else '' }}>Chưa quét QR</option>
-          <option value="not_completed" {{ 'selected' if status == 'not_completed' else '' }}>Chưa hoàn thành video</option>
-        </select></div>
-      <div class="col-12"><button class="btn btn-primary btn-sm">Xem kết quả</button> <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics') }}">Xóa bộ lọc</a></div>
-    </form>
-  </div>
-</div>
-{% if status != 'all' %}
-  {% if pending_notice %}<div class="alert alert-info">{{ pending_notice }}</div>{% endif %}
-  {% if participant_stats %}
-  <div class="d-flex flex-wrap gap-3 small mb-3">
-    <span><strong>Sĩ số đang học:</strong> {{ participant_stats.roster }}</span>
-    <span><strong>Đã quét thành công:</strong> {{ participant_stats.scanned }}</span>
-    <span><strong>Chưa quét:</strong> {{ participant_stats.not_scanned }}</span>
-    <span><strong>Hoàn thành học liệu:</strong> {{ participant_stats.completed }}</span>
-  </div>
-  {% endif %}
-  <div class="card shadow-sm mb-4">
-    <div class="card-header fw-semibold">{{ 'Danh sách sinh viên chưa quét QR thành công' if status == 'not_scanned' else 'Danh sách sinh viên đã quét nhưng chưa xem hoàn thành' }}</div>
-    <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
-      <thead><tr><th>Tên sinh viên (Mã)</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Tên học liệu số</th><th>Tình trạng</th><th>Video chưa hoàn thành</th></tr></thead>
-      <tbody>{% for r in pending_rows %}<tr><td>{{ student_display_map.get(r.student.student_code, r.student.full_name) }}</td><td>{{ r.class_name }}</td><td>{{ r.course_name }}</td><td>{{ r.qr_title }}</td><td>{{ r.status }}</td><td>{% for v in r.missing_videos|default([]) %}<div>{{ v }}</div>{% endfor %}</td></tr>
-      {% else %}<tr><td colspan="6" class="text-center text-muted py-4">{{ 'Hãy chọn lớp và học liệu.' if pending_notice else 'Không có sinh viên nào thuộc nhóm cần theo dõi.' }}</td></tr>{% endfor %}</tbody>
-    </table></div>
-  </div>
-  <div class="small text-muted mb-3">Danh sách dựa trên sinh viên đang học tại thời điểm tra cứu và mã QR đang sử dụng. Với playlist, hoàn thành nghĩa là đã hoàn thành mọi video hiện có thể phát trong playlist. Sinh viên chưa quét được thống kê riêng với sinh viên đã quét nhưng chưa xem hoàn thành.</div>
-{% else %}
-<div class="card shadow-sm mb-4">
-  <div class="card-header fw-semibold">Lịch sử quét mã QR của sinh viên</div>
-  <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
-    <thead><tr><th>Thời gian</th><th>Tên sinh viên (Mã)</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Tên học liệu số</th><th>Kết quả</th></tr></thead>
-    <tbody>{% for s in scans %}<tr><td>{{ s.scanned_at.strftime('%d/%m/%Y %H:%M:%S') if s.scanned_at else '' }}</td><td>{{ student_display_map.get(s.participant_code, 'Chưa có hồ sơ SV') }}</td><td>{{ class_name_map.get(s.class_code, s.class_code or '') }}</td><td>{{ s.course.name if s.course else '—' }}</td><td>{{ s.video.title if s.video else ('Danh sách video – xem tên video ở bảng quá trình xem' if s.qr and s.qr.is_playlist else (s.qr.title if s.qr else '—')) }}</td><td>{{ 'Thành công' if s.success else 'Không thành công' }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}</tbody>
-  </table></div>
-</div>
-<div class="card shadow-sm">
-  <div class="card-header fw-semibold">Quá trình xem video của sinh viên</div>
-  <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
-    <thead><tr><th>Tên sinh viên (Mã)</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Tên học liệu số</th><th>Thời lượng xem ước tính</th><th>Vị trí xa nhất</th><th>% hoàn thành</th><th>Trạng thái</th></tr></thead>
-    <tbody>{% for s in watches %}<tr><td>{{ student_display_map.get(s.participant_code, 'Chưa có hồ sơ SV') }}</td><td>{{ class_name_map.get(s.class_code, s.class_code or '') }}</td><td>{{ s.course.name if s.course else '—' }}</td><td>{{ s.video.title if s.video else '—' }}</td><td>{{ '%.1f'|format(s.estimated_watch_seconds) }} giây</td><td>{{ '%.1f'|format(s.max_position) }} giây</td><td>{{ '%.1f'|format(s.completion_percent) }}%</td><td>{{ 'Đã hoàn thành' if s.completed else 'Chưa hoàn thành' }}</td></tr>{% else %}<tr><td colspan="8" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}</tbody>
-  </table></div>
-</div>
-<div class="alert alert-light border small mt-3">Thời lượng xem được ước tính theo hoạt động của trình phát, không phải bằng chứng về mức độ hiểu bài. Sĩ số hiện tại không dùng để tính ngược tỷ lệ tham gia của các đợt đã diễn ra trong quá khứ.</div>
+<h2 class="mb-2">Thống kê khai thác học liệu</h2>
+<p class="text-muted mb-4">Theo dõi hoạt động hệ thống và kết quả khai thác học liệu của sinh viên theo từng phạm vi.</p>
+
+{% macro pagination(page, page_count, page_numbers, params, page_field, anchor) %}
+{% if page_count > 1 %}
+<nav aria-label="Chuyển trang" class="mt-3">
+  <ul class="pagination pagination-sm flex-wrap justify-content-center mb-0">
+    <li class="page-item {{ 'disabled' if page == 1 else '' }}"><a class="page-link" href="{{ (url_for('analytics', **dict(params, **{page_field: page-1})) ~ '#' ~ anchor) if page > 1 else '#' ~ anchor }}" aria-label="Trang trước">‹</a></li>
+    {% if page_numbers[0] > 1 %}
+    <li class="page-item"><a class="page-link" href="{{ url_for('analytics', **dict(params, **{page_field: 1})) }}#{{ anchor }}">1</a></li>
+    {% if page_numbers[0] > 2 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+    {% endif %}
+    {% for n in page_numbers %}
+    <li class="page-item {{ 'active' if n == page else '' }}"><a class="page-link" href="{{ url_for('analytics', **dict(params, **{page_field: n})) }}#{{ anchor }}" {{ 'aria-current="page"'|safe if n == page else '' }}>{{ n }}</a></li>
+    {% endfor %}
+    {% if page_numbers[-1] < page_count %}
+    {% if page_numbers[-1] < page_count-1 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+    <li class="page-item"><a class="page-link" href="{{ url_for('analytics', **dict(params, **{page_field: page_count})) }}#{{ anchor }}">{{ page_count }}</a></li>
+    {% endif %}
+    <li class="page-item {{ 'disabled' if page == page_count else '' }}"><a class="page-link" href="{{ (url_for('analytics', **dict(params, **{page_field: page+1})) ~ '#' ~ anchor) if page < page_count else '#' ~ anchor }}" aria-label="Trang sau">›</a></li>
+  </ul>
+</nav>
 {% endif %}
+{% endmacro %}
+
+<section id="hoat-dong-he-thong" class="card shadow-sm mb-4" style="scroll-margin-top: 145px;">
+  <div class="card-header fw-bold">1. Thống kê hoạt động của hệ thống</div>
+  <div class="card-body">
+    <p class="small text-muted">Các hoạt động của giảng viên và quản trị viên. Lượt quét QR và xem video của sinh viên được trình bày riêng tại mục 2.</p>
+    <div class="row g-3 mb-3">
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tổng số hoạt động</div><div class="display-6 fw-bold">{{ tests_total }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Đạt</div><div class="display-6 fw-bold text-success">{{ tests_pass }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Không đạt</div><div class="display-6 fw-bold text-danger">{{ tests_fail }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tỷ lệ đạt</div><div class="display-6 fw-bold">{{ (test_rate|string + '%') if test_rate is not none else '—' }}</div></div></div>
+    </div>
+    <form method="get" action="{{ url_for('analytics') }}#hoat-dong-he-thong" class="row g-2 align-items-end border rounded p-3 bg-light mb-3">
+      {% for k, v in sv_args.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+      <div class="col-md-3 col-xl-2"><label class="form-label fw-semibold">Thời gian</label>
+        <select class="form-select form-select-sm" name="sys_period" id="testPeriod">
+          {% for value, label in [('today','Hôm nay'),('7','7 ngày gần đây'),('30','30 ngày gần đây'),('all','Tất cả thời gian'),('custom','Khoảng ngày')] %}
+          <option value="{{ value }}" {{ 'selected' if test_period == value else '' }}>{{ label }}</option>{% endfor %}
+        </select></div>
+      <div class="col-md-3 col-xl-2"><label class="form-label fw-semibold">Chức năng</label>
+        <select class="form-select form-select-sm" name="sys_feature"><option value="">Tất cả chức năng</option>
+          {% for name in test_feature_options %}<option value="{{ name }}" {{ 'selected' if test_feature == name else '' }}>{{ name }}</option>{% endfor %}</select></div>
+      <div class="col-md-3 col-xl-2"><label class="form-label fw-semibold">Kết quả</label>
+        <select class="form-select form-select-sm" name="sys_result">
+          <option value="all" {{ 'selected' if test_result == 'all' else '' }}>Tất cả</option>
+          <option value="pass" {{ 'selected' if test_result == 'pass' else '' }}>Đạt</option>
+          <option value="fail" {{ 'selected' if test_result == 'fail' else '' }}>Không đạt</option>
+        </select></div>
+      <div class="col-md-5 col-xl-3"><label class="form-label fw-semibold">Người thực hiện / Học liệu</label>
+        <input class="form-control form-control-sm" name="sys_search" value="{{ test_search }}" placeholder="Nhập từ khóa tìm kiếm"></div>
+      <div class="col-md-4 col-xl-3 d-flex flex-wrap gap-1">
+        <button class="btn btn-primary btn-sm">Lọc kết quả</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sv_args) }}#hoat-dong-he-thong">Xóa lọc</a>
+      </div>
+      <div class="col-12 {{ '' if test_period == 'custom' else 'd-none' }}" id="testCustomDates">
+        <div class="d-flex flex-wrap gap-2"><div><label class="form-label small">Từ ngày</label><input type="date" class="form-control form-control-sm" name="sys_from" value="{{ test_from }}"></div>
+        <div><label class="form-label small">Đến ngày</label><input type="date" class="form-control form-control-sm" name="sys_to" value="{{ test_to }}"></div></div>
+      </div>
+    </form>
+    <div class="small text-muted mb-2">Có <strong>{{ tests_total }}</strong> hoạt động theo bộ lọc · Trang {{ test_page }}/{{ test_pages }} · 10 dòng/trang</div>
+    <div class="table-responsive"><table class="table table-striped table-sm align-middle mb-0">
+      <thead><tr><th>Thời gian</th><th>Chức năng</th><th>Người thực hiện</th><th>Kết quả</th><th>Minh chứng / Ghi chú</th></tr></thead>
+      <tbody>{% for row in test_rows %}{% set t = row.test %}
+        <tr><td class="text-nowrap">{{ t.created_at.strftime('%d/%m/%Y %H:%M:%S') if t.created_at else '' }}</td><td>{{ t.case_name }}</td>
+          <td>{{ row.actor }}</td><td>{% if t.passed %}<span class="badge text-bg-success">Đạt</span>{% else %}<span class="badge text-bg-danger">Không đạt</span>{% endif %}</td>
+          <td class="small">{{ row.evidence }}</td></tr>
+        {% else %}<tr><td colspan="5" class="text-center text-muted py-4">Chưa có dữ liệu phù hợp bộ lọc.</td></tr>{% endfor %}
+      </tbody></table></div>
+    {{ pagination(test_page, test_pages, test_page_numbers, sys_nav, 'sys_page', 'hoat-dong-he-thong') }}
+  </div>
+</section>
+
+<section id="khai-thac-sinh-vien" class="card shadow-sm mb-3" style="scroll-margin-top: 145px;">
+  <div class="card-header fw-bold">2. Thống kê khai thác học liệu của sinh viên</div>
+  <div class="card-body">
+    <div class="d-flex justify-content-end flex-wrap gap-2 mb-3">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_scans') }}">Xuất lượt quét (CSV)</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_watch') }}">Xuất quá trình xem (CSV)</a>
+    </div>
+    <p class="small text-muted">Một lượt quét QR được ghi nhận một lần; mỗi video sinh viên thực sự phát qua QR playlist được trình bày thành một dòng riêng.</p>
+    <form method="get" action="{{ url_for('analytics') }}#khai-thac-sinh-vien" class="row g-2 align-items-end border rounded p-3 bg-light mb-3">
+      {% for k, v in sys_args.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+      <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Môn học/Mô đun</label>
+        <select class="form-select form-select-sm" name="course_id" id="filterCourse"><option value="">Tất cả</option>
+          {% for c in course_options %}<option value="{{ c.id }}" {{ 'selected' if request.args.get('course_id') == c.id|string else '' }}>{{ c.name }}</option>{% endfor %}</select></div>
+      <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Lớp</label>
+        <select class="form-select form-select-sm" name="class_code"><option value="">Tất cả</option>
+          {% for c in class_options %}<option value="{{ c.code }}" {{ 'selected' if request.args.get('class_code') == c.code else '' }}>{{ c.name }}</option>{% endfor %}</select></div>
+      <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Học liệu được giao</label>
+        <select class="form-select form-select-sm" name="qr_id" id="filterQr"><option value="">Tất cả</option>
+          {% for q in qr_options %}<option value="{{ q.id }}" data-course="{{ q.course_id }}" {{ 'selected' if request.args.get('qr_id') == q.id|string else '' }}>{{ q.title }} – {{ q.course.name if q.course else 'Chưa gán môn' }}</option>{% endfor %}</select></div>
+      <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Tình trạng</label>
+        <select class="form-select form-select-sm" name="status">
+          {% for value,label in [('all','Tất cả lịch sử'),('not_scanned','SV chưa quét QR'),('not_completed','SV chưa hoàn thành'),('unwatched','Đã quét, chưa xem'),('completed','Đã hoàn thành'),('failed','Mở QR thất bại')] %}
+          <option value="{{ value }}" {{ 'selected' if status == value else '' }}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Thời gian</label>
+        <select class="form-select form-select-sm" name="sv_period" id="svPeriod">
+          {% for value,label in [('today','Hôm nay'),('7','7 ngày'),('30','30 ngày'),('all','Tất cả'),('custom','Khoảng ngày')] %}
+          <option value="{{ value }}" {{ 'selected' if sv_period == value else '' }}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Tên video/học liệu</label>
+        <input class="form-control form-control-sm" name="media_search" value="{{ media_search }}" placeholder="Nhập tên học liệu"></div>
+      <div class="col-12 {{ '' if sv_period == 'custom' else 'd-none' }}" id="svCustomDates">
+        <div class="d-flex flex-wrap gap-2"><div><label class="form-label small">Từ ngày</label><input class="form-control form-control-sm" type="date" name="sv_from" value="{{ sv_from }}"></div>
+        <div><label class="form-label small">Đến ngày</label><input class="form-control form-control-sm" type="date" name="sv_to" value="{{ sv_to }}"></div></div>
+      </div>
+      <div class="col-12 d-flex gap-2 flex-wrap"><button class="btn btn-primary btn-sm">Lọc kết quả</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sys_args) }}#khai-thac-sinh-vien">Xóa lọc</a></div>
+    </form>
+    {% if pending_notice %}<div class="alert alert-info">{{ pending_notice }}</div>{% endif %}
+    {% if participant_stats %}<div class="d-flex flex-wrap gap-3 small mb-3">
+      <span><b>Sĩ số đang học:</b> {{ participant_stats.roster }}</span>
+      <span><b>Đã quét thành công:</b> {{ participant_stats.scanned }}</span>
+      <span><b>Chưa quét:</b> {{ participant_stats.not_scanned }}</span>
+      <span><b>Hoàn thành học liệu:</b> {{ participant_stats.completed }}</span></div>{% endif %}
+    <div class="small text-muted mb-2">Có <strong>{{ sv_total }}</strong> dòng theo bộ lọc · Trang {{ sv_page }}/{{ sv_pages }} · 10 dòng/trang</div>
+    <div class="table-responsive"><table class="table table-striped table-sm align-middle mb-0">
+      <thead><tr><th>Thời gian</th><th>Tên SV (Mã)</th><th>Lớp</th><th>MH/MĐ</th><th>Tên học liệu số</th><th>Kết quả</th><th>Thời lượng xem</th><th>Trạng thái</th></tr></thead>
+      <tbody>{% for row in sv_rows %}
+        <tr><td class="text-nowrap">{{ row.time.strftime('%d/%m/%Y %H:%M:%S') if row.time else '—' }}</td>
+          <td>{{ row.student }}</td><td>{{ row.class_name }}</td><td>{{ row.course_name }}</td><td>{{ row.media_name }}</td>
+          <td>{{ row.result }}</td><td class="text-nowrap">{{ row.watch_time }}</td>
+          <td><span class="badge {{ 'text-bg-success' if row.watch_status == 'Hoàn thành' else 'text-bg-secondary' }}">{{ row.watch_status }}</span></td></tr>
+      {% else %}<tr><td colspan="8" class="text-center text-muted py-4">Chưa có kết quả phù hợp.</td></tr>{% endfor %}
+      </tbody></table></div>
+    {{ pagination(sv_page, sv_pages, sv_page_numbers, sv_nav, 'sv_page', 'khai-thac-sinh-vien') }}
+    <p class="small text-muted mt-3 mb-0">Thời lượng xem là ước tính dựa trên hoạt động phát video. SV chưa quét QR được xác định bằng cách đối chiếu danh sách lớp với học liệu đã giao, không chỉ từ lượt quét.</p>
+  </div>
+</section>
 {% endblock %}
-{% block scripts %}<script>
-// Chỉ hiển thị QR thuộc môn học đang chọn; giữ lại lựa chọn hợp lệ khi đổi bộ lọc.
-(function(){const course=document.getElementById('filterCourse'),qr=document.getElementById('filterQr');
-if(!course||!qr)return; function update(){const cid=course.value;let reset=false;for(const opt of qr.options){if(!opt.value)continue;opt.hidden=!!cid&&opt.dataset.course!==cid;if(opt.hidden&&opt.selected)reset=true;}if(reset)qr.value='';}
-course.addEventListener('change',update);update();})();
-</script>{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const course=document.getElementById('filterCourse'),qr=document.getElementById('filterQr');
+  if(course&&qr){const update=()=>{let reset=false;for(const option of qr.options){if(!option.value)continue; option.hidden=!!course.value&&option.dataset.course!==course.value; if(option.hidden&&option.selected)reset=true;}if(reset)qr.value='';};course.addEventListener('change',update);update();}
+  for(const [id,box] of [['testPeriod','testCustomDates'],['svPeriod','svCustomDates']]){
+    const s=document.getElementById(id),d=document.getElementById(box);if(s&&d)s.addEventListener('change',()=>d.classList.toggle('d-none',s.value!=='custom'));
+  }
+})();
+</script>
+{% endblock %}

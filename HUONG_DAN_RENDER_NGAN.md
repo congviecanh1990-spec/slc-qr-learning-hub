@@ -52,3 +52,14 @@ Việc hiển thị tên kèm mã SV theo danh sách lớp làm tăng khả năn
 
 ## Kiểm tra trước phát hành
 Mã nguồn đã được kiểm tra cú pháp Python và cú pháp template Jinja; chưa được kiểm thử tích hợp Google OAuth, PostgreSQL, YouTube API trên Render trong môi trường đóng gói. Kết quả cuối cùng cần xác nhận sau triển khai.
+
+## Cập nhật v4.3.6 – Kiểm tra sau khi triển khai
+
+1. **Không tạo lại Render Web Service hay PostgreSQL.** Sao lưu dữ liệu trước khi cập nhật, sau đó thay mã nguồn trong repository hiện tại và chờ Render hiển thị triển khai thành công.
+2. Vào **Đánh giá nghiệm thu** bằng Quản trị viên: kiểm tra bảng **Theo dõi chỉ tiêu và kết quả nghiệm thu** còn đầy đủ; bên dưới chỉ có **1. Hiệu quả quy trình**, **2. Khảo sát người dùng**.
+3. Vào **Thống kê khai thác**: mục 1 ghi hoạt động GV/quản trị viên, không hiển thị hoạt động quét của SV; mục 2 là **một bảng 8 cột**.
+4. Thử lọc mỗi mục và bấm trang **2**: đúng 10 dòng/trang, chuyển trang không đẩy về đầu trang; thao tác ở mục này không đổi trang/bộ lọc của mục kia.
+5. Dùng SV quét một QR video rồi xem, thử tiếp QR playlist gồm ít nhất hai video; kiểm tra tên từng video đã xem, số lượt quét QR không tăng theo số video, thời lượng và trạng thái xuất hiện phù hợp. Thử quét nhưng chưa xem và thử lọc nhóm chưa quét/chưa hoàn thành.
+6. Kiểm tra hai chức năng xuất dữ liệu **lượt quét CSV** và **quá trình xem CSV** vẫn hoạt động; dữ liệu cũ không bị xóa.
+
+Các phép kiểm tra cú pháp và mô phỏng không thay thế thử nghiệm tích hợp thật trên Render.
