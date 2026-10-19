@@ -1,3 +1,13 @@
+# BỔ SUNG v4.3.5 — Giao diện thống kê, QR và nghiệm thu
+
+- **Thống kê khai thác:** hiển thị “Tên sinh viên (Mã)” với ba chữ số cuối mã SV, tên học liệu số; bỏ cột mã QR. Bộ lọc chọn học liệu bằng tên, không cho lọc tự do theo mã sinh viên. Bảng phiên xem lấy tên video thực tế, kể cả khi phát từ playlist. Mã SV đầy đủ vẫn lưu trong CSDL và vẫn dùng để đối chiếu.
+- **Mã QR động:** số lượng playlist/QR hiển thị dạng số nguyên tự nhiên; chuẩn hóa nhãn nút; kho mã QR dạng bảng gồm học liệu, loại, môn học, trạng thái, ngày tạo và thao tác. Các hành động đổi video đích, mở thử và xóa QR vẫn giữ nguyên nghiệp vụ.
+- **Giảng viên:** bỏ ghi chú dài về xóa GV; đổi nút chuẩn hóa dữ liệu dùng chung thành “Lưu”.
+- **Đánh giá nghiệm thu:** giản lược lời dẫn; tăng chữ ở bốn ô tổng hợp; bảng kết quả tự ghi 10 dòng/trang, phân trang số, lọc thời gian/chức năng/kết quả và tìm tên người thực hiện/học liệu. Tổng hợp số liệu trên toàn bộ bản ghi khớp bộ lọc. Mã SV trên giao diện chỉ còn ba chữ số cuối; dữ liệu gốc không thay đổi.
+- Bản này **không thêm cột hay bảng PostgreSQL**.
+
+---
+
 # BỔ SUNG v4.3.4 — Sửa nguồn video lẫn từ kênh YouTube khác
 
 - Khi đồng bộ YouTube, xác định kênh **thực sự đăng tải** theo trường `snippet.channelId` của YouTube Data API, không coi video xuất hiện trong playlist là video của chủ playlist.

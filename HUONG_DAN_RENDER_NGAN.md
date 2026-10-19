@@ -1,3 +1,19 @@
+# CẬP NHẬT v4.3.5 — GIAO DIỆN THỐNG KÊ, MÃ QR, GIẢNG VIÊN, NGHIỆM THU
+
+**Cập nhật trên dịch vụ cũ:** Sao lưu dữ liệu trước, giải nén ZIP, tải toàn bộ nội dung gốc lên nhánh `main` của GitHub như trước, chờ Render báo **Live**. Giữ nguyên Render service, PostgreSQL và cấu hình OAuth; không phải đặt lại dữ liệu.
+
+**Kiểm tra sau khi deploy:**
+1. Thống kê khai thác: chọn môn học, lớp, tên học liệu; kiểm tra hai bảng hiện “Tên sinh viên (Mã)” (ba số cuối) và “Tên học liệu số”; phiên xem từ QR playlist phải hiện đúng video được xem. Nhóm chưa quét/chưa hoàn thành vẫn lọc được theo lớp và học liệu.
+2. Mã QR động: kiểm tra số playlist/QR không có số 0 thừa; kho mã QR hiển thị bảng; thử tải PNG, mở thử, đổi video đích hoặc xóa QR thử nghiệm (chỉ khi thật sự muốn xóa).
+3. Giảng viên: nút “Lưu” ở phần hiệu chỉnh khoa/bộ môn, không còn ghi chú dài dưới bảng.
+4. Đánh giá nghiệm thu: thử chuyển trang 1, 2..., lựa chọn 7 ngày và bộ lọc “Không đạt”; kiểm tra mỗi trang nhiều nhất 10 bản ghi, tổng và tỷ lệ tính cho tất cả bản ghi khớp lọc chứ không riêng trang đang xem; chọn Khoảng ngày tùy chọn để lọc theo ngày.
+
+**Ghi chú về nhật ký playlist:** Sự kiện quét QR playlist diễn ra *trước* khi chọn phát video, nên nhật ký lượt quét sẽ ghi nhận truy cập danh sách video. Bảng **Quá trình xem video** mới là nơi xác định chính xác tên video đã phát; không đánh đồng việc mở playlist với đã xem mọi video.
+
+**Kiểm tra đã thực hiện khi đóng gói:** Biên dịch cú pháp Python, phân tích 22 template Jinja, thử kết xuất các trang thay đổi với dữ liệu mẫu và kiểm tra toàn vẹn ZIP. Môi trường đóng gói không có Flask/Authlib/SQLAlchemy nên **chưa kiểm thử tích hợp trên Render**.
+
+---
+
 # CẬP NHẬT v4.3.4 — SỬA VIDEO KHÔNG THUỘC KÊNH VẪN XUẤT HIỆN
 
 **Nguyên nhân:** Playlist YouTube có thể chứa video do người khác đăng; phiên bản cũ lấy tất cả video trong playlist và gắn vào kho của giảng viên. Khi gỡ video khỏi playlist, bản ghi cũ có thể vẫn còn.

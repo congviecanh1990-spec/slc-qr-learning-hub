@@ -21,9 +21,9 @@
         <select class="form-select form-select-sm" name="class_code"><option value="">Chọn lớp</option>
           {% for c in class_options %}<option value="{{ c.code }}" {{ 'selected' if request.args.get('class_code') == c.code else '' }}>{{ c.name }}</option>{% endfor %}
         </select></div>
-      <div class="col-md-4 col-lg-3"><label class="form-label fw-semibold small">Mã QR học liệu</label>
-        <select class="form-select form-select-sm" name="qr_id" id="filterQr"><option value="">Chọn mã QR</option>
-          {% for q in qr_options %}<option value="{{ q.id }}" data-course="{{ q.course_id }}" {{ 'selected' if request.args.get('qr_id') == q.id|string else '' }}>{{ q.title }} ({{ q.slug }})</option>{% endfor %}
+      <div class="col-md-4 col-lg-3"><label class="form-label fw-semibold small">Tên học liệu</label>
+        <select class="form-select form-select-sm" name="qr_id" id="filterQr"><option value="">Tất cả học liệu</option>
+          {% for q in qr_options %}<option value="{{ q.id }}" data-course="{{ q.course_id }}" {{ 'selected' if request.args.get('qr_id') == q.id|string else '' }}>{{ q.title }} — {{ q.course.name if q.course else 'Chưa gán môn học' }}</option>{% endfor %}
         </select></div>
       <div class="col-md-4 col-lg-2"><label class="form-label fw-semibold small">Tình trạng</label>
         <select class="form-select form-select-sm" name="status">
@@ -31,8 +31,6 @@
           <option value="not_scanned" {{ 'selected' if status == 'not_scanned' else '' }}>Chưa quét QR</option>
           <option value="not_completed" {{ 'selected' if status == 'not_completed' else '' }}>Chưa hoàn thành video</option>
         </select></div>
-      <div class="col-md-4 col-lg-2"><label class="form-label fw-semibold small">Mã SV</label>
-        <input class="form-control form-control-sm" name="participant" value="{{ request.args.get('participant','') }}" placeholder="Tìm mã SV"></div>
       <div class="col-12"><button class="btn btn-primary btn-sm">Xem kết quả</button> <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics') }}">Xóa bộ lọc</a></div>
     </form>
   </div>
@@ -50,9 +48,9 @@
   <div class="card shadow-sm mb-4">
     <div class="card-header fw-semibold">{{ 'Danh sách sinh viên chưa quét QR thành công' if status == 'not_scanned' else 'Danh sách sinh viên đã quét nhưng chưa xem hoàn thành' }}</div>
     <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
-      <thead><tr><th>Mã SV</th><th>Họ và tên</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Học liệu (QR)</th><th>Tình trạng</th><th>Video chưa hoàn thành</th></tr></thead>
-      <tbody>{% for r in pending_rows %}<tr><td>{{ r.student.student_code }}</td><td>{{ r.student.full_name }}</td><td>{{ r.class_name }}</td><td>{{ r.course_name }}</td><td>{{ r.qr_title }}</td><td>{{ r.status }}</td><td>{% for v in r.missing_videos|default([]) %}<div>{{ v }}</div>{% endfor %}</td></tr>
-      {% else %}<tr><td colspan="7" class="text-center text-muted py-4">{{ 'Hãy chọn lớp và mã QR.' if pending_notice else 'Không có sinh viên nào thuộc nhóm cần theo dõi.' }}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th>Tên sinh viên (Mã)</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Tên học liệu số</th><th>Tình trạng</th><th>Video chưa hoàn thành</th></tr></thead>
+      <tbody>{% for r in pending_rows %}<tr><td>{{ student_display_map.get(r.student.student_code, r.student.full_name) }}</td><td>{{ r.class_name }}</td><td>{{ r.course_name }}</td><td>{{ r.qr_title }}</td><td>{{ r.status }}</td><td>{% for v in r.missing_videos|default([]) %}<div>{{ v }}</div>{% endfor %}</td></tr>
+      {% else %}<tr><td colspan="6" class="text-center text-muted py-4">{{ 'Hãy chọn lớp và học liệu.' if pending_notice else 'Không có sinh viên nào thuộc nhóm cần theo dõi.' }}</td></tr>{% endfor %}</tbody>
     </table></div>
   </div>
   <div class="small text-muted mb-3">Danh sách dựa trên sinh viên đang học tại thời điểm tra cứu và mã QR đang sử dụng. Với playlist, hoàn thành nghĩa là đã hoàn thành mọi video hiện có thể phát trong playlist. Sinh viên chưa quét được thống kê riêng với sinh viên đã quét nhưng chưa xem hoàn thành.</div>
@@ -60,15 +58,15 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-semibold">Lịch sử quét mã QR của sinh viên</div>
   <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
-    <thead><tr><th>Thời gian</th><th>Mã SV</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Mã QR</th><th>Học liệu</th><th>Kết quả</th></tr></thead>
-    <tbody>{% for s in scans %}<tr><td>{{ s.scanned_at.strftime('%d/%m/%Y %H:%M:%S') if s.scanned_at else '' }}</td><td>{{ s.participant_code }}</td><td>{{ class_name_map.get(s.class_code, s.class_code or '') }}</td><td>{{ s.course.name if s.course else '—' }}</td><td>{{ s.qr.slug if s.qr else '' }}</td><td>{{ s.video.title if s.video else ((s.qr.playlist.title if s.qr.playlist else s.qr.title) if s.qr else '') }}</td><td>{{ 'Thành công' if s.success else 'Không thành công' }}</td></tr>{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}</tbody>
+    <thead><tr><th>Thời gian</th><th>Tên sinh viên (Mã)</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Tên học liệu số</th><th>Kết quả</th></tr></thead>
+    <tbody>{% for s in scans %}<tr><td>{{ s.scanned_at.strftime('%d/%m/%Y %H:%M:%S') if s.scanned_at else '' }}</td><td>{{ student_display_map.get(s.participant_code, 'Chưa có hồ sơ SV') }}</td><td>{{ class_name_map.get(s.class_code, s.class_code or '') }}</td><td>{{ s.course.name if s.course else '—' }}</td><td>{{ s.video.title if s.video else ('Danh sách video – xem tên video ở bảng quá trình xem' if s.qr and s.qr.is_playlist else (s.qr.title if s.qr else '—')) }}</td><td>{{ 'Thành công' if s.success else 'Không thành công' }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>
 <div class="card shadow-sm">
   <div class="card-header fw-semibold">Quá trình xem video của sinh viên</div>
   <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
-    <thead><tr><th>Mã SV</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Video</th><th>Thời lượng xem ước tính</th><th>Vị trí xa nhất</th><th>% hoàn thành</th><th>Trạng thái</th></tr></thead>
-    <tbody>{% for s in watches %}<tr><td>{{ s.participant_code }}</td><td>{{ class_name_map.get(s.class_code, s.class_code or '') }}</td><td>{{ s.course.name if s.course else '—' }}</td><td>{{ s.video.title if s.video else '—' }}</td><td>{{ '%.1f'|format(s.estimated_watch_seconds) }} giây</td><td>{{ '%.1f'|format(s.max_position) }} giây</td><td>{{ '%.1f'|format(s.completion_percent) }}%</td><td>{{ 'Đã hoàn thành' if s.completed else 'Chưa hoàn thành' }}</td></tr>{% else %}<tr><td colspan="8" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}</tbody>
+    <thead><tr><th>Tên sinh viên (Mã)</th><th>Lớp</th><th>Môn học/Mô đun</th><th>Tên học liệu số</th><th>Thời lượng xem ước tính</th><th>Vị trí xa nhất</th><th>% hoàn thành</th><th>Trạng thái</th></tr></thead>
+    <tbody>{% for s in watches %}<tr><td>{{ student_display_map.get(s.participant_code, 'Chưa có hồ sơ SV') }}</td><td>{{ class_name_map.get(s.class_code, s.class_code or '') }}</td><td>{{ s.course.name if s.course else '—' }}</td><td>{{ s.video.title if s.video else '—' }}</td><td>{{ '%.1f'|format(s.estimated_watch_seconds) }} giây</td><td>{{ '%.1f'|format(s.max_position) }} giây</td><td>{{ '%.1f'|format(s.completion_percent) }}%</td><td>{{ 'Đã hoàn thành' if s.completed else 'Chưa hoàn thành' }}</td></tr>{% else %}<tr><td colspan="8" class="text-center text-muted py-4">Chưa có dữ liệu.</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>
 <div class="alert alert-light border small mt-3">Thời lượng xem được ước tính theo hoạt động của trình phát, không phải bằng chứng về mức độ hiểu bài. Sĩ số hiện tại không dùng để tính ngược tỷ lệ tham gia của các đợt đã diễn ra trong quá khứ.</div>

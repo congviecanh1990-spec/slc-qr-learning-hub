@@ -23,3 +23,6 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 /* v3.5: bộ chọn nhiều học phần cho playlist dạng danh sách thả xuống, không kéo dài bảng. */
 .course-picker-toggle{min-width:190px;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:.75rem}.course-picker-menu{min-width:280px;max-width:360px;max-height:300px;overflow-y:auto}.course-picker-menu .dropdown-item{white-space:normal;border-radius:.35rem}.course-picker-menu .dropdown-item:hover{background:#f2f4f7}
 .playlist-table-wrap{overflow:visible}@media(max-width:991.98px){.playlist-table-wrap{overflow-x:auto;overflow-y:visible}.course-picker-menu{min-width:260px}}
+
+/* v4.3.5: kho mã QR dạng bảng, bố trí thao tác nhất quán. */
+.qr-inventory-table td{vertical-align:top;padding:.7rem .55rem}.qr-inventory-table select{max-width:360px}.qr-inventory-table form{margin-bottom:0}.pagination .page-link{color:var(--brand)}.pagination .page-item.active .page-link{background-color:var(--brand);border-color:var(--brand);color:white}

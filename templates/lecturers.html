@@ -77,9 +77,6 @@
   </div>
 </div>
 
-<div class="small text-muted mt-3">
-  Khi xóa một giảng viên, tài khoản Google/OAuth và toàn bộ dữ liệu nghiệp vụ, môn học/ mô đun, kênh/video đã đồng bộ, mã QR, lượt quét/xem và dữ liệu thử nghiệm thuộc giảng viên đó sẽ bị xóa. Danh mục lớp và sinh viên dùng chung của Nhà trường được giữ lại; nếu người bị xóa là GVCN, lớp sẽ chuyển về trạng thái chưa giao GVCN.
-</div>
 <div class="card mt-4 shadow-sm"><div class="card-header fw-bold">Chuẩn hóa tên khoa hoặc bộ môn dùng chung</div><div class="card-body">
  <p class="small text-muted">Dùng khi danh mục có lỗi chính tả; chỉ thay đổi cách hiển thị, không đổi mã môn học hoặc dữ liệu QR.</p>
  <form method="post" action="{{ url_for('rename_shared_catalog') }}" class="row g-2 align-items-end">
@@ -87,6 +84,6 @@
  <div class="col-md-2"><label class="form-label fw-bold">Loại thông tin</label><select name="field" class="form-select"><option value="department_name">Bộ môn</option><option value="faculty_name">Khoa</option></select></div>
  <div class="col-md-4"><label class="form-label fw-bold">Tên đang lưu</label><input class="form-control" name="old_value" required></div>
  <div class="col-md-4"><label class="form-label fw-bold">Tên chính xác</label><input class="form-control" name="new_value" required></div>
- <div class="col-md-2"><button class="btn btn-primary w-100">Chuẩn hóa</button></div></form></div></div>
+ <div class="col-md-2"><button class="btn btn-primary w-100">Lưu</button></div></form></div></div>
 {% endblock %}
 

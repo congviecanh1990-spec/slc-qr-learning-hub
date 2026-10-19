@@ -74,6 +74,12 @@ def normalize_student_code(value) -> str:
     return re.sub(r"\s+", "", str(value or "").strip()).upper()[:64]
 
 
+def student_code_tail(code) -> str:
+    """Dùng đúng ba chữ số cuối khi trình bày, không dùng làm khóa định danh."""
+    match = re.search(r"(\d{3})$", str(code or ""))
+    return match.group(1) if match else "—"
+
+
 def enrollment_active_on(enrollment: ClassEnrollment, on_date: date) -> bool:
     return bool(enrollment.started_on <= on_date and (enrollment.ended_on is None or enrollment.ended_on > on_date))
 
@@ -2429,7 +2435,6 @@ def register_routes(app):
         for legacy in ClassGroup.query.all():
             class_name_map.setdefault(legacy.code, legacy.name)
 
-        participant = request.args.get("participant", "").strip()
         class_code = request.args.get("class_code", "").strip()
         course_id = request.args.get("course_id", type=int)
         qr_id = request.args.get("qr_id", type=int)
@@ -2438,10 +2443,7 @@ def register_routes(app):
             status = "all"
         selected_course = next((c for c in course_options if c.id == course_id), None)
         selected_qr = next((q for q in qr_options if q.id == qr_id), None)
-        # Lọc history độc lập với danh sách SV chưa tham gia; cần có QR thuộc đúng phạm vi.
-        if participant:
-            scan_q = scan_q.filter(ScanLog.participant_code.ilike(f"%{participant}%"))
-            watch_q = watch_q.filter(WatchSession.participant_code.ilike(f"%{participant}%"))
+        # Tra cứu bằng tên học liệu; mã QR chỉ dùng nội bộ để đối chiếu từng học liệu.
         if class_code:
             scan_q = scan_q.filter(ScanLog.class_code == class_code)
             watch_q = watch_q.filter(WatchSession.class_code == class_code)
@@ -2528,14 +2530,23 @@ def register_routes(app):
                                                  "qr_title": selected_qr.title,
                                                  "missing_videos": missing,
                                                  "status": f"Đã hoàn thành {count_completed}/{len(target_video_ids)} video"})
-                    if participant:
-                        pending_rows = [r for r in pending_rows if participant.lower() in r["student"].student_code.lower()
-                                        or participant.lower() in r["student"].full_name.lower()]
         scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(500).all() if status == "all" else []
         watches = watch_q.order_by(WatchSession.started_at.desc()).limit(500).all() if status == "all" else []
+        # Giữ mã SV đầy đủ trong CSDL, chỉ rút gọn 3 số cuối trên giao diện.
+        participant_codes = {row.participant_code for row in [*scans, *watches] if row.participant_code}
+        participant_codes.update(r["student"].student_code for r in pending_rows)
+        student_names = {}
+        if participant_codes:
+            student_names = {st.student_code: st.full_name for st in
+                             Student.query.filter(Student.student_code.in_(participant_codes)).all()}
+        student_display_map = {
+            code: f"{student_names.get(code) or 'Chưa có hồ sơ SV'} ({student_code_tail(code)})"
+            for code in participant_codes
+        }
         return render_template("analytics.html", scans=scans, watches=watches,
                                class_options=class_options, class_name_map=class_name_map,
                                course_options=course_options, qr_options=qr_options,
+                               student_display_map=student_display_map,
                                status=status, pending_rows=pending_rows,
                                pending_notice=pending_notice, participant_stats=participant_stats)
 
@@ -3066,14 +3077,63 @@ def register_routes(app):
             return redirect(url_for("research_page"))
 
         metrics = acceptance_metrics(user)
-        # Lấy 200 ca mới nhất rồi nhóm theo chức năng, mỗi nhóm sắp xếp mới nhất trước.
-        # Không sắp xếp trước khi LIMIT vì như vậy chỉ xuất hiện các chức năng đầu bảng chữ cái.
-        tests = FunctionalTestRun.query.filter_by(source="automatic").order_by(FunctionalTestRun.created_at.desc()).limit(200).all()
-        tests = sorted(tests, key=lambda x: (x.case_name.casefold(), -(x.created_at.timestamp() if x.created_at else 0)))
-        students_by_code = {s.student_code: s.full_name for s in Student.query.all()}
+        # Truy vấn tại máy chủ: chỉ tải 10 dòng đang xem, không đưa toàn bộ
+        # nhật ký toàn trường vào bộ nhớ hay vào trang HTML.
+        test_period = (request.args.get("test_period") or "30").strip()
+        test_feature = (request.args.get("test_feature") or "").strip()
+        test_result = (request.args.get("test_result") or "all").strip()
+        test_search = (request.args.get("test_search") or "").strip()[:120]
+        test_from = (request.args.get("test_from") or "").strip()
+        test_to = (request.args.get("test_to") or "").strip()
+        test_page = max(1, request.args.get("test_page", 1, type=int))
+        test_query = FunctionalTestRun.query.filter_by(source="automatic")
+        now = utcnow()
+        if test_period == "today":
+            test_query = test_query.filter(FunctionalTestRun.created_at >= datetime.combine(now.date(), datetime.min.time()))
+        elif test_period in {"7", "30"}:
+            test_query = test_query.filter(FunctionalTestRun.created_at >= now - timedelta(days=int(test_period)))
+        elif test_period == "custom":
+            try:
+                if test_from:
+                    test_query = test_query.filter(FunctionalTestRun.created_at >= datetime.combine(date.fromisoformat(test_from), datetime.min.time()))
+                if test_to:
+                    test_query = test_query.filter(FunctionalTestRun.created_at < datetime.combine(date.fromisoformat(test_to) + timedelta(days=1), datetime.min.time()))
+            except ValueError:
+                flash("Ngày lọc không hợp lệ; vui lòng chọn lại.", "warning")
+        elif test_period != "all":
+            test_period = "30"
+            test_query = test_query.filter(FunctionalTestRun.created_at >= now - timedelta(days=30))
+        if test_feature:
+            test_query = test_query.filter(FunctionalTestRun.case_name == test_feature)
+        if test_result == "pass":
+            test_query = test_query.filter(FunctionalTestRun.passed.is_(True))
+        elif test_result == "fail":
+            test_query = test_query.filter(FunctionalTestRun.passed.is_(False))
+        if test_search:
+            like = f"%{test_search}%"
+            matching_users = db.session.query(User.id).filter(or_(User.name.ilike(like), User.email.ilike(like)))
+            matching_students = db.session.query(Student.student_code).filter(
+                or_(Student.full_name.ilike(like), Student.student_code.ilike(like)))
+            test_query = test_query.filter(or_(
+                FunctionalTestRun.case_name.ilike(like), FunctionalTestRun.note.ilike(like),
+                FunctionalTestRun.participant_code.ilike(like),
+                FunctionalTestRun.owner_id.in_(matching_users),
+                FunctionalTestRun.participant_code.in_(matching_students)))
+        tests_total = test_query.count()
+        tests_pass = test_query.filter(FunctionalTestRun.passed.is_(True)).count()
+        tests_fail = tests_total - tests_pass
+        test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
+        test_pages = max(1, (tests_total + 9) // 10)
+        test_page = min(test_page, test_pages)
+        tests = test_query.order_by(FunctionalTestRun.created_at.desc(), FunctionalTestRun.id.desc()).offset((test_page - 1) * 10).limit(10).all()
+        test_page_numbers = list(range(max(1, test_page-2), min(test_pages, test_page+2)+1))
+        test_feature_options = [row[0] for row in db.session.query(FunctionalTestRun.case_name)
+                                .filter(FunctionalTestRun.source == "automatic")
+                                .distinct().order_by(FunctionalTestRun.case_name).all()]
+        students_by_code = {s.student_code: s.full_name for s in Student.query.filter(
+            Student.student_code.in_({t.participant_code for t in tests if t.participant_code})).all()}
         class_name_map = {c.code: c.name for c in SchoolClass.query.all()}
-        # Với log cũ chưa có mã SV: chỉ suy ra nếu có đúng một lượt quét
-        # khớp mã QR và thời gian rất gần; không đoán khi có nhiều sinh viên quét cùng lúc.
+        # Nhật ký cũ chưa có mã SV: chỉ đối chiếu nếu có một lượt quét khớp QR/thời điểm.
         legacy_qr_slugs = set()
         for test in tests:
             if test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"} and not test.participant_code:
@@ -3084,7 +3144,7 @@ def register_routes(app):
         if legacy_qr_slugs:
             for scan in (ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
                          .filter(QrCode.slug.in_(legacy_qr_slugs), ScanLog.role == "SV")
-                         .order_by(ScanLog.scanned_at.desc()).limit(2500).all()):
+                         .order_by(ScanLog.scanned_at.desc()).limit(200).all()):
                 if scan.qr:
                     legacy_scans.setdefault(scan.qr.slug, []).append(scan)
         test_rows = []
@@ -3094,15 +3154,18 @@ def register_routes(app):
             if not actor_code and test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"}:
                 match = re.search(r"\bQR\s+([A-Za-z0-9_-]+)", test.note or "")
                 if match and test.created_at:
-                    candidates = [s for s in legacy_scans.get(match.group(1), [])
-                                  if abs((s.scanned_at.replace(tzinfo=None) - test.created_at.replace(tzinfo=None)).total_seconds()) <= 5]
+                    candidates = [x for x in legacy_scans.get(match.group(1), [])
+                                  if abs((x.scanned_at.replace(tzinfo=None) - test.created_at.replace(tzinfo=None)).total_seconds()) <= 5]
                     if len(candidates) == 1:
                         related_scan = candidates[0]
                         actor_code, actor_class = related_scan.participant_code, related_scan.class_code
             if actor_code:
-                full_name = students_by_code.get(actor_code, "Sinh viên chưa có hồ sơ")
+                full_name = students_by_code.get(actor_code)
+                if not full_name:
+                    student = Student.query.filter_by(student_code=actor_code).first()
+                    full_name = student.full_name if student else "Sinh viên chưa có hồ sơ"
                 classroom = class_name_map.get(actor_class, actor_class or "Chưa xác định lớp")
-                actor = f"{full_name} ({actor_code} - {classroom})"
+                actor = f"{full_name} ({student_code_tail(actor_code)} - {classroom})"
             elif test.case_code in {"QR_SCAN", "QR_PLAYLIST_SCAN"} and "vai trò SV" in (test.note or ""):
                 actor = "Sinh viên (nhật ký cũ chưa xác định được mã)"
             elif test.owner:
@@ -3116,10 +3179,9 @@ def register_routes(app):
                          related_scan.video.title if related_scan.video else q.title)
                 evidence = f"{title} – {related_scan.course.name if related_scan.course else 'Chưa xác định môn học/mô đun'}"
             test_rows.append({"test": test, "actor": actor, "evidence": evidence})
-        tests_total = FunctionalTestRun.query.filter_by(source="automatic").count()
-        tests_pass = FunctionalTestRun.query.filter_by(source="automatic", passed=True).count()
-        tests_fail = max(0, tests_total - tests_pass)
-        test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
+        test_filter_args = {"test_period": test_period, "test_feature": test_feature,
+                            "test_result": test_result, "test_search": test_search,
+                            "test_from": test_from, "test_to": test_to}
 
         experiments = ExperimentRun.query.order_by(ExperimentRun.created_at.desc()).limit(200).all()
         manual_runs = [x for x in experiments if x.mode == "manual"]
@@ -3186,6 +3248,17 @@ def register_routes(app):
             tests_pass=tests_pass,
             tests_fail=tests_fail,
             test_rate=test_rate,
+            test_pages=test_pages,
+            test_page=test_page,
+            test_page_numbers=test_page_numbers,
+            test_period=test_period,
+            test_feature=test_feature,
+            test_feature_options=test_feature_options,
+            test_result=test_result,
+            test_search=test_search,
+            test_from=test_from,
+            test_to=test_to,
+            test_filter_args=test_filter_args,
             experiments=experiments,
             webapp_runs=webapp_runs,
             manual_runs=manual_runs,

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 <h2 class="mb-1">Theo dõi chỉ tiêu và kết quả nghiệm thu</h2>
-<p class="text-muted mb-4">Trang này tổng hợp minh chứng phát sinh từ hoạt động thực tế của hệ thống. Ca kiểm thử và số liệu phía Web App được ghi tự động; chỉ dữ liệu quy trình thủ công được nhập để làm đối chứng.</p>
+
 
 <div class="table-responsive mb-4">
   <table class="table table-bordered align-middle bg-white">
@@ -49,30 +49,73 @@
   <div class="card-header fw-bold">1. Kết quả kiểm thử tự động</div>
   <div class="card-body">
     <div class="row g-3 mb-3">
-      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Tổng lượt kiểm thử</div><div class="fs-3 fw-bold">{{ tests_total }}</div></div></div>
-      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Đạt</div><div class="fs-3 fw-bold text-success">{{ tests_pass }}</div></div></div>
-      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Không đạt</div><div class="fs-3 fw-bold text-danger">{{ tests_fail }}</div></div></div>
-      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="text-muted small">Tỷ lệ đạt</div><div class="fs-3 fw-bold">{{ (test_rate|string + '%') if test_rate is not none else '—' }}</div></div></div>
+      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tổng hợp kiểm thử</div><div class="display-6 fw-bold">{{ tests_total }}</div></div></div>
+      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Đạt</div><div class="display-6 fw-bold text-success">{{ tests_pass }}</div></div></div>
+      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Không đạt</div><div class="display-6 fw-bold text-danger">{{ tests_fail }}</div></div></div>
+      <div class="col-md-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tỷ lệ đạt</div><div class="display-6 fw-bold">{{ (test_rate|string + '%') if test_rate is not none else '—' }}</div></div></div>
     </div>
-    <p class="small text-muted">Hệ thống tự ghi nhận từ các hoạt động thật như đăng nhập Google, đồng bộ YouTube, gán video vào môn học/ mô đun, tạo QR, quét QR, đổi video đích, sao lưu và khôi phục dữ liệu.</p>
+    <p class="fw-semibold mb-3">Cụ thể:</p>
+    <form method="get" class="row g-2 align-items-end mb-3 border rounded p-3 bg-light">
+      <div class="col-md-3 col-lg-2"><label class="form-label">Thời gian</label>
+        <select class="form-select form-select-sm" name="test_period" id="testPeriod">
+          {% for value, label in [('today','Hôm nay'),('7','7 ngày gần đây'),('30','30 ngày gần đây'),('all','Tất cả thời gian'),('custom','Khoảng ngày tùy chọn')] %}
+          <option value="{{ value }}" {{ 'selected' if test_period == value else '' }}>{{ label }}</option>{% endfor %}
+        </select></div>
+      <div class="col-md-3 col-lg-2"><label class="form-label">Chức năng</label>
+        <select class="form-select form-select-sm" name="test_feature"><option value="">Tất cả chức năng</option>
+          {% for name in test_feature_options %}<option value="{{ name }}" {{ 'selected' if test_feature == name else '' }}>{{ name }}</option>{% endfor %}</select></div>
+      <div class="col-md-3 col-lg-2"><label class="form-label">Kết quả</label>
+        <select class="form-select form-select-sm" name="test_result">
+          <option value="all" {{ 'selected' if test_result == 'all' else '' }}>Tất cả</option>
+          <option value="pass" {{ 'selected' if test_result == 'pass' else '' }}>Đạt</option>
+          <option value="fail" {{ 'selected' if test_result == 'fail' else '' }}>Không đạt</option>
+        </select></div>
+      <div class="col-md-3 col-lg-3"><label class="form-label">Người thực hiện / Học liệu</label>
+        <input class="form-control form-control-sm" name="test_search" value="{{ test_search }}" placeholder="Nhập từ khóa tìm kiếm"></div>
+      <div class="col-md-6 col-lg-3 d-flex gap-1">
+        <button class="btn btn-primary btn-sm">Lọc kết quả</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('research_page') }}">Xóa lọc</a>
+      </div>
+      <div class="col-12 {{ '' if test_period == 'custom' else 'd-none' }}" id="testCustomDates">
+        <div class="d-flex flex-wrap gap-2"><div><label class="form-label small">Từ ngày</label><input type="date" class="form-control form-control-sm" name="test_from" value="{{ test_from }}"></div>
+        <div><label class="form-label small">Đến ngày</label><input type="date" class="form-control form-control-sm" name="test_to" value="{{ test_to }}"></div></div>
+      </div>
+    </form>
+    <div class="small text-muted mb-2">Có <strong>{{ tests_total }}</strong> bản ghi theo bộ lọc · Trang {{ test_page }}/{{ test_pages }} · 10 dòng/trang</div>
     <div class="table-responsive">
       <table class="table table-sm table-striped align-middle">
-        <thead><tr><th>Thời gian</th><th>Chức năng</th><th>Kết quả</th><th>Người thực hiện</th><th>Minh chứng / ghi chú</th></tr></thead>
+        <thead><tr><th>Thời gian</th><th>Chức năng</th><th>Người thực hiện</th><th>Kết quả</th><th>Minh chứng / Ghi chú</th></tr></thead>
         <tbody>
           {% for row in test_rows %}{% set t = row.test %}
           <tr>
             <td class="text-nowrap">{{ t.created_at.strftime('%d/%m/%Y %H:%M:%S') if t.created_at else '' }}</td>
-            <td>{{ t.case_name }}</td>
+            <td>{{ t.case_name }}</td><td>{{ row.actor }}</td>
             <td>{% if t.passed %}<span class="badge text-bg-success">Đạt</span>{% else %}<span class="badge text-bg-danger">Không đạt</span>{% endif %}</td>
-            <td>{{ row.actor }}</td>
             <td class="small">{{ row.evidence }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="5" class="text-center text-muted py-4">Chưa có dữ liệu kiểm thử tự động. Hãy sử dụng các chức năng của Web App để hệ thống tự ghi nhận.</td></tr>
+          <tr><td colspan="5" class="text-center text-muted py-4">Chưa có dữ liệu phù hợp bộ lọc.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    {% if test_pages > 1 %}
+    <nav aria-label="Chuyển trang kết quả kiểm thử">
+      <ul class="pagination pagination-sm flex-wrap justify-content-center mt-3 mb-0">
+        <li class="page-item {{ 'disabled' if test_page == 1 else '' }}"><a class="page-link" href="{{ url_for('research_page', **dict(test_filter_args, test_page=test_page-1)) }}">‹</a></li>
+        {% if test_page_numbers[0] > 1 %}<li class="page-item"><a class="page-link" href="{{ url_for('research_page', **dict(test_filter_args, test_page=1)) }}">1</a></li>{% if test_page_numbers[0]>2 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}{% endif %}
+        {% for n in test_page_numbers %}<li class="page-item {{ 'active' if n == test_page else '' }}"><a class="page-link" href="{{ url_for('research_page', **dict(test_filter_args, test_page=n)) }}">{{ n }}</a></li>{% endfor %}
+        {% if test_page_numbers[-1] < test_pages %}{% if test_page_numbers[-1] < test_pages-1 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}<li class="page-item"><a class="page-link" href="{{ url_for('research_page', **dict(test_filter_args, test_page=test_pages)) }}">{{ test_pages }}</a></li>{% endif %}
+        <li class="page-item {{ 'disabled' if test_page == test_pages else '' }}"><a class="page-link" href="{{ url_for('research_page', **dict(test_filter_args, test_page=test_page+1)) }}">›</a></li>
+      </ul>
+    </nav>
+    {% endif %}
+    <script>
+      document.addEventListener('DOMContentLoaded', function(){
+        const select=document.getElementById('testPeriod'),box=document.getElementById('testCustomDates');
+        if(select && box) select.addEventListener('change',function(){box.classList.toggle('d-none', select.value!=='custom');});
+      });
+    </script>
   </div>
 </div>
 
