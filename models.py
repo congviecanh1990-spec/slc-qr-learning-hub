@@ -112,6 +112,10 @@ class Video(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     channel_id = db.Column(db.Integer, db.ForeignKey("youtube_channels.id", ondelete="CASCADE"), nullable=False)
     youtube_video_id = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    # Kênh YouTube thực sự đăng tải video (videos.list.snippet.channelId).
+    # Không được suy ra quyền sở hữu từ playlist chứa video: playlist có thể
+    # bao gồm video của một kênh khác. NULL = chưa được API xác minh.
+    uploader_channel_id = db.Column(db.String(64), nullable=True, index=True)
     title = db.Column(db.String(500), nullable=False, default="")
     description = db.Column(db.Text, nullable=True)
     published_at = db.Column(db.DateTime(timezone=True), nullable=True)

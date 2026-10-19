@@ -1,3 +1,14 @@
+# BỔ SUNG v4.3.4 — Sửa nguồn video lẫn từ kênh YouTube khác
+
+- Khi đồng bộ YouTube, xác định kênh **thực sự đăng tải** theo trường `snippet.channelId` của YouTube Data API, không coi video xuất hiện trong playlist là video của chủ playlist.
+- Kho video học liệu, bộ chọn tạo QR và các chỉ số số video chỉ tính video đã xác minh thuộc các kênh giảng viên thực sự kết nối. Video của kênh thứ hai đã kết nối hợp lệ vẫn được sử dụng.
+- Video bị nhập nhầm trước đây sẽ không còn xuất hiện sau khi triển khai và đồng bộ lại. Các liên kết playlist-video không hợp lệ được tự loại khỏi playlist; bản ghi video, mã QR, lịch sử quét/xem **không bị xóa**.
+- Mã QR video cũ liên quan đến video sai nguồn được đánh dấu cần rà soát nếu gắn với môn học; không tự ngừng hoạt động hoặc thay đích.
+- Thêm cột PostgreSQL `videos.uploader_channel_id` (tự cập nhật schema khi Web App khởi động). **Không xóa database**. Các video cũ chỉ có thông tin kiểm chứng sau khi bấm **Đồng bộ lại**.
+- Kiểm thử độc lập tại `tests/test_youtube_playlist_ownership.py` (chạy không cần OAuth/DB).
+
+---
+
 # Bổ sung v4.3.1 — hiệu chỉnh giao diện và bổ sung lớp đang dạy
 
 - Trang **Lớp chủ nhiệm** bỏ các câu giải thích dài đã được yêu cầu loại bỏ; giữ các thao tác Excel, thêm SV, sửa tên, trạng thái và xóa nhập nhầm.

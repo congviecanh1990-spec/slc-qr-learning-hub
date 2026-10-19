@@ -324,6 +324,13 @@ def ensure_schema_upgrades():
                 WHERE (faculty_name IS NULL OR faculty_name = '')
                   AND unit_name IS NOT NULL AND unit_name <> ''
             """))
+        if "videos" in tables:
+            video_columns = {c["name"] for c in inspector.get_columns("videos")}
+            if "uploader_channel_id" not in video_columns:
+                # Không tự suy đoán rằng video cũ thuộc kênh đang gắn với bản ghi.
+                # Lần đồng bộ tiếp theo sẽ kiểm chứng bằng YouTube API.
+                conn.execute(text("ALTER TABLE videos ADD COLUMN uploader_channel_id VARCHAR(64)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_videos_uploader_channel_id ON videos (uploader_channel_id)"))
         if "playlists" in tables:
             playlist_columns = {c["name"] for c in inspector.get_columns("playlists")}
             if "is_available" not in playlist_columns:
@@ -529,14 +536,26 @@ def video_is_usable(video: Video | None) -> bool:
     return bool(video and video.is_available and video.embeddable is not False and video.privacy_status != "private")
 
 
+def video_is_from_connected_channel(video: Video | None) -> bool:
+    """Quyền sở hữu phải được xác nhận qua YouTube API, không qua playlist."""
+    return bool(video and video.channel and video.uploader_channel_id
+                and video.uploader_channel_id == video.channel.channel_id)
+
+
 def course_owned_by_user(course: Course, user: User) -> bool:
     return bool(course.owner_id == user.id)
 
 
 def visible_video_query(user: User):
-    q = Video.query.join(YouTubeChannel)
-    q = q.filter(YouTubeChannel.user_id == user.id)
-    return q
+    """Chỉ trả về video đã xác minh do kênh kết nối của chính GV đăng tải.
+
+    Việc một video xuất hiện trong playlist không chứng minh GV sở hữu video.
+    Những video nhập sai từ bản cũ được giữ trong CSDL để không mất lịch sử QR,
+    nhưng không được đưa vào Kho video hoặc danh sách tạo QR mới.
+    """
+    return (Video.query.join(YouTubeChannel)
+            .filter(YouTubeChannel.user_id == user.id,
+                    Video.uploader_channel_id == YouTubeChannel.channel_id))
 
 
 def visible_playlist_query(user: User):
@@ -885,7 +904,9 @@ def register_routes(app):
         if not user:
             return render_template("landing.html")
         whole_system = user.role == "admin" and request.args.get("scope") == "all"
-        videos = Video.query.count() if whole_system else visible_video_query(user).count()
+        videos = (db.session.query(Video.id).join(YouTubeChannel)
+                  .filter(Video.uploader_channel_id == YouTubeChannel.channel_id).count()
+                  if whole_system else visible_video_query(user).count())
         qrs = (QrCode.query.filter_by(active=True).count() if whole_system else
                QrCode.query.filter_by(owner_id=user.id, active=True).count())
         courses = (Course.query.filter_by(active=True).count() if whole_system else
@@ -1682,7 +1703,8 @@ def register_routes(app):
         total_processing = 0.0
         for link in links:
             video = link.video
-            if not video_is_usable(video):
+            if not video_is_usable(video) or not video_is_from_connected_channel(video):
+                # Không sinh QR mới từ bản ghi video không đúng nguồn của phiên bản cũ.
                 skipped += 1
                 continue
             qr, was_created = create_qr_for_course_video(course, video, user, link)
@@ -1874,7 +1896,8 @@ def register_routes(app):
             links = CourseVideo.query.filter_by(course_id=course.id).all()
             total = len(links)
             has_qr = sum(1 for link in links if link.qr_id and link.qr and link.qr.active)
-            usable_missing = sum(1 for link in links if not link.qr_id and video_is_usable(link.video))
+            usable_missing = sum(1 for link in links if not link.qr_id and video_is_usable(link.video)
+                                 and video_is_from_connected_channel(link.video))
             needs_retarget = sum(
                 1 for link in links
                 if link.qr_id and link.qr and link.qr.active and not video_is_usable(active_video_for_qr(link.qr))
@@ -1901,7 +1924,8 @@ def register_routes(app):
         for q in qrs:
             if q.course_id and not q.is_playlist:
                 target = active_video_for_qr(q)
-                if target and not CourseVideo.query.filter_by(course_id=q.course_id, video_id=target.id).first():
+                if target and (not video_is_from_connected_channel(target) or
+                               not CourseVideo.query.filter_by(course_id=q.course_id, video_id=target.id).first()):
                     qr_needs_review.add(q.id)
         return render_template(
             "qr.html", qr_needs_review=qr_needs_review, qrs=qrs, videos=videos, courses=courses, course_stats=course_stats,
@@ -3412,7 +3436,8 @@ def register_routes(app):
                 return redirect(url_for("data_management"))
 
         summary = {
-            "videos": Video.query.count(),
+            "videos": db.session.query(Video.id).join(YouTubeChannel).filter(
+                Video.uploader_channel_id == YouTubeChannel.channel_id).count(),
             "courses": Course.query.filter_by(active=True).count(),
             "qrs": QrCode.query.filter_by(active=True).count(),
             "scans": ScanLog.query.count(),
@@ -3681,7 +3706,8 @@ def acceptance_metrics(user):
         gv_non_it_count = 1 if user.professional_group == "other" else 0
     sv_count = participant_base.filter(ScanLog.role == "SV").distinct().count()
 
-    video_q = Video.query.join(YouTubeChannel)
+    video_q = Video.query.join(YouTubeChannel).filter(
+        Video.uploader_channel_id == YouTubeChannel.channel_id)
     if user.role != "admin":
         video_q = video_q.filter(YouTubeChannel.user_id == user.id)
 

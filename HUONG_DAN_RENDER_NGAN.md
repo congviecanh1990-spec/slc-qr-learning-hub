@@ -1,3 +1,22 @@
+# CẬP NHẬT v4.3.4 — SỬA VIDEO KHÔNG THUỘC KÊNH VẪN XUẤT HIỆN
+
+**Nguyên nhân:** Playlist YouTube có thể chứa video do người khác đăng; phiên bản cũ lấy tất cả video trong playlist và gắn vào kho của giảng viên. Khi gỡ video khỏi playlist, bản ghi cũ có thể vẫn còn.
+
+**Cách cập nhật:** Giữ nguyên repository GitHub, Render Service và PostgreSQL. Sao lưu trước khi cập nhật; giải nén gói mới, upload/commit toàn bộ file vào nhánh `main`, đợi Render báo **Live**. Không thay đổi các biến Google OAuth.
+
+**Kiểm tra sau triển khai:**
+1. Đăng nhập bằng tài khoản giảng viên; vào **Kênh YouTube** và bấm **Đồng bộ lại** (nếu hệ thống đã tự đồng bộ khi đăng nhập thì cũng có thể bấm để chắc chắn hoàn tất).
+2. Vào **Kho video học liệu** và tìm các tiêu đề ngoại lai trước đây. Chúng không được xuất hiện nữa; chỉ video thực sự do kênh YouTube mà giảng viên đã kết nối tải lên được hiển thị.
+3. Kiểm tra danh sách video trong các playlist, trạng thái gán môn học/mô đun và QR. Những QR đã phát hành vẫn được giữ nguyên; mã QR video ngoại lai cũ có gắn môn học sẽ có nhắc nhở cần rà soát.
+4. Thử tạo QR một video thực sự thuộc kênh. Nếu có kênh thứ hai, xác nhận các video của kênh này cũng xuất hiện sau khi đồng bộ tương ứng.
+5. Kiểm tra lịch sử quét và xem trước đó không mất.
+
+**Lưu ý:** Bản v4.3.4 thêm một cột `uploader_channel_id` có thể để trống đối với dữ liệu cũ chưa được đối soát; nhấn **Đồng bộ lại** để kiểm chứng nguồn video qua YouTube API. Không tự động xóa video, QR hoặc nhật ký. Bản này chỉ sửa lỗi nguồn video, không thêm lịch cron trả phí.
+
+**Kiểm thử kỹ thuật:** Có kiểm thử logic đồng bộ bằng mô phỏng, kiểm tra cú pháp Python và Jinja. Chưa xác nhận đầy đủ Google OAuth, API YouTube và PostgreSQL trực tiếp trên Render; cần kiểm tra thực tế sau deploy.
+
+---
+
 # HƯỚNG DẪN CẬP NHẬT WEB APP v4.3.3 TRÊN RENDER
 
 Bản này kế thừa v4.3.2, **không xóa hoặc tạo lại PostgreSQL, không cần thay biến môi trường Google OAuth**.

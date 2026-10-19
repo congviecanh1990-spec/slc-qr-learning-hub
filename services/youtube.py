@@ -200,6 +200,12 @@ def sync_playlists(user, channel, credential=None):
 
 
 def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=False, credential=None):
+    """Đồng bộ playlist nhưng không coi video của kênh khác là video của GV.
+
+    Một playlist có thể chứa bất kỳ video công khai nào trên YouTube. Chỉ đưa
+    video do kênh đã được giảng viên kết nối thật sự đăng tải vào kho học liệu.
+    Những liên kết sai từ lần đồng bộ cũ bị bỏ; bản ghi Video/QR vẫn được giữ.
+    """
     video_ids = []
     item_meta = {}
     page = None
@@ -244,7 +250,10 @@ def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=Fal
         current_video_ids = set()
         for vid in video_ids:
             video = Video.query.filter_by(youtube_video_id=vid).first()
-            if not video:
+            # Không phải video thuộc một kênh GV đã kết nối thì không nhận.
+            if not video or video.channel.user_id != user.id or not video.uploader_channel_id:
+                continue
+            if video.uploader_channel_id != video.channel.channel_id:
                 continue
             current_video_ids.add(video.id)
             link = PlaylistVideo.query.filter_by(playlist_id=playlist.id, video_id=video.id).first()
@@ -253,8 +262,8 @@ def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=Fal
                 db.session.add(PlaylistVideo(playlist_id=playlist.id, video_id=video.id, position=position))
             else:
                 link.position = position
-        # Xóa liên kết đã bị gỡ khỏi playlist YouTube. Video vẫn được giữ trong kho
-        # video nếu còn tồn tại trên kênh.
+        # Gỡ các quan hệ playlist -> video đã bị xóa khỏi playlist hoặc được
+        # xác minh là thuộc kênh không kết nối. Không xóa video hoặc lịch sử QR.
         for link in PlaylistVideo.query.filter_by(playlist_id=playlist.id).all():
             if link.video_id not in current_video_ids:
                 db.session.delete(link)
@@ -262,6 +271,11 @@ def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=Fal
 
 
 def sync_video_ids(user, channel, video_ids, credential=None):
+    """Kiểm tra đúng kênh ĐĂNG TẢI qua snippet.channelId của videos.list.
+
+    Khác với video.channel_id trong DB, kết quả của YouTube API mới là căn cứ
+    quyền sở hữu; video nằm trong playlist của GV chưa chắc do GV tải lên.
+    """
     if credential is None and channel.connected_account_id:
         credential = db.session.get(ConnectedGoogleAccount, channel.connected_account_id)
     if not video_ids:
@@ -283,13 +297,28 @@ def sync_video_ids(user, channel, video_ids, credential=None):
         snippet = item.get("snippet", {})
         status = item.get("status", {})
         content = item.get("contentDetails", {})
+        actual_youtube_channel_id = snippet.get("channelId")
+
         video = Video.query.filter_by(youtube_video_id=vid).first()
         if video and video.channel.user_id != user.id:
+            # Tuyệt đối không sửa video đã được kết nối với GV khác.
+            continue
+
+        owning_channel = (YouTubeChannel.query.filter_by(
+            user_id=user.id, channel_id=actual_youtube_channel_id).first()
+            if actual_youtube_channel_id else None)
+        if not video and not owning_channel:
+            # Video của kênh khác trong playlist: không thêm vào Kho video.
             continue
         if not video:
-            video = Video(channel_id=channel.id, youtube_video_id=vid)
+            video = Video(channel_id=owning_channel.id, youtube_video_id=vid)
             db.session.add(video)
-        video.channel_id = channel.id
+        if owning_channel:
+            # Sửa liên kết sai từ các phiên bản cũ, khi một video của kênh B bị
+            # đưa nhầm vào kênh A vì xuất hiện trong playlist A.
+            video.channel_id = owning_channel.id
+            video.channel = owning_channel
+        video.uploader_channel_id = actual_youtube_channel_id
         video.title = snippet.get("title", vid)
         video.description = snippet.get("description")
         video.published_at = _parse_dt(snippet.get("publishedAt"))
@@ -304,7 +333,7 @@ def sync_video_ids(user, channel, video_ids, credential=None):
     missing = set(video_ids) - returned
     for vid in missing:
         video = Video.query.filter_by(youtube_video_id=vid).first()
-        if video:
+        if video and video.channel.user_id == user.id:
             video.is_available = False
             video.last_synced_at = utcnow()
     db.session.commit()
