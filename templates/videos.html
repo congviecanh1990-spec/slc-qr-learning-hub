@@ -1,5 +1,28 @@
 {% extends 'base.html' %}
 {% block content %}
+{% macro library_pagination(page, pages, field, anchor) %}
+  {% if pages > 1 %}
+  <nav aria-label="Chuyển trang {{ anchor }}" class="my-3">
+    <ul class="pagination pagination-sm flex-wrap justify-content-center">
+      <li class="page-item {{ 'disabled' if page <= 1 else '' }}"><a class="page-link" href="{{ url_for('videos_page', **dict(library_args, **{field: page-1})) }}#{{ anchor }}">‹</a></li>
+      {% set first_visible = [1, page-2]|max %}
+      {% set last_visible = [pages, page+2]|min %}
+      {% if first_visible > 1 %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('videos_page', **dict(library_args, **{field: 1})) }}#{{ anchor }}">1</a></li>
+        {% if first_visible > 2 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+      {% endif %}
+      {% for n in range(first_visible, last_visible + 1) %}
+        <li class="page-item {{ 'active' if n==page else '' }}"><a class="page-link" href="{{ url_for('videos_page', **dict(library_args, **{field: n})) }}#{{ anchor }}" {{ 'aria-current="page"'|safe if n==page else '' }}>{{ n }}</a></li>
+      {% endfor %}
+      {% if last_visible < pages %}
+        {% if last_visible < pages-1 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('videos_page', **dict(library_args, **{field: pages})) }}#{{ anchor }}">{{ pages }}</a></li>
+      {% endif %}
+      <li class="page-item {{ 'disabled' if page >= pages else '' }}"><a class="page-link" href="{{ url_for('videos_page', **dict(library_args, **{field: page+1})) }}#{{ anchor }}">›</a></li>
+    </ul>
+  </nav>
+  {% endif %}
+{% endmacro %}
 <div class="mb-3">
   <h2 class="mb-1">Kho video học liệu</h2>
 </div>
@@ -12,16 +35,17 @@
   </div>
 </div>
 
-<section id="playlists" class="mb-5">
+<section id="playlists" class="mb-5" style="scroll-margin-top:125px">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
     <div>
       <h4 class="mb-0">1. Danh sách playlist</h4>
       <div class="text-muted small">Chọn môn học/ mô đun áp dụng cho playlist trước. Toàn bộ video hiện có và video bổ sung sau này trong playlist sẽ tự động thuộc các môn học/ mô đun đã chọn.</div>
     </div>
-    <span class="text-muted small">Đang hiển thị: {{ playlists|length }} playlist</span>
+    <span class="text-muted small">Có {{ playlist_total|default(playlists|length) }} playlist · Trang {{ playlist_page|default(1) }}/{{ playlist_pages|default(1) }} · 5 dòng/trang</span>
   </div>
 
   <form class="card card-body shadow-sm mb-3" method="get" action="{{ url_for('videos_page') }}#playlists">
+    {% for key in ['q','status','assignment','playlist_id','v_page'] %}{% if (library_args|default({})).get(key) %}<input type="hidden" name="{{ key }}" value="{{ (library_args|default({}))[key] }}">{% endif %}{% endfor %}
     <div class="row g-2 align-items-end">
       <div class="col-lg-6">
         <label class="form-label small">Tìm kiếm playlist</label>
@@ -49,7 +73,7 @@
         {% set active_course_ids = p.course_links | selectattr('active') | map(attribute='course_id') | list %}
         <tr id="playlist-{{ p.id }}" class="library-target-row">
           <td>
-            <div class="fw-semibold">{{ p.title }}</div>
+            <div class="fw-semibold">{{ p.title }}</div>{% if not p.is_available %}<span class="badge text-bg-warning">Playlist không còn trên YouTube</span><div class="small text-muted">QR cũ được giữ để tra cứu lịch sử; có thể ngừng sử dụng QR.</div>{% endif %}
           </td>
           <td>{{ p.channel.title }}</td>
           <td>{{ p.video_links|length }}</td>
@@ -96,7 +120,7 @@
           <td>
             {% set active_links = p.course_links | selectattr('active') | list %}
             {% if active_course_ids %}
-              <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap playlist-qr-actions align-items-center">
+              <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap playlist-qr-actions align-items-center library-qr-form" data-library-qr-form="1">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
                 <select class="form-select form-select-sm playlist-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR playlist" required>
@@ -105,13 +129,19 @@
                     <option value="{{ l.course.id }}"
                       {% if l.qr and l.qr.active %}
                       data-qr-png="{{ url_for('qr_png', qr_id=l.qr.id) }}"
-                      data-qr-preview="{{ url_for('public_qr', slug=l.qr.slug, preview=1) }}"
+                      data-qr-delete="{{ url_for('delete_qr', qr_id=l.qr.id) }}"
                       {% endif %}>{{ l.course.name }}{{ ' – đã có mã QR' if l.qr and l.qr.active else '' }}</option>
                   {% endfor %}
                 </select>
                 <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available else '' }}>Tạo mã QR</button>
                 <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#">Tải mã QR</a>
-                <a class="btn btn-outline-primary btn-sm playlist-qr-preview" hidden href="#" target="_blank" rel="noopener">Mở thử</a>
+              </form>
+              <form method="post" action="#" class="playlist-qr-delete-form mt-1 library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Ngừng sử dụng mã QR playlist này? Mã đã in sẽ không hoạt động nhưng lịch sử được giữ lại.');" hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
+                <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
+                <button class="btn btn-outline-danger btn-sm" type="submit">Xóa mã QR</button>
               </form>
             {% else %}<div class="text-muted small">Hãy chọn môn học/mô đun và bấm Lưu trước.</div>{% endif %}
           </td>
@@ -122,18 +152,20 @@
       </tbody>
     </table>
   </div>
+  {{ library_pagination(playlist_page|default(1), playlist_pages|default(1), 'p_page', 'playlists') }}
 </section>
 
-<section class="mb-3" id="videos">
+<section class="mb-3" id="videos" style="scroll-margin-top:125px">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
     <div>
       <h4 class="mb-0">2. Danh sách video</h4>
       <div class="text-muted small">Chỉ gán riêng khi video chưa được xử lý qua playlist hoặc khi bạn không muốn dùng toàn bộ playlist cho môn học/ mô đun.</div>
     </div>
-    <span class="text-muted small">Đang hiển thị: {{ videos|length }} video</span>
+    <span class="text-muted small">Có {{ video_total|default(videos|length) }} video · Trang {{ video_page|default(1) }}/{{ video_pages|default(1) }} · 5 dòng/trang</span>
   </div>
 
   <form class="card card-body shadow-sm mb-3" method="get" action="{{ url_for('videos_page') }}#videos">
+    {% for key in ['p_q','p_assignment','p_page'] %}{% if (library_args|default({})).get(key) %}<input type="hidden" name="{{ key }}" value="{{ (library_args|default({}))[key] }}">{% endif %}{% endfor %}
     <div class="row g-2 align-items-end">
       <div class="col-xl-3 col-lg-6">
         <label class="form-label small">Tìm kiếm video</label>
@@ -216,26 +248,54 @@
           <td>{{ 'Có thể phát' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'Cần kiểm tra' }}</td>
           <td><span class="badge {{ 'text-bg-success' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'text-bg-warning' }}">{{ v.status_label }}</span></td>
           <td>
-            <form method="post" action="{{ url_for('create_video_qr_from_library', video_id=v.id) }}" class="d-flex flex-wrap gap-1">
+            {% set vqr = namespace(selected=false) %}
+            <form method="post" action="{{ url_for('create_video_qr_from_library', video_id=v.id) }}" class="d-flex flex-wrap gap-1 align-items-center library-qr-form video-qr-actions" data-library-qr-form="1" data-video-usable="{{ '1' if v.is_available and v.embeddable is not sameas false and v.privacy_status != 'private' else '0' }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-              <select class="form-select form-select-sm" name="course_id" aria-label="Chọn môn học/mô đun tạo QR video" required>
+              <select class="form-select form-select-sm video-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR video" required>
                 {% if courses|length != 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
                 {% for c in courses %}
-                  {% set has_qr = namespace(value=false) %}
+                  {% set found = namespace(qr=none) %}
                   {% for link in v.course_links if link.course_id == c.id %}
-                    {% if link.qr and link.qr.active %}{% set has_qr.value=true %}{% endif %}
+                    {% if link.qr and link.qr.active %}{% set found.qr=link.qr %}{% endif %}
                   {% endfor %}
-                  <option value="{{ c.id }}">{{ c.name }}{{ ' – đã có QR' if has_qr.value else '' }}</option>
+                  <option value="{{ c.id }}" {% if found.qr %}
+                     data-qr-png="{{ url_for('qr_png', qr_id=found.qr.id) }}"
+                     data-qr-delete="{{ url_for('delete_qr', qr_id=found.qr.id) }}"
+                     data-qr-retarget="{{ url_for('qr_retarget', qr_id=found.qr.id) }}"
+                     {% endif %}>{{ c.name }}{{ ' – đã có mã QR' if found.qr else '' }}</option>
                 {% endfor %}
               </select>
-              <button class="btn btn-primary btn-sm" {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
+              <button class="btn btn-primary btn-sm video-qr-create" {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
+              <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download" hidden>Tải mã QR</a>
             </form>
+            <div class="d-flex flex-wrap gap-1 align-items-center mt-1 video-qr-extra" data-qr-row="video-{{ v.id }}">
+              <form method="post" action="#" class="video-qr-delete library-qr-form" data-library-qr-form="1" hidden onsubmit="return confirm('Xóa mã QR này? Mã đã in sẽ ngừng hoạt động nhưng lịch sử vẫn được giữ lại.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
+                <input type="hidden" name="library_row" value="video-{{ v.id }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Xóa</button>
+              </form>
+              <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" hidden aria-expanded="false">Đổi video đích</button>
+              <form method="post" action="#" class="video-qr-retarget library-qr-form mt-1 w-100" data-library-qr-form="1" hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
+                <input type="hidden" name="library_row" value="video-{{ v.id }}">
+                <select class="form-select form-select-sm" name="video_id" required aria-label="Chọn video đích">
+                  <option value="">Chọn video đích mới</option>
+                  {% for new_v in retarget_videos|default([]) %}<option value="{{ new_v.id }}">{{ new_v.title }}</option>{% endfor %}
+                </select>
+                <button type="submit" class="btn btn-warning btn-sm mt-1">Lưu video đích</button>
+              </form>
+            </div>
           </td>
         </tr>{% else %}<tr><td colspan="8" class="text-center text-muted py-4">Không có video phù hợp bộ lọc.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
+    {{ library_pagination(video_page|default(1), video_pages|default(1), 'v_page', 'videos') }}
 </section>
 {% endblock %}
 
@@ -265,7 +325,15 @@
       const html = await response.text();
       const updatedPage = new DOMParser().parseFromString(html, 'text/html');
       const newRow = updatedPage.getElementById(rowId);
-      if (!newRow) throw new Error('Không tìm thấy playlist sau khi lưu.');
+      if (!newRow) {
+        // Sau khi thay đổi gán môn, playlist có thể rời bộ lọc hiện hành
+        // hoặc chuyển sang trang khác. Yêu cầu đã được lưu thành công.
+        let msg = form.querySelector('.library-save-feedback');
+        if (!msg) { msg=document.createElement('div'); msg.className='library-save-feedback text-success'; form.appendChild(msg); }
+        msg.textContent='Đã lưu. Playlist có thể chuyển khỏi trang/bộ lọc hiện tại; hãy lọc lại để xem trạng thái mới.';
+        if(button)button.disabled=false;
+        return;
+      }
       const feedback = document.createElement('div');
       feedback.className = 'library-save-feedback text-success fw-semibold';
       feedback.setAttribute('role','status');
@@ -300,26 +368,81 @@
 
   // Mỗi playlist có thể áp dụng cho nhiều MH/MĐ, nên trạng thái QR thay đổi theo môn đã chọn.
   function updatePlaylistQrActions(select) {
-    const area = select.closest('.playlist-qr-actions');
-    if (!area) return;
-    const option = select.selectedOptions[0];
-    const hasQr = !!(option && option.dataset.qrPng);
-    const validCourse = !!select.value;
-    const create = area.querySelector('.playlist-qr-create');
-    const download = area.querySelector('.playlist-qr-download');
-    const preview = area.querySelector('.playlist-qr-preview');
-    if (create) { create.hidden = hasQr; create.disabled = !validCourse; }
-    for (const link of [download, preview]) {
-      if (!link) continue;
-      link.hidden = !hasQr;
-      if (hasQr) link.href = link === download ? option.dataset.qrPng : option.dataset.qrPreview;
-      else link.removeAttribute('href');
-    }
+    const row=select.closest('tr.library-target-row'), area=select.closest('.playlist-qr-actions');
+    if(!area || !row) return;
+    const option=select.selectedOptions[0], hasQr=!!(option && option.dataset.qrPng), valid=!!select.value;
+    const create=area.querySelector('.playlist-qr-create'), download=area.querySelector('.playlist-qr-download');
+    const remove=row.querySelector('.playlist-qr-delete-form');
+    create.hidden=hasQr; create.disabled=!valid || row.querySelector('.text-bg-warning') !== null;
+    download.hidden=!hasQr;
+    if(hasQr) download.href=option.dataset.qrPng; else download.removeAttribute('href');
+    if(remove){remove.hidden=!hasQr;if(hasQr)remove.action=option.dataset.qrDelete;}
   }
+  function updateVideoQrActions(select) {
+    const row=select.closest('tr.library-target-row'), area=select.closest('.video-qr-actions');
+    if(!area || !row)return;
+    const option=select.selectedOptions[0], hasQr=!!(option && option.dataset.qrPng);
+    const create=area.querySelector('.video-qr-create'), download=area.querySelector('.video-qr-download');
+    const extra=row.querySelector('.video-qr-extra');
+    const remove=extra.querySelector('.video-qr-delete'), retarget=extra.querySelector('.video-qr-retarget');
+    const toggle=extra.querySelector('.video-qr-retarget-toggle');
+    create.hidden=hasQr;create.disabled=!select.value || area.dataset.videoUsable!=='1';
+    download.hidden=!hasQr;
+    if(hasQr){download.href=option.dataset.qrPng;remove.action=option.dataset.qrDelete;retarget.action=option.dataset.qrRetarget;}
+    else{download.removeAttribute('href');retarget.hidden=true;toggle.setAttribute('aria-expanded','false');}
+    remove.hidden=!hasQr;toggle.hidden=!hasQr;
+  }
+  function setupQrActions(scope) {
+    scope.querySelectorAll('.playlist-qr-course-select').forEach(updatePlaylistQrActions);
+    scope.querySelectorAll('.video-qr-course-select').forEach(updateVideoQrActions);
+  }
+  document.addEventListener('click',event=>{
+    const b=event.target.closest('.video-qr-retarget-toggle');if(!b)return;
+    const form=b.closest('.video-qr-extra').querySelector('.video-qr-retarget');
+    form.hidden=!form.hidden;b.setAttribute('aria-expanded', String(!form.hidden));
+  });
+  // Trả về HTML của đúng trang đang xem nhưng không tải lại trang,
+  // giữ cả vị trí cuộn và dòng đang thao tác.
+  document.addEventListener('submit',async event=>{
+    const form=event.target.closest('form[data-library-qr-form]');
+    if(!form || event.defaultPrevented)return;
+    event.preventDefault();
+    if(form.dataset.busy==='1')return;
+    form.dataset.busy='1';
+    const row=form.closest('tr.library-target-row'), rowId=row?.id;
+    const originalY=window.scrollY, originalX=window.scrollX;
+    const btn=form.querySelector('button[type="submit"],button:not([type])');
+    if(btn)btn.disabled=true;
+    try{
+      const response=await fetch(form.action,{method:'POST',body:new FormData(form),credentials:'same-origin',redirect:'follow',headers:{'X-Requested-With':'XMLHttpRequest'},cache:'no-store'});
+      if(!response.ok || new URL(response.url).pathname!=='/videos')throw Error('Không thể xác nhận thao tác.');
+      const newPage=new DOMParser().parseFromString(await response.text(),'text/html');
+      const newRow=newPage.getElementById(rowId);
+      if(newRow && row){
+        row.replaceWith(newRow);
+        const picker=newRow.querySelector('.playlist-course-form');
+        if(picker)picker.querySelectorAll('.playlist-course-check').forEach(c=>c.addEventListener('change',()=>updateCoursePicker(picker)));
+        setupQrActions(newRow);
+        const notice=document.createElement('div');notice.className='small fw-semibold text-success mt-1';notice.role='status';
+        notice.textContent='Đã xử lý. Trạng thái mã QR đã được cập nhật.';
+        newRow.querySelector('td:last-child')?.append(notice);
+      }else if(row){
+        const notice=document.createElement('div');notice.className='small text-success';notice.textContent='Đã thực hiện thao tác. Có thể cần điều chỉnh bộ lọc để xem dữ liệu mới.';
+        row.querySelector('td:last-child')?.append(notice);
+      }
+      window.scrollTo(originalX,originalY);
+    }catch(error){
+      let notice=form.querySelector('.qr-action-error');
+      if(!notice){notice=document.createElement('div');notice.className='qr-action-error small text-danger';form.append(notice);}
+      notice.textContent='Chưa xác nhận được thao tác; hãy kiểm tra lại trước khi thử tiếp.';
+      if(btn)btn.disabled=false;
+    }finally{form.dataset.busy='0';}
+  });
   document.addEventListener('change', function (event) {
     if (event.target.matches('.playlist-qr-course-select')) updatePlaylistQrActions(event.target);
+    if (event.target.matches('.video-qr-course-select')) updateVideoQrActions(event.target);
   });
-  document.querySelectorAll('.playlist-qr-course-select').forEach(updatePlaylistQrActions);
+  setupQrActions(document);
 })();
 </script>
 

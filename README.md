@@ -1,3 +1,16 @@
+# Thay đổi v4.3.10 – ngày 20/10/2026
+
+- **Kho video học liệu:** danh sách playlist và danh sách video có phân trang độc lập **5 dòng/trang** (truy vấn lấy đúng 5 dòng tại máy chủ); bộ lọc và số trang hiện tại được giữ khi thao tác.
+- **Video đã có QR theo môn được chọn:** thay nút Tạo QR bằng **Tải mã QR**, đồng thời thêm **Xóa** và **Đổi video đích**. Sau khi tạo/xóa/đổi, cập nhật tại dòng hiện tại bằng yêu cầu nền để giữ vị trí, không tải lại toàn bộ trang.
+- **Playlist đã có QR:** có **Tải mã QR**, **Xóa mã QR**, bỏ **Mở thử** khỏi Kho video học liệu. Playlist không còn trên YouTube vẫn được báo rõ trong thư viện khi có liên kết môn học; QR lịch sử không bị xóa tự động; không tạo QR mới cho nguồn đã mất.
+- **Quản lý mã QR động:** phục hồi **Tải mã QR (PNG)** và **Mở thử** ở bảng Kho mã QR cho cả video/playlist; vẫn cho Xóa và Đổi video đích (chỉ QR video).
+- **Thống kê khai thác:** mục 1 dùng danh sách chọn **Người thực hiện** thay cho ô tìm người/học liệu; mục 2 bỏ ô Tên video/học liệu, đưa hai nút lọc lên ngang hàng bộ lọc. Quyền xem thống kê và 10 dòng/trang không đổi.
+- **Google OAuth:** khi Google trả lỗi `mismatching_state`/CSRF, không bỏ kiểm tra state; thử đăng nhập an toàn lại tối đa một lần nếu phiên còn hợp lệ, nếu tiếp tục lỗi thì hướng dẫn kiểm tra cookie, tab đăng nhập, BASE_URL và SECRET_KEY. Không thể cam kết hết lỗi khi chưa kiểm tra môi trường Render.
+- **Dữ liệu:** không thêm bảng/cột mới so với v4.3.9; không xóa dữ liệu PostgreSQL, không tự thay mã/slug QR đã in.
+- **Kiểm thử:** Jinja, Python, JavaScript, hiển thị giao diện v4.3.10 và một số tình huống SQLite mô phỏng đạt; chưa kiểm thử trực tiếp Google/Render.
+
+---
+
 # Thay đổi v4.3.9 – Kho học liệu, ZIP theo môn và nhật ký lỗi (20/10/2026)
 
 - **Môn học/Mô đun:** phóng to cảnh báo chỉ tạo một môn một lần; làm đậm thông tin về dạy nhiều lớp và tránh môn trùng tên.

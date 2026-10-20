@@ -615,7 +615,7 @@ def videos_library_return(anchor: str, raw_query: str = "") -> str:
 
     A stable row anchor stops the browser jumping back to the beginning after POST.
     """
-    allowed = {"q", "status", "assignment", "playlist_id", "p_q", "p_assignment"}
+    allowed = {"q", "status", "assignment", "playlist_id", "p_q", "p_assignment", "p_page", "v_page"}
     query = urlencode([(key, value[:150]) for key, value in parse_qsl((raw_query or "")[:1200])
                        if key in allowed and value
                        and not ((anchor.startswith("playlist-") and key == "p_assignment") or
@@ -1026,6 +1026,7 @@ def register_routes(app):
             flash("Chưa cấu hình GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET.", "danger")
             return redirect(url_for("index"))
         redirect_uri = f"{base_url()}/auth/callback"
+        session["oauth_retry_attempt"] = 1 if request.args.get("retry") == "1" else 0
         session["after_login"] = safe_next(request.args.get("next")) or url_for("index")
         return oauth.google.authorize_redirect(
             redirect_uri,
@@ -1090,6 +1091,7 @@ def register_routes(app):
             )
             db.session.commit()
             session["user_id"] = user.id
+            session.pop("oauth_retry_attempt", None)
             session.permanent = True
             # Mã GV được cấp sau khi xác nhận thông tin hồ sơ (cả Quản trị viên).
             # Tự đồng bộ trên màn chờ mỗi lần đăng nhập thành công.
@@ -1103,13 +1105,27 @@ def register_routes(app):
             return redirect(url_for("sync_wait"))
         except Exception as exc:
             db.session.rollback()
+            # OAuth state là biện pháp phòng chống CSRF: tuyệt đối KHÔNG bỏ qua
+            # kiểm tra state hoặc tự chấp nhận callback không khớp.
+            error_text = str(exc)
+            state_failed = "mismatching_state" in error_text.lower() or (
+                "csrf warning" in error_text.lower() and "state" in error_text.lower())
             db.session.add(ErrorLog(module="oauth", action="Đăng nhập hệ thống", course_module="Hệ thống", message="Đăng nhập Google thất bại", details=str(exc)))
             record_functional_test(
                 "AUTH_LOGIN", "Đăng nhập Google", False, owner_id=None,
                 note=f"OAuth thất bại: {exc}"
             )
             db.session.commit()
-            flash(f"Đăng nhập thất bại: {exc}", "danger")
+            if state_failed:
+                # Tab cũ, nhấn đăng nhập nhiều lần hoặc cookie phiên thay đổi
+                # làm state không còn khớp. Thử lại đúng MỘT lần, sau đó dừng.
+                if not session.get("oauth_retry_attempt", 0) and "after_login" in session:
+                    flash("Phiên xác thực Google đã thay đổi. Hệ thống sẽ khởi tạo lại đăng nhập an toàn một lần.", "warning")
+                    return redirect(url_for("login", retry=1))
+                session.pop("oauth_retry_attempt", None)
+                flash("Phiên đăng nhập Google không khớp. Vui lòng đóng các tab đăng nhập cũ, bật cookie và thử lại bằng một tab duy nhất.", "danger")
+            else:
+                flash("Đăng nhập Google không thành công. Vui lòng thử lại; nếu tiếp diễn, báo quản trị viên kiểm tra Nhật ký lỗi.", "danger")
             return redirect(url_for("index"))
 
     @app.route("/profile/setup", methods=["GET", "POST"])
@@ -1398,23 +1414,37 @@ def register_routes(app):
             q = q.filter(~Video.id.in_(assigned_video_ids))
         elif assignment == "assigned":
             q = q.filter(Video.id.in_(assigned_video_ids))
-        videos = q.order_by(Video.published_at.desc().nullslast(), Video.id.desc()).all()
+        video_total = q.count()
+        video_pages = max(1, (video_total + 4) // 5)
+        video_page = min(max(1, request.args.get("v_page", 1, type=int)), video_pages)
+        videos = q.order_by(Video.published_at.desc().nullslast(), Video.id.desc()).offset((video_page-1)*5).limit(5).all()
 
         # --- Bộ lọc playlist ---
         playlist_search = request.args.get("p_q", "").strip()
         playlist_assignment = request.args.get("p_assignment", "").strip()
-        pq = visible_playlist_query(user)
-        if playlist_search:
-            pq = pq.filter(Playlist.title.ilike(f"%{playlist_search}%"))
         assigned_playlist_ids = (
             db.session.query(CoursePlaylist.playlist_id)
             .filter(CoursePlaylist.course_id.in_(owned_course_ids), CoursePlaylist.active.is_(True))
         )
+        # Vẫn liệt kê các playlist đã mất trên YouTube nếu còn được gán môn,
+        # để giáo viên nhìn thấy tình trạng và ngừng QR nhưng không xóa lịch sử.
+        pq = (Playlist.query.join(YouTubeChannel).filter(
+            YouTubeChannel.user_id == user.id,
+            or_(Playlist.is_available.is_(True), Playlist.id.in_(assigned_playlist_ids)),
+            or_(YouTubeChannel.uploads_playlist_id.is_(None),
+                Playlist.youtube_playlist_id != YouTubeChannel.uploads_playlist_id)))
+        if playlist_search:
+            pq = pq.filter(Playlist.title.ilike(f"%{playlist_search}%"))
         if playlist_assignment == "unassigned":
             pq = pq.filter(~Playlist.id.in_(assigned_playlist_ids))
         elif playlist_assignment == "assigned":
             pq = pq.filter(Playlist.id.in_(assigned_playlist_ids))
-        playlists = pq.order_by(Playlist.title).all()
+        # Playlist đã bị xóa/ẩn trên YouTube vẫn hiện để GV xử lý QR cũ,
+        # nhưng không cho tạo QR mới từ nguồn không khả dụng.
+        playlist_total = pq.count()
+        playlist_pages = max(1, (playlist_total + 4) // 5)
+        playlist_page = min(max(1, request.args.get("p_page", 1, type=int)), playlist_pages)
+        playlists = pq.order_by(Playlist.is_available.desc(), Playlist.title).offset((playlist_page-1)*5).limit(5).all()
 
         courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
         return render_template(
@@ -1428,6 +1458,12 @@ def register_routes(app):
             available_playlists=available_playlists,
             playlist_search=playlist_search,
             playlist_assignment=playlist_assignment,
+            video_page=video_page, video_pages=video_pages, video_total=video_total,
+            playlist_page=playlist_page, playlist_pages=playlist_pages, playlist_total=playlist_total,
+            library_args=request.args.to_dict(flat=True),
+            retarget_videos=visible_video_query(user).filter(
+                Video.is_available.is_(True), Video.privacy_status != "private",
+                Video.embeddable.isnot(False)).order_by(Video.title).all(),
             courses=courses,
         )
 
@@ -2196,6 +2232,14 @@ def register_routes(app):
         return redirect(url_for("qr_page"))
 
 
+    def qr_action_destination(qr, fallback="qr"):
+        """Redirect back to originating library row, never to a supplied external URL."""
+        if request.form.get("return_to") == "videos":
+            row = request.form.get("library_row", "")
+            if re.fullmatch(r"(?:video|playlist)-[0-9]+", row):
+                return videos_library_return(row, request.form.get("return_query", ""))
+        return url_for("qr_page")
+
     @app.post("/qr/<int:qr_id>/retarget")
     @login_required
     def qr_retarget(qr_id):
@@ -2207,14 +2251,14 @@ def register_routes(app):
             abort(404)
         if qr.is_playlist:
             flash("Mã QR playlist tự cập nhật theo nội dung playlist sau mỗi lần đồng bộ YouTube; không đổi video đích theo cách này.", "info")
-            return redirect(url_for("qr_page"))
+            return redirect(qr_action_destination(qr))
         video_id = request.form.get("video_id", type=int)
         video = visible_video_query(user).filter(Video.id == video_id).first() if video_id else None
         if not video:
             abort(403)
         if not video_is_usable(video):
             flash("Video mới chưa đủ điều kiện sử dụng.", "warning")
-            return redirect(url_for("qr_page"))
+            return redirect(qr_action_destination(qr))
         linked = CourseVideo.query.filter_by(qr_id=qr.id).first()
         if qr.course_id and not linked:
             course = db.session.get(Course, qr.course_id)
@@ -2228,7 +2272,7 @@ def register_routes(app):
                 db.session.flush()
             if target_link.qr_id and target_link.qr_id != qr.id:
                 flash("Video đích đã có QR riêng ở môn học này.", "warning")
-                return redirect(url_for("qr_page"))
+                return redirect(qr_action_destination(qr))
             target_link.manual_added = True
             target_link.qr_id = qr.id
             linked = target_link
@@ -2237,7 +2281,7 @@ def register_routes(app):
             if duplicate and duplicate.id != linked.id:
                 if duplicate.qr_id and duplicate.qr_id != qr.id:
                     flash("Video mới đã có một mã QR khác trong cùng môn học/ mô đun; không thể tạo liên kết trùng.", "warning")
-                    return redirect(url_for("qr_page"))
+                    return redirect(qr_action_destination(qr))
                 db.session.delete(duplicate)
                 db.session.flush()
             linked.video_id = video.id
@@ -2254,7 +2298,7 @@ def register_routes(app):
         )
         db.session.commit()
         flash("Đã đổi video đích. Mã QR và đường dẫn không thay đổi.", "success")
-        return redirect(url_for("qr_page"))
+        return redirect(qr_action_destination(qr))
 
     @app.post("/qr/<int:qr_id>/delete")
     @login_required
@@ -2266,7 +2310,7 @@ def register_routes(app):
             abort(403)
         if not qr.active:
             flash("Mã QR này đã được xóa khỏi danh sách sử dụng.", "info")
-            return redirect(url_for("qr_page"))
+            return redirect(qr_action_destination(qr))
         qr.active = False
         # Gỡ liên kết hiện hành để video trong môn học/ mô đun có thể tạo một QR mới nếu cần.
         for link in CourseVideo.query.filter_by(qr_id=qr.id).all():
@@ -2278,7 +2322,7 @@ def register_routes(app):
             f"Đã xóa mã QR “{qr.title}” khỏi danh sách sử dụng. Lịch sử quét/xem trước đây vẫn được giữ nguyên.",
             "success",
         )
-        return redirect(url_for("qr_page"))
+        return redirect(qr_action_destination(qr))
 
     @app.post("/qr/delete-all")
     @login_required
@@ -2734,7 +2778,20 @@ def register_routes(app):
         test_period = (request.args.get("sys_period") or "30").strip()
         test_feature = (request.args.get("sys_feature") or "").strip()
         test_result = (request.args.get("sys_result") or "all").strip()
-        test_search = (request.args.get("sys_search") or "").strip()[:120]
+        sys_actor_id = request.args.get("sys_actor", type=int)
+        if user.role != "admin" and sys_actor_id is not None and sys_actor_id != user.id:
+            abort(403)
+        test_search = ""  # Không còn tra cứu theo học liệu ở mục hoạt động hệ thống.
+        actor_query = User.query.filter(User.id.in_(
+            db.session.query(FunctionalTestRun.owner_id).filter(
+                FunctionalTestRun.source == "automatic",
+                FunctionalTestRun.participant_code.is_(None),
+                ~FunctionalTestRun.case_code.in_(["QR_SCAN", "QR_PLAYLIST_SCAN"]),
+                FunctionalTestRun.owner_id.isnot(None)
+            )))
+        if user.role != "admin":
+            actor_query = actor_query.filter(User.id == user.id)
+        system_actors = actor_query.order_by(User.name, User.email).all()
         test_from = (request.args.get("sys_from") or "").strip()
         test_to = (request.args.get("sys_to") or "").strip()
         test_page = max(1, request.args.get("sys_page", 1, type=int))
@@ -2766,12 +2823,8 @@ def register_routes(app):
             test_query = test_query.filter(FunctionalTestRun.passed.is_(True))
         elif test_result == "fail":
             test_query = test_query.filter(FunctionalTestRun.passed.is_(False))
-        if test_search:
-            like = f"%{test_search}%"
-            matching_users = db.session.query(User.id).filter(or_(User.name.ilike(like), User.email.ilike(like)))
-            test_query = test_query.filter(or_(
-                FunctionalTestRun.case_name.ilike(like), FunctionalTestRun.note.ilike(like),
-                FunctionalTestRun.owner_id.in_(matching_users)))
+        if sys_actor_id is not None:
+            test_query = test_query.filter(FunctionalTestRun.owner_id == sys_actor_id)
         tests_total = test_query.count()
         tests_pass = test_query.filter(FunctionalTestRun.passed.is_(True)).count()
         tests_fail = tests_total - tests_pass
@@ -2787,7 +2840,7 @@ def register_routes(app):
         test_rows = [{"test": t, "actor": (f"{t.owner.name or 'Giảng viên'} ({t.owner.email})" if t.owner else "Chưa xác định"),
                       "evidence": t.note or "—"} for t in tests]
         test_filter_args = {"sys_period": test_period, "sys_feature": test_feature,
-                            "sys_result": test_result, "sys_search": test_search,
+                            "sys_result": test_result, "sys_actor": sys_actor_id or "",
                             "sys_from": test_from, "sys_to": test_to}
 
         # Không tính bản ghi quét mã hoặc xem video của SV vào hoạt động hệ thống.
@@ -2998,6 +3051,7 @@ def register_routes(app):
             test_pages=test_pages, test_page_numbers=test_page_numbers,
             test_period=test_period, test_feature=test_feature,
             test_feature_options=test_feature_options, test_result=test_result,
+            system_actors=system_actors, sys_actor_id=sys_actor_id,
             test_search=test_search, test_from=test_from, test_to=test_to,
             test_filter_args=test_filter_args)
 

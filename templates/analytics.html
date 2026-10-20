@@ -51,8 +51,11 @@
           <option value="pass" {{ 'selected' if test_result == 'pass' else '' }}>Đạt</option>
           <option value="fail" {{ 'selected' if test_result == 'fail' else '' }}>Không đạt</option>
         </select></div>
-      <div class="col-md-5 col-xl-3"><label class="form-label fw-semibold">Người thực hiện / Học liệu</label>
-        <input class="form-control form-control-sm" name="sys_search" value="{{ test_search }}" placeholder="Nhập từ khóa tìm kiếm"></div>
+      <div class="col-md-5 col-xl-3"><label class="form-label fw-semibold">Người thực hiện</label>
+        <select class="form-select form-select-sm" name="sys_actor">
+          <option value="">Tất cả người thực hiện</option>
+          {% for person in system_actors %}<option value="{{ person.id }}" {{ 'selected' if sys_actor_id == person.id else '' }}>{{ person.name }} ({{ person.email }})</option>{% endfor %}
+        </select></div>
       <div class="col-md-4 col-xl-3 d-flex flex-wrap gap-1">
         <button class="btn btn-primary btn-sm">Lọc kết quả</button>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sv_args) }}#hoat-dong-he-thong">Xóa lọc</a>
@@ -102,14 +105,13 @@
         <select class="form-select form-select-sm" name="sv_period" id="svPeriod">
           {% for value,label in [('today','Hôm nay'),('7','7 ngày'),('30','30 ngày'),('all','Tất cả'),('custom','Khoảng ngày')] %}
           <option value="{{ value }}" {{ 'selected' if sv_period == value else '' }}>{{ label }}</option>{% endfor %}</select></div>
-      <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Tên video/học liệu</label>
-        <input class="form-control form-control-sm" name="media_search" value="{{ media_search }}" placeholder="Nhập tên học liệu"></div>
+
+      <div class="col-md-auto d-flex gap-2 flex-wrap align-items-end"><button class="btn btn-primary btn-sm">Lọc kết quả</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sys_args) }}#khai-thac-sinh-vien">Xóa lọc</a></div>
       <div class="col-12 {{ '' if sv_period == 'custom' else 'd-none' }}" id="svCustomDates">
         <div class="d-flex flex-wrap gap-2"><div><label class="form-label small">Từ ngày</label><input class="form-control form-control-sm" type="date" name="sv_from" value="{{ sv_from }}"></div>
         <div><label class="form-label small">Đến ngày</label><input class="form-control form-control-sm" type="date" name="sv_to" value="{{ sv_to }}"></div></div>
       </div>
-      <div class="col-12 d-flex gap-2 flex-wrap"><button class="btn btn-primary btn-sm">Lọc kết quả</button>
-        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sys_args) }}#khai-thac-sinh-vien">Xóa lọc</a></div>
     </form>
     {% if pending_notice %}<div class="alert alert-info">{{ pending_notice }}</div>{% endif %}
     {% if participant_stats %}<div class="d-flex flex-wrap gap-3 small mb-3">
