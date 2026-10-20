@@ -41,8 +41,8 @@ assert s.select_one('table.qr-inventory-table button[data-bs-target="#qr-edit-30
 assert not s.select('form form')
 for btn in s.select('a.btn,button.btn'):
     label=btn.get_text(' ',strip=True)
-    if 'Tải' in label and 'mã QR' in label:assert label=='Tải mã QR',label
-    if 'Xóa' in label and 'mã QR' in label:assert label=='Xóa mã QR',label
+    if 'Tải' in label and 'mã QR' in label:assert label in ('Tải mã QR','Tải tất cả mã QR'),label
+    if 'Xóa' in label and 'mã QR' in label:assert label in ('Xóa mã QR','Xóa tất cả mã QR'),label
 html=env.get_template('youtube.html').render(**ctx)
 assert 'Playlist đã đồng bộ' not in html
 assert 'Kết nối nhiều kênh' in html

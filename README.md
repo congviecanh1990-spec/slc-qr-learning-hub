@@ -1,3 +1,12 @@
+# Thay đổi v4.3.12 – ngày 20/10/2026
+
+- **Mã QR động – thao tác hàng loạt:** Nút tải ZIP trong **Kho mã QR** có nhãn **Tải tất cả mã QR**. Khi lọc môn học/mô đun, tệp ZIP chỉ gồm QR của môn đang chọn; khi xem tất cả, ZIP sắp theo thư mục từng môn. Nút xóa hàng loạt là **Xóa tất cả mã QR** và vẫn cần xác nhận; lưu ý **xóa toàn bộ trong phạm vi quản lý**, không phụ thuộc bộ lọc hiện tại. Nút của từng QR vẫn là **Tải mã QR** và **Xóa mã QR**.
+- **Toàn Web App:** chữ trong các nút chức năng là màu đen, in đậm ở trạng thái bình thường, rê chuột, nhấn và vô hiệu hóa. Các nút nền tối chuyển sang nền nhạt cùng tông để giữ độ tương phản với chữ đen. Các tên menu (Kênh YouTube, Giảng viên, Môn học/Mô đun, Danh sách lớp đang dạy, v.v.) hiển thị in đậm. Menu đang chọn vẫn nổi bật màu đỏ.
+- **Không thay đổi nghiệp vụ, URL mã QR, vai trò hoặc PostgreSQL** so với v4.3.11. Không cần xóa dữ liệu. Giao diện cần tải lại trình duyệt sau triển khai để nhận CSS mới.
+- Kiểm thử: cú pháp Python, biên dịch 22 mẫu Jinja, kiểm tra nội dung các nút tải/xóa và menu, cú pháp CSS, các ca kiểm thử hồi quy offline. Chưa kiểm thử trên Render/PostgreSQL thực tế.
+
+---
+
 # Thay đổi v4.3.11 – ngày 20/10/2026
 
 - Bổ sung **Đổi playlist đích** cho mã QR playlist ở **Kho video học liệu** và **Mã QR động**. Giảng viên chọn playlist mới đã đồng bộ trong kênh kết nối và còn video hợp lệ. Giữ nguyên mã QR/slug/đường dẫn và bản ghi quét/xem cũ, không tạo QR mới.

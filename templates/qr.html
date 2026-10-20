@@ -29,10 +29,10 @@
 <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
   <h3 class="h4 mb-0">Kho mã QR</h3>
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if not qrs else '' }}" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}" title="{{ 'Tải ZIP theo môn đang lọc' if selected_course_id is not none else 'Tải ZIP tất cả mã QR theo từng môn học/mô đun' }}">Tải mã QR</a>
+    <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if not qrs else '' }}" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}" title="{{ 'Tải tất cả mã QR thuộc môn học/mô đun đang lọc' if selected_course_id is not none else 'Tải tất cả mã QR, sắp xếp theo thư mục môn học/mô đun' }}">Tải tất cả mã QR</a>
     <form method="post" action="{{ url_for('delete_all_qrs') }}" onsubmit="return confirm('Xóa toàn bộ mã QR đã tạo của tài khoản này? Các mã QR đã in sẽ ngừng hoạt động, nhưng lịch sử quét/xem trước đây vẫn được giữ lại.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-outline-danger btn-sm" {{ 'disabled' if not total_qrs else '' }} title="Xóa toàn bộ mã QR thuộc các môn đang quản lý">Xóa mã QR</button><span class="text-danger small align-self-center">Toàn bộ mã QR</span>
+      <button class="btn btn-outline-danger btn-sm" {{ 'disabled' if not total_qrs else '' }} title="Xóa tất cả mã QR thuộc phạm vi quản lý, không phụ thuộc bộ lọc hiện tại">Xóa tất cả mã QR</button>
     </form>
   </div>
 </div>

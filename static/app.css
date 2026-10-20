@@ -36,3 +36,73 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 
 /* Tránh quy tắc .btn của Bootstrap hiển thị link khi đã ẩn. */
 .playlist-qr-actions [hidden]{display:none!important}
+
+/* v4.3.12: các mục điều hướng in đậm và dễ nhìn; mục đang mở vẫn màu đỏ. */
+.navbar .nav-link{font-weight:800!important;color:#17191d!important}
+.navbar .nav-link:hover{color:var(--brand)!important}
+.navbar .nav-link.nav-current{color:#dc3545!important;font-weight:900!important}
+
+/* v4.3.12: chữ của tất cả nút chức năng màu đen, nét đậm ở mọi trạng thái.
+   Các nền nút đặc trước đây quá sẫm so với chữ đen, vì vậy dùng nền nhạt
+   cùng tông để bảo đảm dễ đọc, đồng thời giữ viền nhận diện chức năng. */
+.btn:not(.btn-close){
+  color:#111111!important;
+  font-weight:800!important;
+}
+.btn:not(.btn-close):is(:hover,:focus,:active,.active,:disabled,.disabled){
+  color:#111111!important;
+  font-weight:800!important;
+}
+.btn-primary{
+  --bs-btn-bg:#f6dfe2;
+  --bs-btn-border-color:#8f171d;
+  --bs-btn-hover-bg:#eed0d5;
+  --bs-btn-hover-border-color:#6f1015;
+  --bs-btn-active-bg:#e7bfc5;
+  --bs-btn-active-border-color:#6f1015;
+  --bs-btn-disabled-bg:#f6dfe2;
+  --bs-btn-disabled-border-color:#9e7b7d;
+}
+.btn-danger{
+  --bs-btn-bg:#f9dddd;
+  --bs-btn-border-color:#b42332;
+  --bs-btn-hover-bg:#f3c7c8;
+  --bs-btn-hover-border-color:#a51d2c;
+  --bs-btn-active-bg:#edb9bd;
+  --bs-btn-active-border-color:#a51d2c;
+}
+.btn-secondary{
+  --bs-btn-bg:#e6e8ec;
+  --bs-btn-border-color:#6c757d;
+  --bs-btn-hover-bg:#d6dae0;
+  --bs-btn-hover-border-color:#495057;
+  --bs-btn-active-bg:#cbd1d8;
+  --bs-btn-active-border-color:#495057;
+}
+.btn-outline-primary{
+  --bs-btn-hover-bg:#f6dfe2;
+  --bs-btn-hover-border-color:#8f171d;
+  --bs-btn-active-bg:#eecbd1;
+  --bs-btn-active-border-color:#6f1015;
+}
+.btn-outline-secondary{
+  --bs-btn-hover-bg:#e6e8ec;
+  --bs-btn-hover-border-color:#6c757d;
+  --bs-btn-active-bg:#d6dae0;
+}
+.btn-outline-danger{
+  --bs-btn-hover-bg:#f9dddd;
+  --bs-btn-hover-border-color:#b42332;
+  --bs-btn-active-bg:#f3c7c8;
+}
+.btn-outline-warning{
+  --bs-btn-hover-bg:#fff0c4;
+  --bs-btn-active-bg:#ffe5a4;
+}
+.btn-outline-success{
+  --bs-btn-hover-bg:#d7f3df;
+  --bs-btn-active-bg:#bfe8cb;
+}
+/* Phân trang cũng dùng chữ đen đậm; trang hiện tại dùng nền nhạt dễ đọc. */
+.pagination .page-link{color:#111111!important;font-weight:800}
+.pagination .page-item.active .page-link{background-color:#f1d8db;border-color:#8f171d;color:#111111!important}
