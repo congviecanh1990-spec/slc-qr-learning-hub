@@ -1,65 +1,29 @@
-# CẬP NHẬT v4.3.5 — GIAO DIỆN THỐNG KÊ, MÃ QR, GIẢNG VIÊN, NGHIỆM THU
+# Web App v4.3.8 – Cập nhật chức năng bàn giao môn học/mô đun
 
-**Cập nhật trên dịch vụ cũ:** Sao lưu dữ liệu trước, giải nén ZIP, tải toàn bộ nội dung gốc lên nhánh `main` của GitHub như trước, chờ Render báo **Live**. Giữ nguyên Render service, PostgreSQL và cấu hình OAuth; không phải đặt lại dữ liệu.
+## Trước khi cập nhật
 
-**Kiểm tra sau khi deploy:**
-1. Thống kê khai thác: chọn môn học, lớp, tên học liệu; kiểm tra hai bảng hiện “Tên sinh viên (Mã)” (ba số cuối) và “Tên học liệu số”; phiên xem từ QR playlist phải hiện đúng video được xem. Nhóm chưa quét/chưa hoàn thành vẫn lọc được theo lớp và học liệu.
-2. Mã QR động: kiểm tra số playlist/QR không có số 0 thừa; kho mã QR hiển thị bảng; thử tải PNG, mở thử, đổi video đích hoặc xóa QR thử nghiệm (chỉ khi thật sự muốn xóa).
-3. Giảng viên: nút “Lưu” ở phần hiệu chỉnh khoa/bộ môn, không còn ghi chú dài dưới bảng.
-4. Đánh giá nghiệm thu: thử chuyển trang 1, 2..., lựa chọn 7 ngày và bộ lọc “Không đạt”; kiểm tra mỗi trang nhiều nhất 10 bản ghi, tổng và tỷ lệ tính cho tất cả bản ghi khớp lọc chứ không riêng trang đang xem; chọn Khoảng ngày tùy chọn để lọc theo ngày.
+1. **Sao lưu PostgreSQL hiện tại** qua mục **Sao lưu & khôi phục** (Quản trị viên) và lưu bản ZIP ở nơi an toàn. Tuyệt đối không đưa ZIP sao lưu (có dữ liệu riêng tư/token mã hóa) lên GitHub.
+2. Giải nén tệp mã nguồn v4.3.8, cập nhật **các tệp nằm bên trong** lên nhánh GitHub Render đang chạy. Không đưa nguyên tệp ZIP mã nguồn lên nhánh để thay cho các tệp mã nguồn.
+3. Để Render chạy bản triển khai mới. **Không chọn xóa dữ liệu** hoặc tạo PostgreSQL mới. Với biến môi trường mặc định `AUTO_CREATE_DB=1`, hệ thống sẽ tự tạo **bảng mới `course_transfers`** để ghi lịch sử bàn giao; không xóa bảng/dữ liệu cũ.
 
-**Ghi chú về nhật ký playlist:** Sự kiện quét QR playlist diễn ra *trước* khi chọn phát video, nên nhật ký lượt quét sẽ ghi nhận truy cập danh sách video. Bảng **Quá trình xem video** mới là nơi xác định chính xác tên video đã phát; không đánh đồng việc mở playlist với đã xem mọi video.
+## Kiểm thử sau khi Render deploy thành công
 
-**Kiểm tra đã thực hiện khi đóng gói:** Biên dịch cú pháp Python, phân tích 22 template Jinja, thử kết xuất các trang thay đổi với dữ liệu mẫu và kiểm tra toàn vẹn ZIP. Môi trường đóng gói không có Flask/Authlib/SQLAlchemy nên **chưa kiểm thử tích hợp trên Render**.
+1. Đăng nhập tài khoản **Quản trị viên** → **Môn học/mô đun** → **Bàn giao môn học/mô đun cho giảng viên khác**.
+2. Chọn môn đang thuộc GV A, chọn GV B, tích xác nhận rồi bấm **Bàn giao môn học/mô đun**. Không chọn giảng viên đã có môn cùng tên; phải xử lý trùng môn trước.
+3. Xác nhận GV A không còn nhìn thấy môn bàn giao trong danh sách môn và không có quyền sửa/xóa/tải QR của môn đó; QR riêng không gắn môn của GV A vẫn thuộc GV A.
+4. Đăng nhập GV B: môn được bàn giao hiển thị, lớp học giữ nguyên, QR cũ xuất hiện trong **Mã QR động**; có thể tải PNG và ZIP QR theo môn, mở thử và (nếu cần) đổi video đích sang video thuộc kênh GV B đã kết nối.
+5. **Quan trọng:** Lấy một mã QR đã in/đã phát hành từ trước, quét bằng tài khoản SV thử: URL `/q/...` không đổi và học liệu vẫn phát nếu video/playlist YouTube nguồn còn khả dụng. Kiểm tra lịch sử quét/xem trước và sau bàn giao trong **Thống kê khai thác**.
+6. Quản trị viên kiểm tra mục **Lịch sử bàn giao gần đây**. Kiểm tra chức năng sao lưu có tệp `course_transfers.json`.
+7. Nếu video/playlist cũ do kênh GV A sở hữu, **không xóa tài khoản/kênh YouTube GV A** khi còn được tham chiếu. Hệ thống ngăn xóa giảng viên có nguồn học liệu hoặc mã QR đã bàn giao. Bàn giao **không chuyển quyền sở hữu kênh YouTube**.
 
----
+## Quy tắc được áp dụng
 
-# CẬP NHẬT v4.3.4 — SỬA VIDEO KHÔNG THUỘC KÊNH VẪN XUẤT HIỆN
+- **Bàn giao có hiệu lực ngay**, chỉ Quản trị viên thực hiện và có xác nhận trước khi lưu; lưu lịch sử người bàn giao, GV cũ, GV mới và ngày thực hiện.
+- **Mã môn, mã QR, slug/URL QR, hình ảnh QR, lớp áp dụng, liên kết học liệu, lịch sử quét/xem và tác giả QR ban đầu đều không thay đổi.** Quyền quản lý QR thuộc môn đi theo GV đang phụ trách.
+- Không tự tạo thêm QR từ video/playlist chưa thuộc kênh YouTube GV B kết nối. Những QR cũ đã tạo từ nguồn GV A vẫn tiếp tục hoạt động và có thể được GV B quản lý.
+- Tài khoản/kênh YouTube gốc vẫn cần duy trì; nếu video bị xóa, chuyển riêng tư hoặc khóa nhúng ở YouTube, **Web App không thể đảm bảo video tiếp tục phát**, dù hình QR vẫn giữ nguyên.
+- Với dự án cài đặt `AUTO_CREATE_DB=0`, cần thực hiện tạo bảng `course_transfers` theo `models.py` bằng quy trình triển khai CSDL của đơn vị trước khi sử dụng chức năng này.
 
-**Nguyên nhân:** Playlist YouTube có thể chứa video do người khác đăng; phiên bản cũ lấy tất cả video trong playlist và gắn vào kho của giảng viên. Khi gỡ video khỏi playlist, bản ghi cũ có thể vẫn còn.
+## Mức độ kiểm thử
 
-**Cách cập nhật:** Giữ nguyên repository GitHub, Render Service và PostgreSQL. Sao lưu trước khi cập nhật; giải nén gói mới, upload/commit toàn bộ file vào nhánh `main`, đợi Render báo **Live**. Không thay đổi các biến Google OAuth.
-
-**Kiểm tra sau triển khai:**
-1. Đăng nhập bằng tài khoản giảng viên; vào **Kênh YouTube** và bấm **Đồng bộ lại** (nếu hệ thống đã tự đồng bộ khi đăng nhập thì cũng có thể bấm để chắc chắn hoàn tất).
-2. Vào **Kho video học liệu** và tìm các tiêu đề ngoại lai trước đây. Chúng không được xuất hiện nữa; chỉ video thực sự do kênh YouTube mà giảng viên đã kết nối tải lên được hiển thị.
-3. Kiểm tra danh sách video trong các playlist, trạng thái gán môn học/mô đun và QR. Những QR đã phát hành vẫn được giữ nguyên; mã QR video ngoại lai cũ có gắn môn học sẽ có nhắc nhở cần rà soát.
-4. Thử tạo QR một video thực sự thuộc kênh. Nếu có kênh thứ hai, xác nhận các video của kênh này cũng xuất hiện sau khi đồng bộ tương ứng.
-5. Kiểm tra lịch sử quét và xem trước đó không mất.
-
-**Lưu ý:** Bản v4.3.4 thêm một cột `uploader_channel_id` có thể để trống đối với dữ liệu cũ chưa được đối soát; nhấn **Đồng bộ lại** để kiểm chứng nguồn video qua YouTube API. Không tự động xóa video, QR hoặc nhật ký. Bản này chỉ sửa lỗi nguồn video, không thêm lịch cron trả phí.
-
-**Kiểm thử kỹ thuật:** Có kiểm thử logic đồng bộ bằng mô phỏng, kiểm tra cú pháp Python và Jinja. Chưa xác nhận đầy đủ Google OAuth, API YouTube và PostgreSQL trực tiếp trên Render; cần kiểm tra thực tế sau deploy.
-
----
-
-# HƯỚNG DẪN CẬP NHẬT WEB APP v4.3.3 TRÊN RENDER
-
-Bản này kế thừa v4.3.2, **không xóa hoặc tạo lại PostgreSQL, không cần thay biến môi trường Google OAuth**.
-
-1. Giữ bản ZIP v4.3.2 làm bản dự phòng và chủ động sao lưu dữ liệu qua chức năng **Sao lưu & khôi phục** trước khi cập nhật.
-2. Giải nén ZIP v4.3.3; vào repository GitHub hiện có `congviecanh1990-spec/slc-qr-learning-hub`, nhánh `main`.
-3. Dùng **Add file → Upload files**, tải các file/thư mục ở *gốc thư mục đã giải nén* lên; ghi đè các tệp tương ứng; kiểm tra đã có các thay đổi trong `app.py`, `templates/classes.html`, `templates/identify.html`, `templates/viewer.html`, `templates/playlist_viewer.html`, rồi **Commit changes**.
-4. Vào Render để theo dõi triển khai tự động; chỉ thử nghiệm khi trạng thái **Live** và log không báo lỗi.
-5. Mở tài khoản GV bộ môn: vào **Danh sách lớp đang dạy**; chỉ còn bảng các lớp, không có form “Thêm lớp đang dạy”. Thử tải Excel ban đầu ở lớp chưa có danh sách (nếu có quyền).
-6. Vào **Môn học/Mô đun** và kiểm tra thao tác tạo/chọn lớp vẫn hoạt động.
-7. Với mã QR đã gán môn và lớp có SV đang học: dùng trình duyệt ẩn danh quét QR, nhập tên lớp, chọn đúng họ tên (mã SV), xem học liệu. Kiểm tra nhật ký quét có mã SV và lớp đã chọn.
-8. Thử quét cùng QR trên cùng trình duyệt một lần nữa và thử **Đổi sinh viên** để bảo đảm không tự dùng danh tính của SV trước.
-9. Thử lớp không được gán với môn, SV bảo lưu/nghỉ học, QR không hoạt động: hệ thống không cho chọn người không hợp lệ và không ghi lượt xem thành công giả.
-
-## Ghi chú về dữ liệu cá nhân
-Việc hiển thị tên kèm mã SV theo danh sách lớp làm tăng khả năng lộ dữ liệu cho người có mã QR. Đây là cách nhận diện tự khai báo, không xác nhận người đang chọn thực sự là SV đó. Cần có thông báo cho sinh viên, đánh giá quyền riêng tư và cân nhắc biện pháp xác thực phù hợp trước khi áp dụng chính thức.
-
-## Kiểm tra trước phát hành
-Mã nguồn đã được kiểm tra cú pháp Python và cú pháp template Jinja; chưa được kiểm thử tích hợp Google OAuth, PostgreSQL, YouTube API trên Render trong môi trường đóng gói. Kết quả cuối cùng cần xác nhận sau triển khai.
-
-## Cập nhật v4.3.6 – Kiểm tra sau khi triển khai
-
-1. **Không tạo lại Render Web Service hay PostgreSQL.** Sao lưu dữ liệu trước khi cập nhật, sau đó thay mã nguồn trong repository hiện tại và chờ Render hiển thị triển khai thành công.
-2. Vào **Đánh giá nghiệm thu** bằng Quản trị viên: kiểm tra bảng **Theo dõi chỉ tiêu và kết quả nghiệm thu** còn đầy đủ; bên dưới chỉ có **1. Hiệu quả quy trình**, **2. Khảo sát người dùng**.
-3. Vào **Thống kê khai thác**: mục 1 ghi hoạt động GV/quản trị viên, không hiển thị hoạt động quét của SV; mục 2 là **một bảng 8 cột**.
-4. Thử lọc mỗi mục và bấm trang **2**: đúng 10 dòng/trang, chuyển trang không đẩy về đầu trang; thao tác ở mục này không đổi trang/bộ lọc của mục kia.
-5. Dùng SV quét một QR video rồi xem, thử tiếp QR playlist gồm ít nhất hai video; kiểm tra tên từng video đã xem, số lượt quét QR không tăng theo số video, thời lượng và trạng thái xuất hiện phù hợp. Thử quét nhưng chưa xem và thử lọc nhóm chưa quét/chưa hoàn thành.
-6. Kiểm tra hai chức năng xuất dữ liệu **lượt quét CSV** và **quá trình xem CSV** vẫn hoạt động; dữ liệu cũ không bị xóa.
-
-Các phép kiểm tra cú pháp và mô phỏng không thay thế thử nghiệm tích hợp thật trên Render.
+Đã chạy kiểm tra cú pháp Python, 22 mẫu Jinja2, kiểm thử SQLite trên mô hình dữ liệu thực về quy tắc quyền QR khi bàn giao và bàn giao tiếp lần hai, cùng các bài kiểm tra giao diện hiện có. **Chưa kiểm thử Google OAuth/PostgreSQL/Render trực tiếp trong môi trường thực tế**.

@@ -11,7 +11,7 @@ import zipfile
 import time
 from datetime import timedelta, datetime, date
 from functools import wraps
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qsl, urlencode
 
 import qrcode
 import requests
@@ -32,7 +32,7 @@ from models import (
     db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ClassGroup,
     SchoolClass, Student, ClassEnrollment, CourseClass, Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
     HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
-    ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, utcnow
+    ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, utcnow
 )
 from security import encrypt_json, decrypt_json
 from services.youtube import sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels
@@ -556,7 +556,28 @@ def video_is_from_connected_channel(video: Video | None) -> bool:
 
 
 def course_owned_by_user(course: Course, user: User) -> bool:
-    return bool(course.owner_id == user.id)
+    return bool(course and user and course.owner_id == user.id)
+
+
+def managed_qr_scope(user_id: int):
+    """Phân quyền theo GV hiện phụ trách môn, KHÔNG theo tác giả QR ban đầu.
+
+    QR không gắn môn vẫn do người tạo quản lý. Điều kiện dùng thống nhất cho
+    tải PNG/ZIP, sửa/xóa QR, thống kê quét/xem và Dashboard.
+    """
+    owned_courses = db.session.query(Course.id).filter(Course.owner_id == user_id)
+    return or_(
+        and_(QrCode.course_id.is_(None), QrCode.owner_id == user_id),
+        and_(QrCode.course_id.isnot(None), QrCode.course_id.in_(owned_courses)),
+    )
+
+
+def qr_managed_by_user(qr: QrCode, user: User) -> bool:
+    if not qr or not user:
+        return False
+    if qr.course_id is not None:
+        return bool(qr.course and qr.course.owner_id == user.id)
+    return qr.owner_id == user.id
 
 
 def visible_video_query(user: User):
@@ -583,6 +604,20 @@ def visible_playlist_query(user: User):
     return q
 
 
+def videos_library_return(anchor: str, raw_query: str = "") -> str:
+    """Redirect only within the video library, retaining approved filter parameters.
+
+    A stable row anchor stops the browser jumping back to the beginning after POST.
+    """
+    allowed = {"q", "status", "assignment", "playlist_id", "p_q", "p_assignment"}
+    query = urlencode([(key, value[:150]) for key, value in parse_qsl((raw_query or "")[:1200])
+                       if key in allowed and value
+                       and not ((anchor.startswith("playlist-") and key == "p_assignment") or
+                                (anchor.startswith("video-") and key == "assignment"))], doseq=True)
+    target = url_for("videos_page") + (("?" + query) if query else "")
+    return target + "#" + anchor
+
+
 def ensure_course_playlist_link(course: Course, playlist: Playlist, user: User):
     link = CoursePlaylist.query.filter_by(course_id=course.id, playlist_id=playlist.id).first()
     if link:
@@ -607,7 +642,7 @@ def create_qr_for_course_playlist(course: Course, playlist: Playlist, user: User
             existing.playlist_id = playlist.id
             return existing, False
     existing = (QrCode.query
-                .filter_by(owner_id=user.id, course_id=course.id, playlist_id=playlist.id, active=True)
+                .filter_by(course_id=course.id, playlist_id=playlist.id, active=True)
                 .filter(QrCode.target_type == "playlist")
                 .order_by(QrCode.created_at.desc())
                 .first())
@@ -616,6 +651,8 @@ def create_qr_for_course_playlist(course: Course, playlist: Playlist, user: User
             link.qr_id = existing.id
         existing.title = (playlist.title or "Playlist")[:255]
         return existing, False
+    if playlist.channel.user_id != user.id:
+        raise ValueError("Playlist thuộc tài khoản YouTube của giảng viên trước. Mã QR cũ vẫn dùng được, nhưng chỉ được tạo mã mới từ playlist do giảng viên hiện tại kết nối.")
     t0 = time.perf_counter()
     slug = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:12]
     qr = QrCode(
@@ -632,9 +669,10 @@ def create_qr_for_course_playlist(course: Course, playlist: Playlist, user: User
 
 
 def active_qr_for_course_video(course_id: int, video_id: int, owner_id: int):
+    # owner_id giữ lại trong chữ ký tương thích; QR cũ do GV trước tạo vẫn dùng.
     return (QrCode.query
             .join(QrTargetHistory, QrTargetHistory.qr_id == QrCode.id)
-            .filter(QrCode.course_id == course_id, QrCode.owner_id == owner_id, QrCode.active.is_(True),
+            .filter(QrCode.course_id == course_id, QrCode.active.is_(True),
                     QrTargetHistory.video_id == video_id, QrTargetHistory.active_to.is_(None))
             .order_by(QrCode.created_at.desc())
             .first())
@@ -758,6 +796,8 @@ def create_qr_for_course_video(course: Course, video: Video, user: User, link: C
             link.qr_id = existing.id
         existing.title = (video.title or "Video")[:255]
         return existing, False
+    if video.channel.user_id != user.id:
+        raise ValueError("Video thuộc kênh của giảng viên trước. QR đã phát hành vẫn hoạt động; mã QR mới chỉ được tạo từ kênh giảng viên đang phụ trách.")
     t0 = time.perf_counter()
     slug = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:12]
     qr = QrCode(owner_id=user.id, course_id=course.id, slug=slug, title=(video.title or "Video")[:255])
@@ -921,14 +961,14 @@ def register_routes(app):
                   .filter(Video.uploader_channel_id == YouTubeChannel.channel_id).count()
                   if whole_system else visible_video_query(user).count())
         qrs = (QrCode.query.filter_by(active=True).count() if whole_system else
-               QrCode.query.filter_by(owner_id=user.id, active=True).count())
+               QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True)).count())
         courses = (Course.query.filter_by(active=True).count() if whole_system else
                    Course.query.filter_by(owner_id=user.id, active=True).count())
         scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
         watch_q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
         if not whole_system:
-            scan_q = scan_q.filter(QrCode.owner_id == user.id)
-            watch_q = watch_q.filter(QrCode.owner_id == user.id)
+            scan_q = scan_q.filter(managed_qr_scope(user.id))
+            watch_q = watch_q.filter(managed_qr_scope(user.id))
         scans = scan_q.count()
         watch = watch_q.count()
         completed = watch_q.filter(WatchSession.completed.is_(True)).count()
@@ -1384,7 +1424,7 @@ def register_routes(app):
         )
         db.session.commit()
         flash(f"Đã gán {created} video vào môn học/ mô đun “{course.name}”. Bỏ qua {skipped} video đã được gán trước đó.", "success")
-        return redirect(url_for("videos_page"))
+        return redirect(videos_library_return("videos", request.form.get("return_query", "")))
 
     @app.post("/playlists/assign-course")
     @login_required
@@ -1449,7 +1489,64 @@ def register_routes(app):
             f"Đã lưu môn học/ mô đun cho playlist “{playlist.title}”. Video trong playlist được tự động đồng bộ vào các môn học/ mô đun đã chọn.",
             "success",
         )
-        return redirect(url_for("videos_page") + "#playlists")
+        return redirect(videos_library_return(
+            f"playlist-{playlist.id}", request.form.get("return_query", "")
+        ))
+
+    @app.post("/playlists/<int:playlist_id>/qr")
+    @login_required
+    def create_playlist_qr_from_library(playlist_id):
+        user = current_user()
+        playlist = visible_playlist_query(user).filter(Playlist.id == playlist_id).first_or_404()
+        course_id = request.form.get("course_id", type=int)
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        link = CoursePlaylist.query.filter_by(course_id=course.id, playlist_id=playlist.id, active=True).first()
+        if not link:
+            flash("Cần lưu môn học/mô đun áp dụng cho playlist trước khi tạo mã QR.", "warning")
+            return redirect(videos_library_return(f"playlist-{playlist.id}", request.form.get("return_query", "")))
+        qr, was_created = create_qr_for_course_playlist(course, playlist, user, link)
+        record_functional_test(
+            "QR_PLAYLIST_SINGLE", "Tạo mã QR cho một playlist", True, owner_id=user.id,
+            note=f"Kho học liệu: {playlist.title}; môn học/mô đun: {course.name}; tạo mới: {was_created}."
+        )
+        db.session.commit()
+        flash("Đã tạo mã QR cho playlist." if was_created else
+              "Playlist đã có mã QR ở môn học/mô đun này; không tạo mã trùng.",
+              "success" if was_created else "info")
+        return redirect(videos_library_return(f"playlist-{playlist.id}", request.form.get("return_query", "")))
+
+    @app.post("/videos/<int:video_id>/qr")
+    @login_required
+    def create_video_qr_from_library(video_id):
+        user = current_user()
+        video = visible_video_query(user).filter(Video.id == video_id).first_or_404()
+        course_id = request.form.get("course_id", type=int)
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        if not video_is_usable(video):
+            flash("Video chưa đủ điều kiện phát và tạo mã QR. Hãy kiểm tra lại video.", "warning")
+            return redirect(videos_library_return(f"video-{video.id}", request.form.get("return_query", "")))
+        started = time.perf_counter()
+        link, _ = ensure_course_video_link(course, video, user, manual=True)
+        qr, was_created = create_qr_for_course_video(course, video, user, link)
+        elapsed = time.perf_counter() - started
+        record_functional_test(
+            "QR_SINGLE", "Tạo một mã QR", True, owner_id=user.id,
+            note=f"Kho học liệu: {video.title}; môn học/mô đun: {course.name}; tạo mới: {was_created}."
+        )
+        record_webapp_experiment(
+            user.id, "TAO_QR_RIENG", elapsed, operations_count=1, success=True,
+            note=f"Video: {video.title}; tạo mới: {was_created}",
+            processing_seconds=(qr.processing_seconds if was_created else 0.0),
+        )
+        db.session.commit()
+        flash("Đã tạo mã QR cho video." if was_created else
+              "Video đã có mã QR ở môn học/mô đun này; không tạo mã trùng.",
+              "success" if was_created else "info")
+        return redirect(videos_library_return(f"video-{video.id}", request.form.get("return_query", "")))
 
     @app.route("/courses", methods=["GET", "POST"])
     @login_required
@@ -1463,6 +1560,38 @@ def register_routes(app):
                 flash("Vui lòng nhập tên môn học/ mô đun, tên khoa và bộ môn quản lý môn học/ mô đun.", "warning")
             else:
                 try:
+                    normalized_name = re.sub(r"\s+", " ", name).casefold()
+                    same_course = next(
+                        (c for c in Course.query.filter_by(owner_id=user.id, active=True).all()
+                         if re.sub(r"\s+", " ", c.name.strip()).casefold() == normalized_name),
+                        None
+                    )
+                    if same_course:
+                        # Một môn học dùng được cho nhiều lớp; không tạo bản ghi trùng.
+                        normalize = lambda value: re.sub(r"\s+", " ", (value or "").strip()).casefold()
+                        if (normalize(same_course.faculty_name or same_course.unit_name) != normalize(faculty)
+                                or normalize(same_course.department_name) != normalize(department)):
+                            flash(f"Môn học/mô đun ‘{same_course.name}’ đã tồn tại, nhưng tên khoa/bộ môn khác thông tin vừa nhập. "
+                                  "Hãy kiểm tra và chỉnh sửa môn hiện có trước khi thêm lớp; hệ thống không tạo bản sao.", "warning")
+                            return redirect(url_for("courses_page") + f"#course-{same_course.id}")
+                        selected_ids = {int(x) for x in request.form.getlist("school_class_ids") if x.isdigit()}
+                        new_class_name = (request.form.get("new_class_name") or "").strip()
+                        if new_class_name:
+                            school_class, _ = create_or_find_school_class(new_class_name, user)
+                            selected_ids.add(school_class.id)
+                        valid_ids = {cl.id for cl in SchoolClass.query.filter(SchoolClass.active.is_(True),
+                                      SchoolClass.id.in_(selected_ids)).all()} if selected_ids else set()
+                        for class_id in valid_ids:
+                            link = CourseClass.query.filter_by(course_id=same_course.id, school_class_id=class_id).first()
+                            if link:
+                                link.active = True
+                            else:
+                                db.session.add(CourseClass(course_id=same_course.id, school_class_id=class_id,
+                                                           added_by=user.id, active=True))
+                        db.session.commit()
+                        flash(f"Môn học/mô đun ‘{same_course.name}’ đã tồn tại, hệ thống không tạo trùng. "
+                              f"Đã cập nhật lớp áp dụng nếu có chọn lớp mới.", "info")
+                        return redirect(url_for("courses_page") + f"#course-{same_course.id}")
                     # GV không phải tự đặt mã. Tạo mã tạm để lấy ID, sau đó đổi sang mã tự động ổn định.
                     course = Course(
                         owner_id=user.id,
@@ -1502,14 +1631,75 @@ def register_routes(app):
         department_options = sorted({(c.department_name or "").strip() for c in all_owned_courses if (c.department_name or "").strip()}, key=str.casefold)
         available_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
         available_school_classes = SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all()
+        # Quản trị viên có chức năng bàn giao, không chia sẻ quyền này cho GV thường.
+        transfer_courses = (Course.query.filter_by(active=True).order_by(Course.name, Course.id).all()
+                            if user.role == "admin" else [])
+        transfer_lecturers = (User.query.filter(User.role.in_(["admin", "lecturer"]))
+                              .order_by(User.name, User.email).all() if user.role == "admin" else [])
+        transfer_history = (CourseTransfer.query.order_by(CourseTransfer.created_at.desc(), CourseTransfer.id.desc())
+                            .limit(15).all() if user.role == "admin" else [])
         return render_template(
             "courses.html",
             courses=courses,
+            transfer_courses=transfer_courses, transfer_lecturers=transfer_lecturers,
+            transfer_history=transfer_history,
             faculty_options=faculty_options,
             department_options=department_options,
             available_playlists=available_playlists,
             available_school_classes=available_school_classes,
         )
+
+    @app.post("/admin/courses/transfer")
+    @login_required
+    def transfer_course_owner():
+        """Chuyển GV phụ trách, không đổi Course.id/QR.slug/tác giả QR và các log.
+
+        Không nhận ngày tương lai: giao dịch chuyển quyền có hiệu lực ngay, lưu ngày
+        thực hiện để truy vết. Mọi liên kết lớp, video, playlist vẫn nguyên vẹn.
+        """
+        admin = current_user()
+        if admin.role != "admin":
+            abort(403)
+        course_id = request.form.get("course_id", type=int)
+        new_owner_id = request.form.get("new_owner_id", type=int)
+        if request.form.get("confirm_transfer") != "yes":
+            flash("Cần xác nhận bàn giao và giữ nguyên mã QR đã phát hành.", "warning")
+            return redirect(url_for("courses_page") + "#admin-course-transfer")
+        if not course_id or not new_owner_id:
+            flash("Vui lòng chọn môn học/mô đun và giảng viên tiếp nhận.", "warning")
+            return redirect(url_for("courses_page") + "#admin-course-transfer")
+        try:
+            course = Course.query.filter_by(id=course_id, active=True).with_for_update().first()
+            target = db.session.get(User, new_owner_id)
+            if not course or not target or target.role not in {"admin", "lecturer"}:
+                flash("Môn học hoặc giảng viên tiếp nhận không hợp lệ.", "warning")
+                return redirect(url_for("courses_page") + "#admin-course-transfer")
+            if course.owner_id == target.id:
+                flash("Giảng viên được chọn đang phụ trách môn học/mô đun này.", "info")
+                return redirect(url_for("courses_page") + "#admin-course-transfer")
+            normalized = lambda value: re.sub(r"\s+", " ", (value or "").strip()).casefold()
+            duplicate = any(normalized(other.name) == normalized(course.name)
+                            for other in Course.query.filter_by(owner_id=target.id, active=True).all())
+            if duplicate:
+                flash("Giảng viên tiếp nhận đã có môn học/mô đun cùng tên. Cần kiểm tra và xử lý trùng môn trước; "
+                      "hệ thống không tự gộp để tránh làm mất liên kết QR.", "warning")
+                return redirect(url_for("courses_page") + "#admin-course-transfer")
+            previous_owner_id = course.owner_id
+            course.owner_id = target.id
+            db.session.add(CourseTransfer(
+                course_id=course.id, previous_owner_id=previous_owner_id,
+                new_owner_id=target.id, changed_by=admin.id, effective_on=utcnow().date()))
+            record_functional_test(
+                "COURSE_TRANSFER", "Bàn giao môn học/mô đun", True, owner_id=admin.id,
+                note=f"Môn: {course.name} ({course.code}); GV cũ ID {previous_owner_id}; GV mới: {target.name or target.email}; giữ QR và lịch sử.")
+            db.session.commit()
+            flash(f"Đã bàn giao môn “{course.name}” cho {target.name or target.email}. "
+                  "Mã QR đã phát hành, địa chỉ QR, lớp, video, playlist và lịch sử quét/xem được giữ nguyên. "
+                  "Giảng viên mới quản lý QR thuộc môn; tài khoản YouTube gốc không bị chuyển quyền.", "success")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Không bàn giao được môn học/mô đun: {exc}", "danger")
+        return redirect(url_for("courses_page") + "#admin-course-transfer")
 
     @app.post("/courses/<int:course_id>/classes/new")
     @login_required
@@ -1546,6 +1736,11 @@ def register_routes(app):
         if not name or not faculty or not department or max(len(name), len(faculty), len(department)) > 255:
             flash("Vui lòng nhập đầy đủ tên môn học/mô đun, khoa và bộ môn hợp lệ.", "warning")
             return redirect(url_for("courses_page"))
+        normalized_name = re.sub(r"\s+", " ", name).casefold()
+        if any(c.id != course.id and re.sub(r"\s+", " ", c.name.strip()).casefold() == normalized_name
+               for c in Course.query.filter_by(owner_id=user.id, active=True).all()):
+            flash("Đã tồn tại môn học/mô đun cùng tên. Hãy dùng một môn cho nhiều lớp, không đổi thành tên trùng.", "warning")
+            return redirect(url_for("courses_page") + f"#course-{course.id}")
         for field, before, after in (("name", course.name, name),
                                      ("faculty_name", course.faculty_name, faculty),
                                      ("department_name", course.department_name, department)):
@@ -1720,6 +1915,13 @@ def register_routes(app):
                 # Không sinh QR mới từ bản ghi video không đúng nguồn của phiên bản cũ.
                 skipped += 1
                 continue
+            # GV mới vẫn sử dụng QR cũ từ kênh GV trước; không tự tạo QR mới
+            # cho nguồn YouTube chưa được GV mới kết nối.
+            existing = (db.session.get(QrCode, link.qr_id) if link.qr_id else
+                        active_qr_for_course_video(course.id, video.id, user.id))
+            if video.channel.user_id != user.id and not (existing and existing.active):
+                skipped += 1
+                continue
             qr, was_created = create_qr_for_course_video(course, video, user, link)
             if was_created:
                 created += 1
@@ -1765,6 +1967,11 @@ def register_routes(app):
             if not playlist or not playlist.is_available:
                 skipped += 1
                 continue
+            existing = (db.session.get(QrCode, link.qr_id) if link.qr_id else
+                        QrCode.query.filter_by(course_id=course.id, playlist_id=playlist.id, active=True).first())
+            if playlist.channel.user_id != user.id and not (existing and existing.active):
+                skipped += 1
+                continue
             qr, was_created = create_qr_for_course_playlist(course, playlist, user, link)
             if was_created:
                 created += 1
@@ -1798,14 +2005,10 @@ def register_routes(app):
         course = db.session.get(Course, course_id) or abort(404)
         if not course_owned_by_user(course, user):
             abort(403)
-        qrs = []
-        seen = set()
-        for link in CourseVideo.query.filter_by(course_id=course.id).filter(CourseVideo.qr_id.isnot(None)).all():
-            if link.qr and link.qr.active and link.qr.id not in seen:
-                qrs.append(link.qr); seen.add(link.qr.id)
-        for link in CoursePlaylist.query.filter_by(course_id=course.id, active=True).filter(CoursePlaylist.qr_id.isnot(None)).all():
-            if link.qr and link.qr.active and link.qr.id not in seen:
-                qrs.append(link.qr); seen.add(link.qr.id)
+        # Bao gồm mọi QR đang hoạt động thuộc môn học/mô đun (cả QR đã tách
+        # khỏi liên kết học liệu sau chỉnh sửa playlist). Không bỏ sót QR đã phát hành.
+        qrs = (QrCode.query.filter_by(course_id=course.id, active=True)
+               .order_by(QrCode.created_at, QrCode.id).all())
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1880,10 +2083,26 @@ def register_routes(app):
                 flash("Đã tạo mã QR động thành công.", "success")
             return redirect(url_for("qr_page"))
 
-        qrs = QrCode.query.filter_by(owner_id=user.id, active=True).order_by(QrCode.created_at.desc()).all()
+        selected_course_id = request.args.get("course_id", type=int)
+        courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
+        selected_course = None
+        if selected_course_id is not None and selected_course_id < 0:
+            abort(404)
+        if selected_course_id and selected_course_id > 0:
+            selected_course = next((c for c in courses if c.id == selected_course_id), None)
+            if not selected_course:
+                abort(403)
+        all_qrs = (QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True))
+                   .order_by(QrCode.created_at.desc()).all())
+        if selected_course_id is None:
+            qrs = all_qrs
+        elif selected_course_id == 0:
+            qrs = [q for q in all_qrs if q.course_id is None]
+        else:
+            qrs = [q for q in all_qrs if q.course_id == selected_course_id]
         # Đồng bộ tên QR theo đúng tiêu đề nguồn hiện tại: video hoặc playlist.
         title_changed = False
-        for existing_qr in qrs:
+        for existing_qr in all_qrs:
             if existing_qr.is_playlist:
                 if existing_qr.playlist and existing_qr.playlist.title:
                     exact_title = existing_qr.playlist.title[:255]
@@ -1898,41 +2117,6 @@ def register_routes(app):
         if title_changed:
             db.session.commit()
 
-        videos = visible_video_query(user).filter(
-            Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False)
-        ).order_by(Video.title).all()
-        courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
-        course_stats = []
-        playlist_stats = []
-        course_playlist_options = []
-        for course in courses:
-            links = CourseVideo.query.filter_by(course_id=course.id).all()
-            total = len(links)
-            has_qr = sum(1 for link in links if link.qr_id and link.qr and link.qr.active)
-            usable_missing = sum(1 for link in links if not link.qr_id and video_is_usable(link.video)
-                                 and video_is_from_connected_channel(link.video))
-            needs_retarget = sum(
-                1 for link in links
-                if link.qr_id and link.qr and link.qr.active and not video_is_usable(active_video_for_qr(link.qr))
-            )
-            course_stats.append({
-                "course": course, "total": total, "has_qr": has_qr,
-                "missing": usable_missing, "needs_retarget": needs_retarget,
-            })
-
-            plinks = CoursePlaylist.query.filter_by(course_id=course.id, active=True).all()
-            p_total = len(plinks)
-            p_has_qr = sum(1 for link in plinks if link.qr_id and link.qr and link.qr.active)
-            p_missing = sum(1 for link in plinks if (not link.qr_id or not link.qr or not link.qr.active) and link.playlist and link.playlist.is_available)
-            p_unavailable = sum(1 for link in plinks if not link.playlist or not link.playlist.is_available)
-            playlist_stats.append({
-                "course": course, "total": p_total, "has_qr": p_has_qr,
-                "missing": p_missing, "unavailable": p_unavailable,
-                "names": [link.playlist.title for link in plinks if link.playlist],
-            })
-            for link in plinks:
-                if link.playlist and link.playlist.is_available:
-                    course_playlist_options.append(link)
         qr_needs_review = set()
         for q in qrs:
             if q.course_id and not q.is_playlist:
@@ -1940,9 +2124,15 @@ def register_routes(app):
                 if target and (not video_is_from_connected_channel(target) or
                                not CourseVideo.query.filter_by(course_id=q.course_id, video_id=target.id).first()):
                     qr_needs_review.add(q.id)
+        # Danh sách video thay thế vẫn cần cho nút Đổi video đích trong Kho mã QR.
+        videos = visible_video_query(user).filter(
+            Video.is_available.is_(True), Video.privacy_status != "private",
+            Video.embeddable.isnot(False)
+        ).order_by(Video.title).all()
         return render_template(
-            "qr.html", qr_needs_review=qr_needs_review, qrs=qrs, videos=videos, courses=courses, course_stats=course_stats,
-            playlist_stats=playlist_stats, course_playlist_options=course_playlist_options,
+            "qr.html", qr_needs_review=qr_needs_review, qrs=qrs, videos=videos, courses=courses,
+            selected_course=selected_course, selected_course_id=selected_course_id,
+            total_qrs=len(all_qrs),
         )
 
     @app.post("/qr/playlist")
@@ -1955,6 +2145,9 @@ def register_routes(app):
             abort(403)
         if not link.playlist or not link.playlist.is_available:
             flash("Playlist hiện không còn khả dụng trên YouTube. Hãy đồng bộ lại kênh hoặc chọn playlist khác.", "warning")
+            return redirect(url_for("qr_page"))
+        if link.playlist.channel.user_id != user.id and not (link.qr and link.qr.active):
+            flash("Playlist này thuộc kênh của giảng viên trước, không thể tạo QR mới khi chưa kết nối nguồn. Các QR cũ vẫn hoạt động.", "warning")
             return redirect(url_for("qr_page"))
         qr, was_created = create_qr_for_course_playlist(link.course, link.playlist, user, link)
         record_functional_test(
@@ -1971,7 +2164,7 @@ def register_routes(app):
     def qr_retarget(qr_id):
         qr = db.session.get(QrCode, qr_id) or abort(404)
         user = current_user()
-        if qr.owner_id != user.id:
+        if not qr_managed_by_user(qr, user):
             abort(403)
         if not qr.active:
             abort(404)
@@ -2032,7 +2225,7 @@ def register_routes(app):
         """Ngừng sử dụng một QR nhưng giữ log/lịch sử để phục vụ nghiên cứu."""
         qr = db.session.get(QrCode, qr_id) or abort(404)
         user = current_user()
-        if qr.owner_id != user.id:
+        if not qr_managed_by_user(qr, user):
             abort(403)
         if not qr.active:
             flash("Mã QR này đã được xóa khỏi danh sách sử dụng.", "info")
@@ -2054,7 +2247,7 @@ def register_routes(app):
     @login_required
     def delete_all_qrs():
         user = current_user()
-        qrs = QrCode.query.filter_by(owner_id=user.id, active=True).all()
+        qrs = QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True)).all()
         if not qrs:
             flash("Không có mã QR nào để xóa.", "info")
             return redirect(url_for("qr_page"))
@@ -2075,7 +2268,7 @@ def register_routes(app):
     def qr_png(qr_id):
         qr = db.session.get(QrCode, qr_id) or abort(404)
         user = current_user()
-        if qr.owner_id != user.id:
+        if not qr_managed_by_user(qr, user):
             abort(403)
         if not qr.active:
             abort(404)
@@ -2089,7 +2282,7 @@ def register_routes(app):
     @login_required
     def qr_download_all():
         user = current_user()
-        qrs = QrCode.query.filter_by(owner_id=user.id, active=True).all()
+        qrs = QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True)).all()
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -2119,7 +2312,7 @@ def register_routes(app):
         preview_mode = bool(
             request.args.get("preview") == "1"
             and signed_in_user
-            and (signed_in_user.role == "admin" or qr.owner_id == signed_in_user.id)
+            and (signed_in_user.role == "admin" or qr_managed_by_user(qr, signed_in_user))
         )
         tracking_enabled = not preview_mode
 
@@ -2200,7 +2393,7 @@ def register_routes(app):
                         course_id=qr.course_id, qr_id=qr.id, video_id=None, success=success,
                     ))
                     record_functional_test(
-                        "QR_PLAYLIST_SCAN", "Quét mã QR playlist và mở học liệu", success, owner_id=qr.owner_id,
+                        "QR_PLAYLIST_SCAN", "Quét mã QR playlist và mở học liệu", success, owner_id=(qr.course.owner_id if qr.course else qr.owner_id),
                         note=(f"{playlist.title if playlist else qr.title} – "
                               f"{qr.course.name if qr.course else 'Chưa xác định môn học/mô đun'}"),
                         participant_code=pcode if role == "SV" else None,
@@ -2237,7 +2430,7 @@ def register_routes(app):
                     success=success,
                 ))
                 record_functional_test(
-                    "QR_SCAN", "Quét mã QR và mở học liệu", success, owner_id=qr.owner_id,
+                    "QR_SCAN", "Quét mã QR và mở học liệu", success, owner_id=(qr.course.owner_id if qr.course else qr.owner_id),
                     note=(f"{video.title if video else qr.title} – "
                           f"{qr.course.name if qr.course else 'Chưa xác định môn học/mô đun'}"),
                     participant_code=pcode if role == "SV" else None,
@@ -2427,7 +2620,7 @@ def register_routes(app):
         qr_q = QrCode.query.filter(QrCode.active.is_(True), QrCode.course_id.isnot(None))
         if user.role != "admin":
             course_q = course_q.filter(Course.owner_id == user.id)
-            qr_q = qr_q.filter(QrCode.owner_id == user.id)
+            qr_q = qr_q.filter(managed_qr_scope(user.id))
         course_options = course_q.order_by(Course.name).all()
         qr_options = qr_q.order_by(QrCode.course_id, QrCode.title).all()
         if user.role == "admin":
@@ -2665,8 +2858,8 @@ def register_routes(app):
                 .join(QrCode, WatchSession.qr_id == QrCode.id)
                 .where(WatchSession.role == "SV", ScanLog.id.is_(None)))
             if user.role != "admin":
-                scan_with_video = scan_with_video.where(QrCode.owner_id == user.id)
-                orphan_video = orphan_video.where(QrCode.owner_id == user.id)
+                scan_with_video = scan_with_video.where(managed_qr_scope(user.id))
+                orphan_video = orphan_video.where(managed_qr_scope(user.id))
             events = union_all(scan_with_video, orphan_video).subquery("sv_events")
             class_expr = func.coalesce(ScanLog.class_code, WatchSession.class_code)
             course_expr = func.coalesce(ScanLog.course_id, WatchSession.course_id)
@@ -2756,7 +2949,7 @@ def register_routes(app):
         user = current_user()
         q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id).filter(ScanLog.role == "SV")
         if user.role != "admin":
-            q = q.filter(QrCode.owner_id == user.id)
+            q = q.filter(managed_qr_scope(user.id))
         for s in q.order_by(ScanLog.scanned_at).all():
             w.writerow([s.id, s.participant_code, s.class_code, s.course.code if s.course else "", s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.scanned_at.isoformat(), int(s.success)])
         return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=scan_logs.csv"})
@@ -2770,7 +2963,7 @@ def register_routes(app):
         user = current_user()
         q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
         if user.role != "admin":
-            q = q.filter(QrCode.owner_id == user.id)
+            q = q.filter(managed_qr_scope(user.id))
         for s in q.order_by(WatchSession.started_at).all():
             w.writerow([s.session_key, s.participant_code, s.class_code, s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.started_at.isoformat(), round(s.estimated_watch_seconds, 2), round(s.max_position, 2), round(s.duration_seconds, 2), round(s.completion_percent, 2), int(s.completed)])
         return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=watch_sessions.csv"})
@@ -3423,6 +3616,28 @@ def register_routes(app):
         if lecturer.role != "lecturer":
             flash("Chỉ có thể xóa tài khoản Giảng viên tại chức năng này. Tài khoản Quản trị viên được bảo vệ.", "warning")
             return redirect(url_for("lecturers_page"))
+        # Không được cascade-delete QR đã in và nguồn học liệu bàn giao!
+        # Trường hợp này cần lưu giữ tài khoản nguồn dù GV không còn giảng dạy.
+        handed_off_qr = (QrCode.query.join(Course, Course.id == QrCode.course_id)
+            .filter(QrCode.owner_id == lecturer.id, Course.owner_id != lecturer.id).first())
+        handed_off_playlist = (CoursePlaylist.query.join(Course, Course.id == CoursePlaylist.course_id)
+            .join(Playlist, Playlist.id == CoursePlaylist.playlist_id)
+            .join(YouTubeChannel, YouTubeChannel.id == Playlist.channel_id)
+            .filter(YouTubeChannel.user_id == lecturer.id, Course.owner_id != lecturer.id).first())
+        handed_off_video = (CourseVideo.query.join(Course, Course.id == CourseVideo.course_id)
+            .join(Video, Video.id == CourseVideo.video_id)
+            .join(YouTubeChannel, YouTubeChannel.id == Video.channel_id)
+            .filter(YouTubeChannel.user_id == lecturer.id, Course.owner_id != lecturer.id).first())
+        if handed_off_qr or handed_off_playlist or handed_off_video:
+            flash("Chưa thể xóa giảng viên này: mã QR hoặc học liệu của tài khoản vẫn đang phục vụ môn đã bàn giao. "
+                  "Giữ tài khoản/kênh YouTube để bảo toàn QR đã phát hành và lịch sử khai thác.", "warning")
+            return redirect(url_for("lecturers_page"))
+        active_course_qrs = (QrCode.query.join(Course, Course.id == QrCode.course_id)
+            .filter(Course.owner_id == lecturer.id, QrCode.active.is_(True)).first())
+        if active_course_qrs:
+            flash("Giảng viên này đang phụ trách môn có QR còn hoạt động. "
+                  "Vui lòng bàn giao môn sang giảng viên khác trước khi xóa tài khoản, để mã QR đã in không bị mất.", "warning")
+            return redirect(url_for("lecturers_page"))
         try:
             display = lecturer.name or lecturer.email
             email = lecturer.email
@@ -3661,7 +3876,7 @@ def register_routes(app):
 
 
 
-BACKUP_VERSION = "4.3"
+BACKUP_VERSION = "4.4"
 
 def backup_table_specs():
     """Thứ tự từ bảng cha đến bảng con, dùng chung cho sao lưu, khôi phục, xóa sạch."""
@@ -3674,6 +3889,7 @@ def backup_table_specs():
         ("videos", Video),
         ("playlist_videos", PlaylistVideo),
         ("courses", Course),
+        ("course_transfers", CourseTransfer),
         ("class_groups", ClassGroup),
         ("school_classes", SchoolClass),
         ("homeroom_changes", HomeroomChange),
@@ -3723,14 +3939,14 @@ def restore_from_zip(fileobj):
         if "manifest.json" not in names:
             raise ValueError("Không có manifest.json; đây không phải backup hợp lệ.")
         manifest = json.loads(zf.read("manifest.json"))
-        if manifest.get("backup_version") not in {"2.0", "2.1", "3.0", BACKUP_VERSION}:
+        if manifest.get("backup_version") not in {"2.0", "2.1", "3.0", "4.3", BACKUP_VERSION}:
             raise ValueError("Phiên bản backup không tương thích.")
         payload = {}
         for name, model in backup_table_specs():
             fn = f"{name}.json"
             if fn not in names:
                 # Các bảng bổ sung ở phiên bản sau là tùy chọn để backup cũ vẫn khôi phục được.
-                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes", "connected_google_accounts", "homeroom_changes", "edit_history"}:
+                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes", "connected_google_accounts", "homeroom_changes", "edit_history", "course_transfers"}:
                     payload[name] = []
                     continue
                 raise ValueError(f"Thiếu {fn} trong backup.")
@@ -3782,7 +3998,7 @@ def acceptance_metrics(user):
     """
     scan_q = ScanLog.query.join(QrCode, ScanLog.qr_id == QrCode.id)
     if user.role != "admin":
-        scan_q = scan_q.filter(QrCode.owner_id == user.id)
+        scan_q = scan_q.filter(managed_qr_scope(user.id))
     scans_total = scan_q.count()
     scans_success = scan_q.filter(ScanLog.success.is_(True)).count()
     scan_rate = round(100 * scans_success / scans_total, 1) if scans_total else None
@@ -3819,7 +4035,7 @@ def acceptance_metrics(user):
 
     qr_perf_q = QrCode.query.filter(QrCode.processing_seconds.isnot(None))
     if user.role != "admin":
-        qr_perf_q = qr_perf_q.filter(QrCode.owner_id == user.id)
+        qr_perf_q = qr_perf_q.filter(managed_qr_scope(user.id))
     qr_perf = [q.processing_seconds for q in qr_perf_q.all() if q.processing_seconds is not None]
     processing_values = qr_perf or [x.system_processing_seconds for x in webapp if x.system_processing_seconds is not None]
     avg_processing = sum(processing_values) / len(processing_values) if processing_values else None
@@ -3834,7 +4050,7 @@ def acceptance_metrics(user):
 
     participant_base = db.session.query(ScanLog.participant_code).join(QrCode, ScanLog.qr_id == QrCode.id)
     if user.role != "admin":
-        participant_base = participant_base.filter(QrCode.owner_id == user.id)
+        participant_base = participant_base.filter(managed_qr_scope(user.id))
     # Chỉ tính GV đã thực sự tạo môn học/QR hoặc gán học liệu, không tính đăng nhập
     # quản trị thuần túy. Mỗi GV được tính tối đa một lần kể cả kiêm Admin/GVCN.
     # Sinh viên tham gia được tính theo mã SV thực tế đã quét QR.

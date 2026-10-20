@@ -167,6 +167,22 @@ class Course(db.Model):
     __table_args__ = (UniqueConstraint("owner_id", "code", name="uq_owner_course_code"),)
 
 
+class CourseTransfer(db.Model):
+    """Bàn giao giảng viên phụ trách; khóa môn/QR và tác giả mã QR gốc không đổi."""
+    __tablename__ = "course_transfers"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    previous_owner_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    new_owner_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    changed_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    effective_on = db.Column(db.Date, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    course = db.relationship("Course", backref=db.backref("transfer_history", order_by="CourseTransfer.created_at"))
+    previous_owner = db.relationship("User", foreign_keys=[previous_owner_id])
+    new_owner = db.relationship("User", foreign_keys=[new_owner_id])
+    administrator = db.relationship("User", foreign_keys=[changed_by])
+
+
 class CourseVideo(db.Model):
     __tablename__ = "course_videos"
     id = db.Column(db.Integer, primary_key=True)

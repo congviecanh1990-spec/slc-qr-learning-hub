@@ -42,12 +42,12 @@
   <div class="table-responsive playlist-table-wrap">
     <table class="table table-hover align-middle bg-white">
       <thead><tr>
-        <th>Playlist</th><th>Kênh YouTube</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th>
+        <th>Playlist</th><th>Kênh YouTube</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
       </tr></thead>
       <tbody>
       {% for p in playlists %}
         {% set active_course_ids = p.course_links | selectattr('active') | map(attribute='course_id') | list %}
-        <tr>
+        <tr id="playlist-{{ p.id }}" class="library-target-row">
           <td>
             <div class="fw-semibold">{{ p.title }}</div>
           </td>
@@ -56,6 +56,7 @@
           <td>
             <form method="post" action="{{ url_for('set_playlist_course_assignments', playlist_id=p.id) }}" class="playlist-course-form" data-playlist-id="{{ p.id }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
               {% if courses %}
               <div class="d-flex flex-wrap align-items-center gap-2">
                 <div class="dropdown course-picker" data-bs-auto-close="outside">
@@ -92,9 +93,25 @@
             <span class="badge {{ 'text-bg-success' if p.is_available else 'text-bg-danger' }}">{{ 'Có thể sử dụng' if p.is_available else 'Không còn khả dụng' }}</span>
             {% if p.privacy_status %}<div class="small text-muted mt-1">{{ p.privacy_status }}</div>{% endif %}
           </td>
+          <td>
+            {% set active_links = p.course_links | selectattr('active') | list %}
+            {% if active_course_ids %}
+              <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
+                <select class="form-select form-select-sm" name="course_id" aria-label="Chọn môn học/mô đun tạo QR playlist" required>
+                  {% if active_course_ids|length > 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
+                  {% for l in active_links if l.course.owner_id == me.id and l.course.active %}
+                    <option value="{{ l.course.id }}">{{ l.course.name }}{{ ' – đã có QR' if l.qr and l.qr.active else '' }}</option>
+                  {% endfor %}
+                </select>
+                <button class="btn btn-primary btn-sm" {{ 'disabled' if not p.is_available else '' }}>Tạo mã QR</button>
+              </form>
+            {% else %}<div class="text-muted small">Hãy chọn môn học/mô đun và bấm Lưu trước.</div>{% endif %}
+          </td>
         </tr>
       {% else %}
-        <tr><td colspan="5" class="text-center text-muted py-4">Không có playlist phù hợp bộ lọc. Hãy đồng bộ kênh YouTube nếu chưa có dữ liệu.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted py-4">Không có playlist phù hợp bộ lọc. Hãy đồng bộ kênh YouTube nếu chưa có dữ liệu.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -149,6 +166,7 @@
 
   <form method="post" action="{{ url_for('assign_videos_to_course') }}" id="assignVideoForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
     <div class="card shadow-sm mb-3">
       <div class="card-body d-flex flex-wrap gap-2 align-items-end">
         <div class="flex-grow-1">
@@ -162,31 +180,56 @@
         <span class="text-muted small" id="selectedVideoCount">Đã chọn: 0 video</span>
       </div>
     </div>
+  </form>
 
     <div class="table-responsive">
       <table class="table table-hover align-middle bg-white">
         <thead><tr>
           <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllVideos" title="Chọn tất cả video đang hiển thị"></th>
-          <th>Video học liệu</th><th>Kênh YouTube</th><th>Playlist</th><th>Môn học/ mô đun đã gán</th><th>Khả năng phát</th><th>Trạng thái</th>
+          <th>Video học liệu</th><th>Kênh YouTube</th><th>Playlist</th><th>Môn học/ mô đun đã gán</th><th>Khả năng phát</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
         </tr></thead>
         <tbody>
-        {% for v in videos %}<tr>
-          <td><input class="form-check-input video-check" type="checkbox" name="video_ids" value="{{ v.id }}"></td>
+        {% for v in videos %}<tr id="video-{{ v.id }}" class="library-target-row">
+          <td><input class="form-check-input video-check" type="checkbox" form="assignVideoForm" name="video_ids" value="{{ v.id }}"></td>
           <td><div class="d-flex gap-2 align-items-center">{% if v.thumbnail_url %}<img class="thumb" src="{{ v.thumbnail_url }}" alt="">{% endif %}<div><div class="fw-semibold">{{ v.title }}</div><div class="small text-muted">{{ v.youtube_video_id }}</div></div></div></td>
           <td>{{ v.channel.title }}</td>
           <td>
+            {% set pl_state = namespace(has_playlist=false, has_qr=false) %}
             {% for plink in v.playlist_links if plink.playlist.is_available and plink.playlist.youtube_playlist_id != v.channel.uploads_playlist_id %}
+              {% set pl_state.has_playlist = true %}
               <span class="badge text-bg-light border me-1 mb-1">{{ plink.playlist.title }}</span>
-            {% else %}<span class="text-muted small">Không thuộc playlist</span>{% endfor %}
+            {% endfor %}
+            {% if pl_state.has_playlist %}
+              {% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}
+                {% if link.qr and link.qr.active %}{% set pl_state.has_qr = true %}{% endif %}
+              {% endfor %}
+              <div><span class="badge {{ 'text-bg-success' if pl_state.has_qr else 'text-bg-secondary' }}">{{ 'Đã có mã QR' if pl_state.has_qr else 'Chưa có mã QR' }}</span></div>
+            {% else %}<span class="text-muted small">Không thuộc playlist</span>{% endif %}
           </td>
           <td>{% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}<span class="badge text-bg-light border me-1 mb-1">{{ link.course.name }}</span>{% else %}<span class="text-muted small">Chưa gán</span>{% endfor %}</td>
           <td>{{ 'Có thể phát' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'Cần kiểm tra' }}</td>
           <td><span class="badge {{ 'text-bg-success' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'text-bg-warning' }}">{{ v.status_label }}</span></td>
-        </tr>{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Không có video phù hợp bộ lọc.</td></tr>{% endfor %}
+          <td>
+            <form method="post" action="{{ url_for('create_video_qr_from_library', video_id=v.id) }}" class="d-flex flex-wrap gap-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
+              <select class="form-select form-select-sm" name="course_id" aria-label="Chọn môn học/mô đun tạo QR video" required>
+                {% if courses|length != 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
+                {% for c in courses %}
+                  {% set has_qr = namespace(value=false) %}
+                  {% for link in v.course_links if link.course_id == c.id %}
+                    {% if link.qr and link.qr.active %}{% set has_qr.value=true %}{% endif %}
+                  {% endfor %}
+                  <option value="{{ c.id }}">{{ c.name }}{{ ' – đã có QR' if has_qr.value else '' }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-primary btn-sm" {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
+            </form>
+          </td>
+        </tr>{% else %}<tr><td colspan="8" class="text-center text-muted py-4">Không có video phù hợp bộ lọc.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
-  </form>
 </section>
 {% endblock %}
 

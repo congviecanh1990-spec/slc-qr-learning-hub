@@ -1,6 +1,41 @@
 {% extends 'base.html' %}
 {% block content %}
 <h2 class="mb-3">Quản lý môn học/ mô đun</h2>
+<div class="alert alert-info small">Mỗi môn học/mô đun chỉ cần tạo một lần cho mỗi giảng viên. Khi dạy nhiều lớp, chọn bổ sung các lớp tại cùng một môn học/mô đun; không cần tạo thêm môn học trùng tên.</div>
+{% if me.role == 'admin' %}
+<div id="admin-course-transfer" class="card shadow-sm mb-4 border-primary">
+  <div class="card-header fw-bold">Bàn giao môn học/mô đun cho giảng viên khác (Quản trị viên)</div>
+  <div class="card-body">
+    <p class="small text-muted mb-3">Bàn giao có hiệu lực ngay. Giữ nguyên mã môn học, lớp áp dụng, mã QR đã in và toàn bộ lịch sử khai thác. Kênh YouTube vẫn thuộc tài khoản đã kết nối ban đầu.</p>
+    <form method="post" action="{{ url_for('transfer_course_owner') }}" class="row g-2 align-items-end" onsubmit="return confirm('Xác nhận bàn giao môn học? QR đã phát hành vẫn hoạt động và giảng viên mới sẽ tiếp nhận quyền quản lý môn/QR.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-lg-5"><label class="form-label fw-bold">Môn học/mô đun cần bàn giao</label>
+        <select name="course_id" class="form-select" required><option value="">-- Chọn môn học/mô đun --</option>
+          {% for c in transfer_courses %}<option value="{{ c.id }}">{{ c.name }} – {{ c.owner.name or c.owner.email }} ({{ c.code }})</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-4"><label class="form-label fw-bold">Giảng viên tiếp nhận</label>
+        <select name="new_owner_id" class="form-select" required><option value="">-- Chọn giảng viên --</option>
+          {% for gv in transfer_lecturers %}<option value="{{ gv.id }}">{{ gv.name or gv.email }}{% if gv.lecturer_code %} ({{ gv.lecturer_code }}){% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-3"><div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="confirm_transfer" value="yes" id="confirm-transfer" required><label class="form-check-label small" for="confirm-transfer">Giữ nguyên mã QR và lịch sử</label></div>
+        <button class="btn btn-primary w-100" type="submit">Bàn giao môn học/mô đun</button></div>
+    </form>
+    {% if transfer_history %}
+      <details class="mt-3"><summary class="fw-semibold small">Lịch sử bàn giao gần đây</summary>
+        <div class="table-responsive mt-2"><table class="table table-sm table-striped">
+          <thead><tr><th>Ngày</th><th>Môn học/mô đun</th><th>Giảng viên cũ</th><th>Giảng viên mới</th><th>Người thực hiện</th></tr></thead>
+          <tbody>{% for t in transfer_history %}<tr><td>{{ t.effective_on.strftime('%d/%m/%Y') }}</td>
+            <td>{{ t.course.name if t.course else '—' }}</td><td>{{ (t.previous_owner.name or t.previous_owner.email) if t.previous_owner else '—' }}</td>
+            <td>{{ (t.new_owner.name or t.new_owner.email) if t.new_owner else '—' }}</td>
+            <td>{{ (t.administrator.name or t.administrator.email) if t.administrator else '—' }}</td></tr>{% endfor %}</tbody>
+        </table></div>
+      </details>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-bold">Thêm môn học/ mô đun</div>
   <div class="card-body">
@@ -33,7 +68,7 @@
         {% for link in c.video_links %}{% if link.qr_id and link.qr and link.qr.active %}{% set ns.video_qr=ns.video_qr+1 %}{% endif %}{% endfor %}
         {% for link in c.playlist_links if link.active %}{% set ns.playlist_total=ns.playlist_total+1 %}{% if link.qr_id and link.qr and link.qr.active %}{% set ns.playlist_qr=ns.playlist_qr+1 %}{% endif %}{% endfor %}
         {% for link in c.school_class_links if link.active %}{% set ns.class_total=ns.class_total+1 %}{% endfor %}
-        <tr>
+        <tr id="course-{{ c.id }}" class="library-target-row">
           <td><strong>{{ c.name }}</strong></td><td><span class="small">{{ c.department_name or 'Chưa cập nhật' }}<br>{{ c.faculty_name or c.unit_name or 'Chưa cập nhật' }}</span></td>
           <td>Video: <strong>{{ c.video_links|length }}</strong><div class="small text-muted">Đã có mã QR: {{ ns.video_qr }}</div></td>
           <td>Playlist: <strong>{{ ns.playlist_total }}</strong><div class="small text-muted">Đã có mã QR: {{ ns.playlist_qr }}</div></td>

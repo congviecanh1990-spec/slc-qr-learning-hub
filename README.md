@@ -1,3 +1,31 @@
+# Thay đổi v4.3.8 – Bàn giao môn học/mô đun (20/10/2026)
+
+- Thêm chức năng **Bàn giao môn học/mô đun** cho tài khoản Quản trị viên tại trang **Môn học/mô đun**; lịch sử bàn giao được lưu ở bảng `course_transfers` và nằm trong bản sao lưu.
+- **Giữ nguyên mã QR đã phát hành**: khóa môn, QR slug/URL, nguồn video/playlist, lớp, lịch sử quét/xem và tác giả QR gốc không bị sửa/xóa. Giáo viên mới được quyền quản lý, tải, cập nhật QR và xem thống kê theo môn được tiếp nhận; giáo viên cũ mất quyền quản lý mã QR thuộc môn đó.
+- Trường hợp GV tiếp nhận đã có môn trùng tên, hệ thống từ chối bàn giao, không âm thầm gộp môn. Quản trị viên xác nhận trước khi thay đổi.
+- Không chuyển kênh YouTube, OAuth/token của giáo viên cũ; cần giữ tài khoản nguồn khi còn video/playlist/QR liên quan môn đã bàn giao. Bảo vệ thao tác xóa giảng viên để không xóa nhầm QR đang được sử dụng.
+- Các QR cũ vẫn phục vụ người học; không tự tạo QR mới từ nguồn video/playlist chưa được giảng viên tiếp nhận kết nối YouTube.
+- **Cập nhật CSDL không phá hủy dữ liệu:** nếu `AUTO_CREATE_DB=1` hệ thống tự thêm bảng `course_transfers`, không sửa/xóa dữ liệu QR cũ. Đã thêm bảng mới vào sao lưu/khôi phục.
+- Bộ kiểm thử tĩnh, Jinja và SQLite chạy đạt; chưa chạy tích hợp trên Render/PostgreSQL/Google OAuth.
+
+---
+
+# Thay đổi v4.3.7 – ngày 20/10/2026
+
+Phiên bản tiếp nối v4.3.6, giữ nguyên cơ sở dữ liệu PostgreSQL và lịch sử quét/xem.
+
+1. **Kho video học liệu → Playlist**: sau khi tích chọn môn và **Lưu**, trang quay lại đúng dòng playlist. Có thêm nút **Tạo mã QR** ngay từng dòng, gắn với môn học/mô đun đã lưu. Nếu playlist gán nhiều môn, GV chọn môn cần tạo QR. Đã tồn tại QR thì không tạo trùng.
+2. **Kho video học liệu → Video**: thêm cột **Mã QR** với nút **Tạo mã QR** và bộ chọn môn học/mô đun. Nếu video chưa gán, thao tác này đồng thời gán riêng video vào môn được chọn. Cột **Playlist** hiển thị **Đã có mã QR** hoặc **Chưa có mã QR** cho video có playlist (dựa vào QR video còn hoạt động); video không thuộc playlist giữ nguyên dòng **Không thuộc playlist**. Khi tạo/lưu xong trở lại đúng dòng.
+3. **Mã QR động**: bỏ hai khối tạo mã “Tạo mã QR tự động theo môn học/mô đun” và “Tạo QR riêng lẻ”; chỉ giữ kho mã, lựa chọn lọc theo môn, tải mã ZIP theo đúng môn, tải từng PNG và ZIP toàn bộ. Vẫn cho xem thử/đổi video đích/ngừng sử dụng.
+4. **Quản lý môn học/mô đun**: không tạo thêm môn trùng tên của cùng GV. Nếu nhập lại cùng môn, khoa, bộ môn, hệ thống dùng môn hiện có và cộng thêm lớp đang chọn, không nhân đôi môn. Nếu khoa/bộ môn không trùng, báo kiểm tra lại trước khi nhập lớp. Giao diện cho phép thêm hoặc bỏ lớp áp dụng tại môn hiện có.
+5. **Chuyển môn sang GV khác**: Đã bổ sung trong v4.3.8, chỉ quản trị viên bàn giao, giữ nguyên QR/slug/đường dẫn và lịch sử; quyền quản lý QR theo người phụ trách hiện tại, YouTube vẫn theo tài khoản gốc.
+
+Không tự xóa mã QR đã in hoặc lịch sử thống kê, không yêu cầu xóa dữ liệu Render/PostgreSQL. Nên sao lưu DB trước khi triển khai chính thức.
+
+Kiểm thử tĩnh: `python -m compileall -q .`, `python tests/test_v437_interface.py`, `python tests/test_youtube_playlist_ownership.py`, `python tests/test_combined_reporting_sql.py`. Để kiểm thử tích hợp các đường POST cần cài dependencies trong `requirements.txt`, kết nối DB thử nghiệm và xác thực Google test.
+
+---
+
 # BỔ SUNG v4.3.5 — Giao diện thống kê, QR và nghiệm thu
 
 - **Thống kê khai thác:** hiển thị “Tên sinh viên (Mã)” với ba chữ số cuối mã SV, tên học liệu số; bỏ cột mã QR. Bộ lọc chọn học liệu bằng tên, không cho lọc tự do theo mã sinh viên. Bảng phiên xem lấy tên video thực tế, kể cả khi phát từ playlist. Mã SV đầy đủ vẫn lưu trong CSDL và vẫn dùng để đối chiếu.
