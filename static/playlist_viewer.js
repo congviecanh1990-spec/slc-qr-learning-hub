@@ -1,72 +1,128 @@
-let player=null, watchKey=null, heartbeatTimer=null, currentIndex=0;
-const cfg=window.SLC_PLAYLIST_VIEWER;
+/* Theo dõi QR playlist: mỗi video có phiên riêng; ghi sự kiện tuần tự, không gán lẫn video. */
+let player = null, watchKey = null, heartbeatTimer = null, currentIndex = 0;
+let startPromise = null, eventQueue = Promise.resolve(), switching = false;
+const cfg = window.SLC_PLAYLIST_VIEWER;
 
-async function api(path,payload){
-  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':cfg.csrf},body:JSON.stringify(payload)});
-  if(!r.ok){throw new Error(await r.text());}
+async function api(path, payload) {
+  const r = await fetch(path, {method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': cfg.csrf},
+    body: JSON.stringify(payload)});
+  if (!r.ok) throw new Error(await r.text());
   return await r.json();
 }
-
-function currentVideo(){return cfg.videos[currentIndex];}
-function stateName(n){if(n===YT.PlayerState.PLAYING)return 'playing';if(n===YT.PlayerState.PAUSED)return 'paused';if(n===YT.PlayerState.ENDED)return 'ended';if(n===YT.PlayerState.BUFFERING)return 'buffering';if(n===YT.PlayerState.CUED)return 'cued';return 'unstarted';}
-
-async function startWatch(){
-  if(cfg.trackingEnabled===false||!player||watchKey)return;
-  const v=currentVideo();
-  try{
-    const data=await api('/api/watch/start',{slug:cfg.slug,video_id:v.id,duration:player.getDuration()||0});
-    watchKey=data.session_key;
-  }catch(e){console.error(e);}
+function currentVideo() { return cfg.videos[currentIndex]; }
+function stateName(n) {
+  if (n === YT.PlayerState.PLAYING) return 'playing';
+  if (n === YT.PlayerState.PAUSED) return 'paused';
+  if (n === YT.PlayerState.ENDED) return 'ended';
+  if (n === YT.PlayerState.BUFFERING) return 'buffering';
+  if (n === YT.PlayerState.CUED) return 'cued';
+  return 'unstarted';
 }
-
-async function sendEvent(type,state){
-  if(cfg.trackingEnabled===false||!watchKey||!player)return;
-  try{await api('/api/watch/event',{session_key:watchKey,event_type:type,state:state,position:player.getCurrentTime()||0,duration:player.getDuration()||0});}catch(e){console.error(e);}
+function playerNumber(getter) {
+  try { const n = Number(getter()); return Number.isFinite(n) && n >= 0 ? n : 0; }
+  catch (_) { return 0; }
 }
-
-async function closeCurrentWatch(){
-  clearInterval(heartbeatTimer);
-  if(watchKey&&player){await sendEvent('leave',stateName(player.getPlayerState()));}
-  watchKey=null;
+function snapshot(key, type, state) {
+  return {session_key: key, event_type: type, state,
+    position: playerNumber(() => player.getCurrentTime()),
+    duration: playerNumber(() => player.getDuration())};
 }
-
-window.onYouTubeIframeAPIReady=function(){
-  const first=currentVideo();
-  player=new YT.Player('player',{
-    width:'100%',height:'100%',videoId:first.youtubeId,
-    host:'https://www.youtube-nocookie.com',
-    playerVars:{playsinline:1,rel:0,modestbranding:1,enablejsapi:1},
-    events:{onReady:onReady,onStateChange:onStateChange}
+async function startWatch() {
+  if (cfg.trackingEnabled === false || !player || watchKey) return;
+  if (!startPromise) {
+    const v = currentVideo();
+    startPromise = api('/api/watch/start', {slug: cfg.slug, video_id: v.id,
+      duration: playerNumber(() => player.getDuration())})
+      .then(data => { watchKey = data.session_key; })
+      .catch(err => console.error('Không thể bắt đầu theo dõi video trong playlist:', err))
+      .finally(() => { startPromise = null; });
+  }
+  await startPromise;
+}
+async function sendEvent(type, state) {
+  if (cfg.trackingEnabled === false || !watchKey || !player) return null;
+  const data = snapshot(watchKey, type, state);
+  const pending = eventQueue.catch(() => {}).then(() => api('/api/watch/event', data));
+  eventQueue = pending.catch(err => console.error('Lỗi ghi nhận tiến trình:', err));
+  return pending.catch(() => null);
+}
+function showEndResult(verified) {
+  const overlay = document.getElementById('endedOverlay');
+  const heading = overlay.querySelector('h3');
+  const description = overlay.querySelector('p');
+  if (verified) {
+    heading.textContent = 'Đã hoàn thành học liệu';
+    description.textContent = 'Hệ thống đã xác nhận thời lượng xem đạt yêu cầu.';
+  } else {
+    heading.textContent = 'Chưa xác nhận hoàn thành';
+    description.textContent = 'Hệ thống chưa ghi nhận đủ thời lượng xem. Vui lòng xem lại video; không tua bỏ qua nội dung.';
+  }
+  overlay.classList.add('show');
+}
+window.onYouTubeIframeAPIReady = function() {
+  player = new YT.Player('player', {
+    width: '100%', height: '100%', videoId: currentVideo().youtubeId,
+    host: 'https://www.youtube-nocookie.com',
+    playerVars: {playsinline: 1, rel: 0, modestbranding: 1, enablejsapi: 1},
+    events: {onReady: () => { void startWatch(); }, onStateChange}
   });
 };
-
-async function onReady(){await startWatch();}
-
-async function onStateChange(ev){
-  const st=stateName(ev.data);
-  if(ev.data===YT.PlayerState.PLAYING){
+async function onStateChange(ev) {
+  if (switching) return;
+  const st = stateName(ev.data);
+  if (ev.data === YT.PlayerState.PLAYING) {
     document.getElementById('endedOverlay').classList.remove('show');
     await startWatch();
-    sendEvent('play',st);
+    await sendEvent('play', st);
     clearInterval(heartbeatTimer);
-    heartbeatTimer=setInterval(()=>sendEvent('heartbeat','playing'),cfg.heartbeat*1000);
-  }else if(ev.data===YT.PlayerState.PAUSED){clearInterval(heartbeatTimer);sendEvent('pause',st);}
-  else if(ev.data===YT.PlayerState.ENDED){clearInterval(heartbeatTimer);sendEvent('ended',st);document.getElementById('endedOverlay').classList.add('show');}
-  else{sendEvent('state',st);}
+    heartbeatTimer = setInterval(() => { void sendEvent('heartbeat', 'playing'); }, cfg.heartbeat * 1000);
+  } else if (ev.data === YT.PlayerState.PAUSED) {
+    clearInterval(heartbeatTimer);
+    await startWatch();
+    await sendEvent('pause', st);
+  } else if (ev.data === YT.PlayerState.ENDED) {
+    clearInterval(heartbeatTimer);
+    await startWatch();
+    const result = await sendEvent('ended', st);
+    showEndResult(Boolean(result && result.completed));
+  } else {
+    await startWatch();
+    await sendEvent('state', st);
+  }
 }
-
-async function selectVideo(index){
-  if(index===currentIndex&&player){return;}
-  await closeCurrentWatch();
-  currentIndex=index;
-  const v=currentVideo();
-  document.getElementById('currentVideoTitle').textContent=v.title;
+async function closeCurrentWatch() {
+  clearInterval(heartbeatTimer);
+  if (startPromise) await startPromise;
+  if (watchKey && player) await sendEvent('leave', stateName(player.getPlayerState()));
+  await eventQueue;
+  watchKey = null;
+}
+async function selectVideo(index) {
+  if (switching || index === currentIndex || index < 0 || index >= cfg.videos.length || !player) return;
+  switching = true;
+  try {
+    await closeCurrentWatch();
+    currentIndex = index;
+    const v = currentVideo();
+    document.getElementById('currentVideoTitle').textContent = v.title;
+    document.getElementById('endedOverlay').classList.remove('show');
+    document.querySelectorAll('.playlist-video-item').forEach((el, i) => el.classList.toggle('active', i === index));
+    player.loadVideoById(v.youtubeId);
+    // Không bắt đầu trước khi metadata/video mới sẵn sàng; PLAYING sẽ gọi startWatch().
+  } finally { switching = false; }
+}
+document.querySelectorAll('.playlist-video-item').forEach(el => el.addEventListener('click',
+  () => { void selectVideo(Number(el.dataset.index)); }));
+function replayVideo() {
   document.getElementById('endedOverlay').classList.remove('show');
-  document.querySelectorAll('.playlist-video-item').forEach((el,i)=>el.classList.toggle('active',i===index));
-  if(player){player.loadVideoById(v.youtubeId);setTimeout(()=>startWatch(),400);}
+  player.seekTo(0, true);
+  player.playVideo();
 }
-
-document.querySelectorAll('.playlist-video-item').forEach((el)=>el.addEventListener('click',()=>selectVideo(Number(el.dataset.index))));
-function replayVideo(){document.getElementById('endedOverlay').classList.remove('show');player.seekTo(0,true);player.playVideo();}
-window.replayVideo=replayVideo;
-window.addEventListener('pagehide',()=>{if(watchKey&&player){fetch('/api/watch/event',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-CSRFToken':cfg.csrf},body:JSON.stringify({session_key:watchKey,event_type:'leave',state:stateName(player.getPlayerState()),position:player.getCurrentTime()||0,duration:player.getDuration()||0})}).catch(()=>{});}});
+window.replayVideo = replayVideo;
+window.addEventListener('pagehide', () => {
+  if (cfg.trackingEnabled === false || !watchKey || !player) return;
+  const data = snapshot(watchKey, 'leave', stateName(player.getPlayerState()));
+  fetch('/api/watch/event', {method: 'POST', keepalive: true, credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': cfg.csrf}, body: JSON.stringify(data)}).catch(() => {});
+});

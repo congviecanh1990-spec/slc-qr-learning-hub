@@ -1,3 +1,14 @@
+# Thay đổi v4.3.13 – ngày 20/10/2026
+
+- **Giao diện:** Bỏ in đậm hàng loạt chữ trên tất cả nút và menu điều hướng. Chữ dùng nét bình thường, giữ màu đen và nền nút sáng như bản trước; menu đang mở vẫn màu đỏ. Nút **Tải tất cả mã QR**, **Xóa tất cả mã QR**, **Tải mã QR**, **Xóa mã QR** không đổi nhãn hoặc chức năng.
+- **Sửa lỗi thống kê 00:00 nhưng Hoàn thành:** Luồng cũ đặt `WatchSession.completed=True` vô điều kiện khi YouTube báo `ended`, ngay cả khi `estimated_watch_seconds=0`; v4.3.13 yêu cầu ghi nhận thời lượng xem thực tế tối thiểu bằng ngưỡng cấu hình `COMPLETION_THRESHOLD` (mặc định 90%) của độ dài video thì mới hoàn thành. Tua đến cuối, sự kiện ended đơn lẻ, video đứng hình hoặc chưa có dữ liệu thời lượng không đủ điều kiện.
+- **Độ dài video:** Nếu trình phát chưa trả `getDuration()` (0 giây), máy chủ dùng `Video.duration_iso` đã đồng bộ từ YouTube để tính mẫu số. Không dùng độ dài video để thay thế cho thời gian SV thực xem.
+- **Trình phát video và playlist:** Các sự kiện play/heartbeat/pause/ended được gửi theo thứ tự, chốt vị trí tại thời điểm gửi; chuyển video trong playlist kết thúc phiên cũ trước khi tạo phiên mới. Thông báo hoàn thành trên giao diện dựa vào kết quả máy chủ xác nhận, không tự đánh dấu khi YouTube kết thúc.
+- **Dữ liệu lịch sử:** Giữ nguyên log trong PostgreSQL, không viết lại thời lượng xem cũ thiếu chứng cứ. Các bản ghi cũ có `completed=True` nhưng không đủ thời gian xác minh sẽ hiển thị **Chưa đủ dữ liệu xác nhận**, không còn được đếm vào tỷ lệ hoàn thành ở Dashboard, bộ lọc Hoàn thành, hoặc xuất CSV kết quả đã hoàn thành. Nếu cần điều chỉnh hồ sơ lịch sử, cần kiểm tra nhật ký sự kiện riêng, không suy đoán.
+- **Triển khai:** Không thêm cột/bảng, không xóa dữ liệu, giữ nguyên mọi mã QR đã phát hành. Sau cập nhật Render nhấn **Ctrl+F5**. Cần chạy thử video dài khoảng 4–5 phút với HSSV thật theo quy trình dưới đây; chưa thử trực tiếp Google OAuth/YouTube/PostgreSQL trên Render.
+
+---
+
 # Thay đổi v4.3.12 – ngày 20/10/2026
 
 - **Mã QR động – thao tác hàng loạt:** Nút tải ZIP trong **Kho mã QR** có nhãn **Tải tất cả mã QR**. Khi lọc môn học/mô đun, tệp ZIP chỉ gồm QR của môn đang chọn; khi xem tất cả, ZIP sắp theo thư mục từng môn. Nút xóa hàng loạt là **Xóa tất cả mã QR** và vẫn cần xác nhận; lưu ý **xóa toàn bộ trong phạm vi quản lý**, không phụ thuộc bộ lọc hiện tại. Nút của từng QR vẫn là **Tải mã QR** và **Xóa mã QR**.

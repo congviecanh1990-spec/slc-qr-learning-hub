@@ -1,4 +1,43 @@
-# Hướng dẫn cập nhật Web App v4.3.12 trên Render
+# Hướng dẫn cập nhật Web App v4.3.13 trên Render
+
+## 1. Sao lưu
+
+Đăng nhập Quản trị viên → **Sao lưu & khôi phục**, tải một bản sao lưu trước khi cập nhật. Không đăng tệp `.env`, dữ liệu sao lưu và khóa Google lên GitHub.
+
+## 2. Cập nhật
+
+Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.13_RENDER.zip`, tải các tệp nguồn lên repository GitHub đang dùng với Render, đợi triển khai thành công. **Không xóa hoặc tạo lại PostgreSQL**. Bản này không thay đổi bảng/cột hay URL mã QR. Sau triển khai nhấn **Ctrl+F5** để nhận CSS/JavaScript mới.
+
+## 3. Kiểm tra giao diện
+
+Mở **Kênh YouTube**, **Kho video học liệu**, **Mã QR động**, **Thống kê khai thác**. Nút và menu phải có nét chữ bình thường, không bị in đậm hàng loạt; mục menu được chọn vẫn có màu đỏ. Nhãn các nút tải/xóa QR và chức năng giữ nguyên phiên bản trước.
+
+## 4. Kiểm tra sửa lỗi thời lượng và hoàn thành (quan trọng)
+
+Dùng HSSV và mã QR học liệu thử nghiệm, video dài khoảng **4–5 phút**:
+
+1. **Chỉ xem vài giây rồi tua đến cuối**: không được báo Hoàn thành, thời lượng xem không được tự tăng thành toàn bộ thời lượng video.
+2. **Xem liên tục từ đầu đến cuối**: Thống kê khai thác phải thể hiện thời lượng đã xem hợp lý (khoảng 4–5 phút tùy độ dài và mạng), trạng thái **Hoàn thành** khi ghi nhận thực tế ít nhất 90% độ dài video.
+3. **Quét nhưng không phát**, hoặc tạm dừng ngay: không được báo Hoàn thành.
+4. **Mở QR playlist, xem các video riêng**: mỗi video có thời lượng và trạng thái độc lập; không được lấy thời lượng video trước cho video sau.
+5. **Kiểm tra bản ghi cũ `00:00 – Hoàn thành`**: nay phải hiển thị **Chưa đủ dữ liệu xác nhận**. Dữ liệu gốc vẫn giữ nguyên trong CSDL phục vụ đối chiếu.
+6. **Lọc “Đã hoàn thành” và xem Dashboard**: các bản ghi không đủ thời lượng xem xác nhận không được tính vào số hoàn thành.
+
+Nếu một video được xem hết nhưng vẫn hiện **Chưa hoàn thành**, cần kiểm tra tab Network trong trình duyệt (các yêu cầu `/api/watch/start` và `/api/watch/event`), lỗi mạng hoặc chính sách chặn YouTube IFrame API. Không được tự coi kết thúc video là bằng chứng đã xem đủ thời gian.
+
+## 5. Những gì thay đổi trong mã
+
+- Máy chủ: cập nhật `/api/watch/start`, `/api/watch/event`, số liệu Dashboard, truy vấn thống kê và xuất CSV để dùng thời lượng xem xác minh; dùng độ dài YouTube đồng bộ nếu trình phát trả 0.
+- Trình duyệt: cập nhật `static/viewer.js`, `static/playlist_viewer.js` để gửi sự kiện theo thứ tự và chỉ hiện xác nhận hoàn thành khi máy chủ trả về thành công.
+- CSS: điều chỉnh `static/app.css`, trả font-weight menu/nút về 400, giữ màu sắc tương phản của nút và nhãn chức năng.
+
+**Kiểm thử hiện có:** kiểm tra cú pháp Python/JavaScript, 22 mẫu Jinja, truy vấn SQL trên SQLite và các ca test xem đủ, tua, đứng hình, thời lượng 0, playlist, lịch sử cũ. Chưa kiểm thử trực tiếp trên Render và PostgreSQL sản xuất.
+
+---
+
+# Thông tin các phiên bản trước (v4.3.12)
+
+# Ghi chú phiên bản v4.3.12
 
 ## 1. Sao lưu trước khi cập nhật
 

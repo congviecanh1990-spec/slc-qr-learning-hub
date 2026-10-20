@@ -9,7 +9,7 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 .landing-app-title{white-space:nowrap;font-size:clamp(.72rem,3.1vw,2.8rem);letter-spacing:-.02em;line-height:1.15;max-width:100%;margin-left:auto;margin-right:auto}
 
 /* v2.5: chức năng đang mở được làm nổi bật rõ ràng trên thanh menu. */
-.navbar .nav-link.nav-current{color:#dc3545!important;font-weight:800}
+.navbar .nav-link.nav-current{color:#dc3545!important;font-weight:400}
 
 /* v2.6: nhãn biểu mẫu được làm đậm để giảng viên dễ nhận biết trường cần nhập/chọn. */
 .form-label, form label:not(.form-check-label){font-weight:700!important}
@@ -37,21 +37,21 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 /* Tránh quy tắc .btn của Bootstrap hiển thị link khi đã ẩn. */
 .playlist-qr-actions [hidden]{display:none!important}
 
-/* v4.3.12: các mục điều hướng in đậm và dễ nhìn; mục đang mở vẫn màu đỏ. */
-.navbar .nav-link{font-weight:800!important;color:#17191d!important}
+/* v4.3.13: các mục điều hướng KHÔNG in đậm. Giữ mục đang mở màu đỏ. */
+.navbar .nav-link{font-weight:400!important;color:#17191d!important}
 .navbar .nav-link:hover{color:var(--brand)!important}
-.navbar .nav-link.nav-current{color:#dc3545!important;font-weight:900!important}
+.navbar .nav-link.nav-current{color:#dc3545!important;font-weight:400!important}
 
-/* v4.3.12: chữ của tất cả nút chức năng màu đen, nét đậm ở mọi trạng thái.
+/* v4.3.13: chữ của các nút chức năng màu đen, nét thường ở mọi trạng thái.
    Các nền nút đặc trước đây quá sẫm so với chữ đen, vì vậy dùng nền nhạt
    cùng tông để bảo đảm dễ đọc, đồng thời giữ viền nhận diện chức năng. */
 .btn:not(.btn-close){
   color:#111111!important;
-  font-weight:800!important;
+  font-weight:400!important;
 }
 .btn:not(.btn-close):is(:hover,:focus,:active,.active,:disabled,.disabled){
   color:#111111!important;
-  font-weight:800!important;
+  font-weight:400!important;
 }
 .btn-primary{
   --bs-btn-bg:#f6dfe2;
@@ -103,6 +103,6 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
   --bs-btn-hover-bg:#d7f3df;
   --bs-btn-active-bg:#bfe8cb;
 }
-/* Phân trang cũng dùng chữ đen đậm; trang hiện tại dùng nền nhạt dễ đọc. */
-.pagination .page-link{color:#111111!important;font-weight:800}
+/* Phân trang cũng dùng nét thường; giữ màu và nền đã thống nhất. */
+.pagination .page-link{color:#111111!important;font-weight:400}
 .pagination .page-item.active .page-link{background-color:#f1d8db;border-color:#8f171d;color:#111111!important}

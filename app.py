@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -68,6 +69,63 @@ STUDENT_STATUS_LABELS = {
     "khac": "Khác",
 }
 
+
+
+def youtube_duration_seconds(duration_iso: str | None) -> float:
+    """Độ dài video VOD theo contentDetails.duration của YouTube, không phải thời gian SV xem."""
+    match = re.fullmatch(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?", (duration_iso or "").upper())
+    if not match or not any(part is not None for part in match.groups()):
+        return 0.0
+    days, hours, minutes, seconds = [float(part or 0) for part in match.groups()]
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def safe_watch_number(value) -> float:
+    """Không chấp nhận NaN/Infinity hoặc số âm từ trình duyệt."""
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return number if math.isfinite(number) and number >= 0 else 0.0
+
+
+def valid_watch_completion(watch, threshold: float) -> bool:
+    """Phân biệt đã kết thúc trình phát với đã XEM đủ thời lượng thực tế."""
+    duration = safe_watch_number(watch.duration_seconds)
+    watched = safe_watch_number(watch.estimated_watch_seconds)
+    return bool(watch.completed and duration > 0 and watched >= duration * threshold)
+
+
+def valid_watch_completion_expr(threshold: float):
+    """Đồng nhất thống kê, lọc và danh sách chưa hoàn thành trên PostgreSQL/SQLite."""
+    return and_(WatchSession.completed.is_(True), WatchSession.duration_seconds > 0,
+                WatchSession.estimated_watch_seconds >= WatchSession.duration_seconds * threshold)
+
+
+def apply_watch_event(ws, event_type, state, position, duration, now, heartbeat, threshold):
+    """Tính thời gian xem dựa trên khoảng thời gian thực và tiến độ phát liên tục.
+
+    Sự kiện ended KHÔNG tự đồng nghĩa với hoàn thành (SV có thể tua thẳng đến cuối).
+    """
+    elapsed = max(0.0, (now - ws.last_event_at).total_seconds()) if ws.last_event_at else 0.0
+    position_delta = position - (ws.last_position or 0.0)
+    counted = 0.0
+    if ws.last_state == "playing" and elapsed <= max(15, heartbeat * 3):
+        if -1.0 <= position_delta <= elapsed + 3.0:
+            counted = max(0.0, min(elapsed, position_delta))
+            ws.estimated_watch_seconds = safe_watch_number(ws.estimated_watch_seconds) + counted
+
+    ws.max_position = max(safe_watch_number(ws.max_position), position)
+    ws.duration_seconds = max(safe_watch_number(ws.duration_seconds), duration)
+    ws.last_event_at = now
+    ws.last_position = position
+    ws.last_state = state
+    ws.completion_percent = (min(100.0, 100.0 * ws.estimated_watch_seconds / ws.duration_seconds)
+                             if ws.duration_seconds > 0 else 0.0)
+    ws.completed = bool(ws.duration_seconds > 0 and ws.estimated_watch_seconds >= ws.duration_seconds * threshold)
+    if event_type == "ended" or state == "ended":
+        ws.ended_at = now
+    return counted
 
 def normalize_student_code(value) -> str:
     if isinstance(value, float) and value.is_integer():
@@ -1008,7 +1066,7 @@ def register_routes(app):
             watch_q = watch_q.filter(managed_qr_scope(user.id))
         scans = scan_q.count()
         watch = watch_q.count()
-        completed = watch_q.filter(WatchSession.completed.is_(True)).count()
+        completed = watch_q.filter(valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"])).count()
         completion_rate = round(100 * completed / watch, 1) if watch else 0
         recent_scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(10).all()
         lecturer_count = User.query.filter(User.last_login_at.isnot(None)).count()
@@ -2736,7 +2794,7 @@ def register_routes(app):
             course_id=qr.course_id,
             qr_id=qr.id,
             video_id=video.id,
-            duration_seconds=float(data.get("duration") or 0),
+            duration_seconds=max(youtube_duration_seconds(video.duration_iso), safe_watch_number(data.get("duration"))),
         )
         db.session.add(ws)
         db.session.commit()
@@ -2752,33 +2810,18 @@ def register_routes(app):
             abort(403)
         event_type = (data.get("event_type") or "heartbeat").lower()[:24]
         state = (data.get("state") or "unknown").lower()[:16]
-        position = max(0.0, float(data.get("position") or 0))
-        duration = max(0.0, float(data.get("duration") or ws.duration_seconds or 0))
+        position = safe_watch_number(data.get("position"))
+        # Video đã đồng bộ có thời lượng tin cậy từ YouTube; có thể trình phát
+        # chưa tải xong metadata khi gửi sự kiện đầu tiên nên trả về duration=0.
+        source_duration = youtube_duration_seconds(ws.video.duration_iso if ws.video else None)
+        duration = max(safe_watch_number(data.get("duration")),
+                       safe_watch_number(ws.duration_seconds), source_duration)
         now = utcnow()
-        elapsed = max(0.0, (now - ws.last_event_at).total_seconds()) if ws.last_event_at else 0.0
-        position_delta = position - (ws.last_position or 0.0)
-        counted = 0.0
-
-        # Chỉ cộng khi phiên trước đang phát, thời gian thực hợp lý và không có bước nhảy tua lớn.
-        if ws.last_state == "playing" and elapsed <= max(15, current_app.config["HEARTBEAT_SECONDS"] * 3):
-            if -1.0 <= position_delta <= elapsed + 3.0:
-                counted = max(0.0, min(elapsed, position_delta + 0.5))
-                ws.estimated_watch_seconds += counted
-
-        ws.max_position = max(ws.max_position or 0.0, position)
-        ws.duration_seconds = max(ws.duration_seconds or 0.0, duration)
-        ws.last_event_at = now
-        ws.last_position = position
-        ws.last_state = state
-
-        if ws.duration_seconds > 0:
-            ws.completion_percent = min(100.0, 100.0 * ws.estimated_watch_seconds / ws.duration_seconds)
-        if event_type == "ended" or state == "ended":
-            ws.completed = True
-            ws.ended_at = now
-            ws.completion_percent = max(ws.completion_percent, 100.0)
-        elif ws.duration_seconds > 0 and ws.estimated_watch_seconds / ws.duration_seconds >= current_app.config["COMPLETION_THRESHOLD"]:
-            ws.completed = True
+        counted = apply_watch_event(
+            ws, event_type, state, position, duration, now,
+            current_app.config["HEARTBEAT_SECONDS"],
+            current_app.config["COMPLETION_THRESHOLD"],
+        )
 
         db.session.add(WatchEvent(
             watch_session_id=ws.id,
@@ -2961,7 +3004,7 @@ def register_routes(app):
                     roster_watches = db.session.query(WatchSession.participant_code, WatchSession.video_id).filter(
                         WatchSession.role == "SV", WatchSession.qr_id == selected_qr.id,
                         WatchSession.class_code == selected_class.code,
-                        WatchSession.completed.is_(True), WatchSession.participant_code.in_(roster_codes))
+                        valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"]), WatchSession.participant_code.in_(roster_codes))
                     if sv_start_at:
                         roster_scans = roster_scans.filter(ScanLog.scanned_at >= sv_start_at)
                         roster_watches = roster_watches.filter(WatchSession.started_at >= sv_start_at)
@@ -3084,7 +3127,7 @@ def register_routes(app):
             if sv_end_at:
                 sv_query = sv_query.filter(events.c.stamp < sv_end_at)
             if status == "completed":
-                sv_query = sv_query.filter(WatchSession.completed.is_(True))
+                sv_query = sv_query.filter(valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"]))
             elif status == "unwatched":
                 sv_query = sv_query.filter(WatchSession.id.is_(None), ScanLog.success.is_(True))
             elif status == "failed":
@@ -3121,7 +3164,9 @@ def register_routes(app):
                     "media_name": played_video,
                     "result": ("Thành công" if success else "Không thành công") if success is not None else "Chưa có dữ liệu quét",
                     "watch_time": watch_time,
-                    "watch_status": ("Hoàn thành" if watch.completed else "Chưa hoàn thành") if watch else ("Chưa xem" if success else "Không mở được"),
+                    "watch_status": (("Hoàn thành" if valid_watch_completion(watch, current_app.config["COMPLETION_THRESHOLD"]) else
+                                     "Chưa đủ dữ liệu xác nhận" if watch.completed else "Chưa hoàn thành")
+                                     if watch else ("Chưa xem" if success else "Không mở được")),
                     "success": success,
                 })
         sv_page_numbers = list(range(max(1, sv_page-2), min(sv_pages, sv_page+2)+1))
@@ -3173,7 +3218,8 @@ def register_routes(app):
         if user.role != "admin":
             q = q.filter(managed_qr_scope(user.id))
         for s in q.order_by(WatchSession.started_at).all():
-            w.writerow([s.session_key, s.participant_code, s.class_code, s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.started_at.isoformat(), round(s.estimated_watch_seconds, 2), round(s.max_position, 2), round(s.duration_seconds, 2), round(s.completion_percent, 2), int(s.completed)])
+            w.writerow([s.session_key, s.participant_code, s.class_code, s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.started_at.isoformat(), round(s.estimated_watch_seconds, 2), round(s.max_position, 2), round(s.duration_seconds, 2), round(100 * s.estimated_watch_seconds / s.duration_seconds, 2) if s.duration_seconds > 0 else 0,
+                        int(valid_watch_completion(s, current_app.config["COMPLETION_THRESHOLD"]))])
         return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=watch_sessions.csv"})
 
 
