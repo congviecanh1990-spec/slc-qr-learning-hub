@@ -38,6 +38,7 @@ soup=BeautifulSoup(html,'html.parser')
 assert soup.select_one('tr#playlist-11 .playlist-qr-create')
 assert soup.select_one('tr#playlist-11 .playlist-qr-download')
 assert soup.select_one('tr#playlist-11 .playlist-qr-delete-form')
+assert soup.select_one('tr#playlist-11 .playlist-qr-retarget-toggle')
 assert not soup.select('tr#playlist-11 .playlist-qr-preview')
 assert soup.select_one('tr#playlist-11 select option[data-qr-delete]')
 assert soup.select_one('tr#video-33 select option[data-qr-png]')
@@ -58,7 +59,7 @@ for qr_id in (20,21):
     assert row.find(string=lambda x:x and 'Mở thử' in x)
     assert row.find(string=lambda x:x and 'Xóa' in x)
 assert soup.select_one('table.qr-inventory-table button[data-bs-target="#qr-edit-20"]')
-assert len(soup.select('table.qr-inventory-table button[data-bs-target="#qr-edit-21"]'))==0
+assert len(soup.select('table.qr-inventory-table button[data-bs-target="#qr-edit-21"]'))==1
 print('PASS: QR inventory supports playlist/video PNG, preview, delete; video retarget')
 
 # Playlist no longer supplied by YouTube keeps visible source status for cleanup, rather than delete records.

@@ -44,7 +44,7 @@ print('PASS: playlist existing QR vs not-yet-created QR per subject, ajax save w
 html=env.get_template('qr.html').render(**base(courses=[c1,c2],qrs=[playlist_qr],videos=[video],qr_needs_review=set(),selected_course=c1,selected_course_id=5,total_qrs=1))
 soup=BeautifulSoup(html,'html.parser')
 assert soup.select_one('a[href^="/qr_download_all?course_id=5"]')
-assert soup.find(string=lambda x:x and 'Tải mã QR (PNG)' in x)
+assert soup.find(string=lambda x:x and 'Tải mã QR' in x)
 assert soup.find(string=lambda x:x and 'Mở thử' in x)
 print('PASS: QR page filtered ZIP, playlist download/preview links restored')
 html=env.get_template('errors.html').render(**base(error_rows=[dict(log=Obj(created_at=datetime(2026,10,20),message='Lỗi',details='Chi tiết'),actor_name='Nguyễn Văn An (123 – Lớp A)',action='Quét QR',course_module='Lập trình Python')]))

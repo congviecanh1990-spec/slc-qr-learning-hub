@@ -1,3 +1,15 @@
+# Thay đổi v4.3.11 – ngày 20/10/2026
+
+- Bổ sung **Đổi playlist đích** cho mã QR playlist ở **Kho video học liệu** và **Mã QR động**. Giảng viên chọn playlist mới đã đồng bộ trong kênh kết nối và còn video hợp lệ. Giữ nguyên mã QR/slug/đường dẫn và bản ghi quét/xem cũ, không tạo QR mới.
+- Không cho thay playlist bằng playlist không thuộc quyền truy cập, playlist trống, hoặc playlist đã có QR khác còn hoạt động trong cùng môn. Quyền quản lý sau bàn giao môn tiếp tục tuân theo giảng viên phụ trách hiện tại.
+- Khi thay đổi, chỉ cập nhật liên kết môn đang thao tác; lưu dấu vết playlist cũ/mới, người thực hiện và thời điểm trong **EditHistory** hiện có. Thống kê lượt quét chưa phát video phản ánh playlist tại thời điểm quét.
+- **Kênh YouTube:** bỏ khu vực liệt kê “Playlist đã đồng bộ”.
+- **Nhãn nút:** toàn bộ nút tải mã QR là **Tải mã QR**, nút xóa mã QR là **Xóa mã QR**. Các nút xuất ZIP vẫn áp dụng đúng bộ lọc và có chú thích để tránh nhầm với tải PNG riêng lẻ.
+- Giữ nguyên phân trang 5 dòng Kho video và 10 dòng Thống kê; các chức năng khác kế thừa v4.3.10. Không thay schema PostgreSQL, không xóa dữ liệu hiện có.
+- Kiểm tra offline: cú pháp Python, Jinja, JavaScript, nghiệp vụ SQLite thay playlist và phân quyền, lịch sử, kiểm thử hồi quy; chưa kiểm tra trực tiếp trên Render.
+
+---
+
 # Thay đổi v4.3.10 – ngày 20/10/2026
 
 - **Kho video học liệu:** danh sách playlist và danh sách video có phân trang độc lập **5 dòng/trang** (truy vấn lấy đúng 5 dòng tại máy chủ); bộ lọc và số trang hiện tại được giữ khi thao tác.

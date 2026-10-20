@@ -936,7 +936,7 @@ def register_routes(app):
             "courses_page": "courses", "add_class": "courses", "set_course_school_classes": "courses", "update_course_info": "courses",
             "assign_playlists_to_course": "courses", "delete_course_playlist": "courses",
             "create_course_qrs_bulk": "courses", "create_course_playlist_qrs_bulk": "courses", "download_course_qrs": "courses",
-            "qr_page": "qr", "create_playlist_qr": "qr", "qr_retarget": "qr", "qr_png": "qr", "qr_download_all": "qr", "delete_all_qrs": "qr",
+            "qr_page": "qr", "create_playlist_qr": "qr", "qr_retarget": "qr", "qr_retarget_playlist": "qr", "qr_png": "qr", "qr_download_all": "qr", "delete_all_qrs": "qr",
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
             "classes_page": "class_admin", "my_classes_page": "homeroom", "teaching_classes_page":"teaching_classes", "create_school_class": "class_admin", "assign_homeroom_teacher": "class_admin",
             "upload_class_students": "homeroom", "add_class_student": "homeroom", "change_student_status": "homeroom", "delete_class_student": "homeroom",
@@ -1464,6 +1464,7 @@ def register_routes(app):
             retarget_videos=visible_video_query(user).filter(
                 Video.is_available.is_(True), Video.privacy_status != "private",
                 Video.embeddable.isnot(False)).order_by(Video.title).all(),
+            replacement_playlists=available_playlists,
             courses=courses,
         )
 
@@ -2202,8 +2203,10 @@ def register_routes(app):
             Video.is_available.is_(True), Video.privacy_status != "private",
             Video.embeddable.isnot(False)
         ).order_by(Video.title).all()
+        replacement_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
         return render_template(
             "qr.html", qr_needs_review=qr_needs_review, qrs=qrs, videos=videos, courses=courses,
+            replacement_playlists=replacement_playlists,
             selected_course=selected_course, selected_course_id=selected_course_id,
             total_qrs=len(all_qrs),
         )
@@ -2239,6 +2242,88 @@ def register_routes(app):
             if re.fullmatch(r"(?:video|playlist)-[0-9]+", row):
                 return videos_library_return(row, request.form.get("return_query", ""))
         return url_for("qr_page")
+
+    @app.post("/qr/<int:qr_id>/retarget-playlist")
+    @login_required
+    def qr_retarget_playlist(qr_id):
+        """Thay playlist đích cho QR cũ, giữ slug và toàn bộ nhật ký quét/xem.
+
+        Tuyệt đối không sửa youtube_playlist_id của playlist cũ: playlist và
+        các phiên xem trước đó cần được giữ làm chứng cứ lịch sử.
+        """
+        qr = db.session.get(QrCode, qr_id) or abort(404)
+        user = current_user()
+        if not qr_managed_by_user(qr, user):
+            abort(403)
+        if not qr.active or not qr.is_playlist or not qr.course_id:
+            abort(404)
+        playlist_id = request.form.get("playlist_id", type=int)
+        replacement = (visible_playlist_query(user).filter(Playlist.id == playlist_id).first()
+                       if playlist_id else None)
+        if replacement is None:
+            flash("Playlist thay thế không khả dụng hoặc không thuộc kênh YouTube đang kết nối.", "warning")
+            return redirect(qr_action_destination(qr))
+        old_playlist = qr.playlist
+        if old_playlist and old_playlist.id == replacement.id:
+            flash("Playlist được chọn đang là đích hiện tại; mã QR không thay đổi.", "info")
+            return redirect(qr_action_destination(qr))
+        if not replacement.video_links:
+            flash("Playlist thay thế chưa có video học liệu được đồng bộ. Hãy kiểm tra playlist và đồng bộ lại YouTube.", "warning")
+            return redirect(qr_action_destination(qr))
+        course = qr.course
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        old_link = CoursePlaylist.query.filter_by(qr_id=qr.id).first()
+        if old_link and old_link.course_id != course.id:
+            abort(409)
+        new_link = CoursePlaylist.query.filter_by(
+            course_id=course.id, playlist_id=replacement.id).first()
+        if new_link and new_link.qr_id and new_link.qr_id != qr.id:
+            assigned = db.session.get(QrCode, new_link.qr_id)
+            if assigned and assigned.active:
+                flash("Playlist thay thế đã có mã QR riêng trong môn học/mô đun này. Hãy chọn playlist khác để tránh trùng.", "warning")
+                return redirect(qr_action_destination(qr))
+        existing_qr = (QrCode.query.filter(
+            QrCode.course_id == course.id, QrCode.playlist_id == replacement.id,
+            QrCode.target_type == "playlist", QrCode.active.is_(True), QrCode.id != qr.id
+        ).first())
+        if existing_qr:
+            flash("Playlist mới đang được sử dụng bởi một mã QR khác của môn học/mô đun.", "warning")
+            return redirect(qr_action_destination(qr))
+
+        old_title = old_playlist.title if old_playlist else qr.title
+        old_id = old_playlist.id if old_playlist else None
+        if not new_link:
+            new_link = CoursePlaylist(course_id=course.id, playlist_id=replacement.id,
+                                      added_by=user.id, active=True)
+            db.session.add(new_link)
+            db.session.flush()
+        else:
+            new_link.active = True
+        # Chỉ gỡ liên kết QR; dữ liệu playlist cũ vẫn tồn tại, không xóa
+        # thông tin lịch sử hay thay đổi những mã QR thuộc môn học khác.
+        if old_link and old_link.id != new_link.id:
+            old_link.qr_id = None
+            old_link.active = False
+        new_link.qr_id = qr.id
+        qr.playlist_id = replacement.id
+        qr.title = (replacement.title or qr.title)[:255]
+        db.session.add(EditHistory(
+            entity_kind="qr_playlist", entity_id=qr.id, field="playlist_target",
+            old_value=f"{old_id or ''} | {old_title}"[:500],
+            new_value=f"{replacement.id} | {replacement.title}"[:500], changed_by=user.id,
+        ))
+        # Cập nhật video kế thừa từ playlist của môn học đích. Các ScanLog,
+        # WatchSession, lịch sử tạo QR và QR.slug hoàn toàn không bị thay đổi.
+        reconcile_course_videos_from_playlists(course, user)
+        record_functional_test(
+            "QR_PLAYLIST_RETARGET", "Đổi playlist đích của mã QR", True,
+            owner_id=user.id,
+            note=f"Mã QR {qr.slug}; playlist cũ: {old_title}; playlist mới: {replacement.title}.",
+        )
+        db.session.commit()
+        flash("Đã đổi playlist đích. Mã QR và đường dẫn đã phát hành được giữ nguyên; lịch sử quét/xem không thay đổi.", "success")
+        return redirect(qr_action_destination(qr))
 
     @app.post("/qr/<int:qr_id>/retarget")
     @login_required
@@ -3017,7 +3102,15 @@ def register_routes(app):
                 course_ref = (scan.course if scan else None) or (watch.course if watch else None)
                 played_video = video.title if video else (qr.title if qr else "Không xác định")
                 if not watch and qr and qr.is_playlist:
-                    played_video = f"{qr.title} (chưa phát video)"
+                    # Giữ tên playlist đúng thời điểm quét, kể cả khi GV đã đổi
+                    # playlist đích của cùng một mã QR vào những ngày sau đó.
+                    next_change = (EditHistory.query.filter_by(
+                        entity_kind="qr_playlist", entity_id=qr.id, field="playlist_target")
+                        .filter(EditHistory.changed_at > stamp)
+                        .order_by(EditHistory.changed_at.asc(), EditHistory.id.asc()).first())
+                    historical_name = ((next_change.old_value or "").split(" | ", 1)[-1]
+                                       if next_change else qr.title)
+                    played_video = f"{historical_name or qr.title} (chưa phát video)"
                 seconds = max(0, round(watch.estimated_watch_seconds)) if watch else 0
                 watch_time = f"{seconds//3600:02d}:{(seconds//60)%60:02d}:{seconds%60:02d}" if seconds >= 3600 else f"{seconds//60:02d}:{seconds%60:02d}"
                 success = scan.success if scan else None

@@ -130,6 +130,7 @@
                       {% if l.qr and l.qr.active %}
                       data-qr-png="{{ url_for('qr_png', qr_id=l.qr.id) }}"
                       data-qr-delete="{{ url_for('delete_qr', qr_id=l.qr.id) }}"
+                      data-qr-retarget-playlist="{{ url_for('qr_retarget_playlist', qr_id=l.qr.id) }}"
                       {% endif %}>{{ l.course.name }}{{ ' – đã có mã QR' if l.qr and l.qr.active else '' }}</option>
                   {% endfor %}
                 </select>
@@ -142,6 +143,21 @@
                 <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
                 <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
                 <button class="btn btn-outline-danger btn-sm" type="submit">Xóa mã QR</button>
+              </form>
+              <button type="button" class="btn btn-outline-warning btn-sm playlist-qr-retarget-toggle mt-1" hidden aria-expanded="false">Đổi playlist đích</button>
+              <form method="post" action="#" class="playlist-qr-retarget library-qr-form mt-1" data-library-qr-form="1" hidden onsubmit="return confirm('Xác nhận đổi playlist đích? Mã QR cũ tiếp tục được sử dụng và lịch sử được giữ nguyên.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
+                <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
+                <select class="form-select form-select-sm mb-1" name="playlist_id" required aria-label="Chọn playlist thay thế">
+                  <option value="">Chọn playlist đích mới</option>
+                  {% for replacement in replacement_playlists if replacement.id != p.id %}
+                    <option value="{{ replacement.id }}">{{ replacement.title }} ({{ replacement.channel.title }})</option>
+                  {% endfor %}
+                </select>
+                <div class="small text-muted mb-1">QR đã in, mã và lịch sử quét/xem vẫn được giữ nguyên.</div>
+                <button type="submit" class="btn btn-warning btn-sm">Lưu playlist đích</button>
               </form>
             {% else %}<div class="text-muted small">Hãy chọn môn học/mô đun và bấm Lưu trước.</div>{% endif %}
           </td>
@@ -275,7 +291,7 @@
                 <input type="hidden" name="return_to" value="videos">
                 <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
                 <input type="hidden" name="library_row" value="video-{{ v.id }}">
-                <button type="submit" class="btn btn-outline-danger btn-sm">Xóa</button>
+                <button type="submit" class="btn btn-outline-danger btn-sm">Xóa mã QR</button>
               </form>
               <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" hidden aria-expanded="false">Đổi video đích</button>
               <form method="post" action="#" class="video-qr-retarget library-qr-form mt-1 w-100" data-library-qr-form="1" hidden>
@@ -373,10 +389,13 @@
     const option=select.selectedOptions[0], hasQr=!!(option && option.dataset.qrPng), valid=!!select.value;
     const create=area.querySelector('.playlist-qr-create'), download=area.querySelector('.playlist-qr-download');
     const remove=row.querySelector('.playlist-qr-delete-form');
+    const retarget=row.querySelector('.playlist-qr-retarget'), toggle=row.querySelector('.playlist-qr-retarget-toggle');
     create.hidden=hasQr; create.disabled=!valid || row.querySelector('.text-bg-warning') !== null;
     download.hidden=!hasQr;
     if(hasQr) download.href=option.dataset.qrPng; else download.removeAttribute('href');
     if(remove){remove.hidden=!hasQr;if(hasQr)remove.action=option.dataset.qrDelete;}
+    if(toggle){toggle.hidden=!hasQr; if(!hasQr){retarget.hidden=true;toggle.setAttribute('aria-expanded','false');}}
+    if(hasQr && retarget)retarget.action=option.dataset.qrRetargetPlaylist;
   }
   function updateVideoQrActions(select) {
     const row=select.closest('tr.library-target-row'), area=select.closest('.video-qr-actions');
@@ -397,8 +416,10 @@
     scope.querySelectorAll('.video-qr-course-select').forEach(updateVideoQrActions);
   }
   document.addEventListener('click',event=>{
-    const b=event.target.closest('.video-qr-retarget-toggle');if(!b)return;
-    const form=b.closest('.video-qr-extra').querySelector('.video-qr-retarget');
+    const b=event.target.closest('.video-qr-retarget-toggle, .playlist-qr-retarget-toggle');if(!b)return;
+    const row=b.closest('tr.library-target-row');
+    const form=row?.querySelector(b.matches('.video-qr-retarget-toggle') ? '.video-qr-retarget' : '.playlist-qr-retarget');
+    if(!form)return;
     form.hidden=!form.hidden;b.setAttribute('aria-expanded', String(!form.hidden));
   });
   // Trả về HTML của đúng trang đang xem nhưng không tải lại trang,

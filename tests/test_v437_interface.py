@@ -63,7 +63,7 @@ html=env.get_template('qr.html').render(**base(courses=[course],qrs=[qr],videos=
                   qr_needs_review=set(), selected_course=course, selected_course_id=5, total_qrs=1))
 soup=BeautifulSoup(html, 'html.parser')
 assert soup.select_one('#qr-course-filter select[name="course_id"]')
-assert soup.find(string=lambda x:x and 'Tải mã QR của MH/MĐ (Zip)' in x)
+assert soup.find(string=lambda x:x and 'Tải mã QR' in x)
 assert not soup.find(string=lambda x:x and 'Tạo QR riêng lẻ' in x)
 assert not soup.find(string=lambda x:x and 'Tạo mã QR tự động theo môn học' in x)
 assert soup.find(string=lambda x:x and 'Đổi video đích' in x)
