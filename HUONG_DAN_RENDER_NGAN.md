@@ -1,3 +1,38 @@
+# Hướng dẫn cập nhật Web App v4.3.14 trên Render
+
+## 1. Sao lưu và triển khai
+
+Sao lưu dữ liệu tại **Quản trị viên → Sao lưu & khôi phục**. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.14_RENDER.zip`, cập nhật mã nguồn lên GitHub như những lần trước và chờ Render triển khai. **Không xóa PostgreSQL**. Sau đó nhấn **Ctrl + F5** để làm mới giao diện.
+
+## 2. Kiểm tra điều hướng
+
+Chỉ **mục menu hiện đang mở** (ví dụ **Thống kê khai thác**) có **chữ đỏ, in đậm**. Các mục khác và nút chức năng hiển thị nét thường như bản v4.3.13.
+
+## 3. Kiểm tra trạng thái SV theo quy tắc 95%
+
+| Độ dài video | Thời lượng SV xem | Trạng thái đúng |
+|---|---|---|
+| 05:35 | 00:00 | **Chưa xem** |
+| 05:35 | 03:50 | **Chưa hoàn thành** (230/335 giây = 68,7%) |
+| 05:35 | 05:18 | **Chưa hoàn thành nếu dưới 318,25 giây thực tế** |
+| 05:35 | 05:19 | **Hoàn thành** |
+
+**Lưu ý:** 95% của 05:35 là **318,25 giây**, tức 05 phút 18,25 giây. Phép tính dùng thời lượng giây thực tế được máy chủ ghi, không chỉ giá trị phút:giây đã làm tròn trong bảng.
+
+Bản ghi cũ có `completed=True` do cơ chế cũ sẽ không còn mang nhãn **Chưa đủ dữ liệu xác nhận**; Web App tính lại trạng thái theo thời lượng xem đã lưu: 00:00 = Chưa xem, chưa đạt 95% = Chưa hoàn thành. Lịch sử gốc không bị xóa hoặc sửa.
+
+## 4. Kiểm tra đồng bộ báo cáo
+
+Vào **Thống kê khai thác**, kiểm tra bộ lọc **Đã hoàn thành**, **SV chưa hoàn thành**, thống kê trên Dashboard và xuất **CSV quá trình xem**. Mọi nơi phải chỉ công nhận hoàn thành khi thực xem ít nhất **95%**. Khi quét mà không phát video, thời lượng là 00:00 và trạng thái là Chưa xem.
+
+## 5. Cấu hình Render
+
+Ngưỡng 95% đã được **cố định trong `config.py`**, không còn lấy từ biến môi trường `COMPLETION_THRESHOLD` cũ (vì nhiều hệ thống trước đây đã đặt 0.90). `render.yaml` ghi 0.95 cho nhất quán. Bạn không cần đặt lại PostgreSQL hoặc đổi Secret Key/OAuth.
+
+**Đã kiểm tra offline** mã nguồn Python, giao diện Jinja/CSS, mô phỏng các trường hợp ranh giới 95% và truy vấn SQLite. Chưa kiểm thử trực tiếp trên Render/Google OAuth/YouTube API.
+
+---
+
 # Hướng dẫn cập nhật Web App v4.3.13 trên Render
 
 ## 1. Sao lưu

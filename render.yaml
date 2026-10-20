@@ -23,7 +23,7 @@ services:
       - key: RECONCILE_KEY
         generateValue: true
       - key: COMPLETION_THRESHOLD
-        value: "0.90"
+        value: "0.95"
       - key: HEARTBEAT_SECONDS
         value: "5"
       - key: COOKIE_SECURE

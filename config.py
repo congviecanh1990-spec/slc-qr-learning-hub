@@ -51,7 +51,9 @@ class Config:
         if x.strip()
     }
     RECONCILE_KEY = os.getenv("RECONCILE_KEY", "change-me")
-    COMPLETION_THRESHOLD = float(os.getenv("COMPLETION_THRESHOLD", "0.90"))
+    # Quy định nghiệm thu đã chốt: xem đủ 95% độ dài video mới Hoàn thành.
+    # Cố định để Render không tiếp tục nhận nhầm biến môi trường cũ 0.90.
+    COMPLETION_THRESHOLD = 0.95
     HEARTBEAT_SECONDS = int(os.getenv("HEARTBEAT_SECONDS", "5"))
     AUTO_CREATE_DB = os.getenv("AUTO_CREATE_DB", "1") == "1"
 

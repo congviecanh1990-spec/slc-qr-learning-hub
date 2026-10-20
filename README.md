@@ -1,3 +1,13 @@
+# Thay đổi v4.3.14 – 20/10/2026
+
+- **Thanh điều hướng:** mục đang mở màu **đỏ, in đậm**; các mục còn lại nét thường. Nút chức năng không in đậm hàng loạt.
+- **Quy tắc xem video bắt buộc (95%):** ước tính thời gian xem **00:00** là **Chưa xem**; từ 1 giây đến dưới 95% độ dài là **Chưa hoàn thành**; từ 95% trở lên mới là **Hoàn thành**. Ví dụ video 05:35 (335 giây), xem 03:50 (230 giây, 68,7%) là Chưa hoàn thành.
+- **Thống kê đồng bộ:** Dashboard, lọc “Đã hoàn thành”, đối chiếu “SV chưa hoàn thành”, CSV và bảng lịch sử cùng kiểm tra bằng thời lượng ghi nhận / độ dài video, không dựa vào cờ completed cũ. Các bản ghi cũ vẫn được giữ nguyên trong CSDL nhưng kết quả hiển thị được tính lại.
+- **Ngưỡng được cố định:** `COMPLETION_THRESHOLD=0.95` trong cấu hình ứng dụng nhằm tránh Render còn sử dụng giá trị biến môi trường cũ 0.90; `render.yaml` cũng được cập nhật lên 0.95.
+- Không thêm cột/bảng, không đổi mã QR đã phát hành. Cần thử thực tế trên Render với video thử nghiệm sau triển khai.
+
+---
+
 # Thay đổi v4.3.13 – ngày 20/10/2026
 
 - **Giao diện:** Bỏ in đậm hàng loạt chữ trên tất cả nút và menu điều hướng. Chữ dùng nét bình thường, giữ màu đen và nền nút sáng như bản trước; menu đang mở vẫn màu đỏ. Nút **Tải tất cả mã QR**, **Xóa tất cả mã QR**, **Tải mã QR**, **Xóa mã QR** không đổi nhãn hoặc chức năng.

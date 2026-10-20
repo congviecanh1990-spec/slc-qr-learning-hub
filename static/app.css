@@ -8,8 +8,7 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 /* v2.2: tiêu đề trang đăng nhập luôn hiển thị trên một dòng. */
 .landing-app-title{white-space:nowrap;font-size:clamp(.72rem,3.1vw,2.8rem);letter-spacing:-.02em;line-height:1.15;max-width:100%;margin-left:auto;margin-right:auto}
 
-/* v2.5: chức năng đang mở được làm nổi bật rõ ràng trên thanh menu. */
-.navbar .nav-link.nav-current{color:#dc3545!important;font-weight:400}
+/* v2.5: nhận diện mục điều hướng đang mở do quy tắc v4.3.14 đảm nhiệm. */
 
 /* v2.6: nhãn biểu mẫu được làm đậm để giảng viên dễ nhận biết trường cần nhập/chọn. */
 .form-label, form label:not(.form-check-label){font-weight:700!important}
@@ -37,10 +36,12 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 /* Tránh quy tắc .btn của Bootstrap hiển thị link khi đã ẩn. */
 .playlist-qr-actions [hidden]{display:none!important}
 
-/* v4.3.13: các mục điều hướng KHÔNG in đậm. Giữ mục đang mở màu đỏ. */
+/* v4.3.14: chỉ mục menu ĐANG MỞ dùng chữ đỏ và in đậm; các mục khác nét thường. */
 .navbar .nav-link{font-weight:400!important;color:#17191d!important}
 .navbar .nav-link:hover{color:var(--brand)!important}
-.navbar .nav-link.nav-current{color:#dc3545!important;font-weight:400!important}
+.navbar .nav-link.nav-current,
+.navbar .nav-link.nav-current:hover,
+.navbar .nav-link.nav-current:focus{color:#dc3545!important;font-weight:700!important}
 
 /* v4.3.13: chữ của các nút chức năng màu đen, nét thường ở mọi trạng thái.
    Các nền nút đặc trước đây quá sẫm so với chữ đen, vì vậy dùng nền nhạt

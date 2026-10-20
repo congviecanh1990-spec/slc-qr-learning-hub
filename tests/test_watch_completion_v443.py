@@ -29,11 +29,11 @@ def new(duration=252):
         estimated_watch_seconds=0, duration_seconds=duration, max_position=0,
         completion_percent=0, completed=False, ended_at=None)
 def event(w, action, state, t, p, dur=0):
-    return apply(w,action,state,p,dur,start+timedelta(seconds=t),5,0.90)
+    return apply(w,action,state,p,dur,start+timedelta(seconds=t),5,0.95)
 
 # Lỗi cũ: chỉ bấm tới cuối là ended dù thời lượng xem bằng 0.
 w=new();event(w,'ended','ended',1,252)
-assert not w.completed and w.estimated_watch_seconds == 0 and verified(w,0.90) is False
+assert not w.completed and w.estimated_watch_seconds == 0 and verified(w,0.95) is False
 # Video dài 4 phút, trình phát trả về getDuration=0 phải không tự chứng nhận.
 w=new(0);event(w,'ended','ended',1,0,0)
 assert not w.completed and w.duration_seconds == 0 and w.completion_percent == 0
@@ -47,18 +47,18 @@ assert w.estimated_watch_seconds < 12 and not w.completed
 w=new();event(w,'play','playing',1,0)
 for t in range(6,126,5): event(w,'heartbeat','playing',t,0)
 assert w.estimated_watch_seconds == 0 and not w.completed
-# Xem thật 240 giây của video 252 giây: đạt 90%.
+# Xem thật 240 giây của video 252 giây: đạt 95%.
 w=new();event(w,'play','playing',1,0)
 for seconds in range(5,241,5): event(w,'heartbeat','playing',seconds+1,seconds)
 event(w,'ended','ended',254,252)
-assert w.estimated_watch_seconds >= 228, w.estimated_watch_seconds
-assert w.completed and verified(w,0.9)
+assert w.estimated_watch_seconds >= 239.4, w.estimated_watch_seconds
+assert w.completed and verified(w,0.95)
 # Kết thúc trình phát có thể đến sau khi tab nghỉ > 15 giây, không tính bù thời gian không xác minh.
 w=new();event(w,'play','playing',1,0)
 event(w,'ended','ended',254,252)
 assert w.estimated_watch_seconds == 0 and not w.completed
 # Phiên đã ghi sai ở phiên bản trước không được tính hoàn thành trong thống kê hiện tại.
 old=new();old.completed=True
-assert not verified(old,0.9)
+assert not verified(old,0.95)
 # Không thay đổi lịch sử cũ trong PostgreSQL.
-print('PASS v4.3.13: ended=0, tua, đóng băng, xem đủ 90%, thời lượng 0 và dữ liệu cũ')
+print('PASS v4.3.14: ended=0, tua, đóng băng, xem đủ 95%, thời lượng 0 và dữ liệu cũ')

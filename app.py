@@ -93,13 +93,26 @@ def valid_watch_completion(watch, threshold: float) -> bool:
     """Phân biệt đã kết thúc trình phát với đã XEM đủ thời lượng thực tế."""
     duration = safe_watch_number(watch.duration_seconds)
     watched = safe_watch_number(watch.estimated_watch_seconds)
-    return bool(watch.completed and duration > 0 and watched >= duration * threshold)
+    # Dữ liệu cũ có thể chứa completed=True từ ngưỡng 90% hoặc sự kiện ended.
+    # Không tin cờ lưu cũ: quyết định bằng số giây xem thực tế / độ dài video.
+    return bool(duration > 0 and watched > 0 and watched >= duration * threshold)
 
 
 def valid_watch_completion_expr(threshold: float):
     """Đồng nhất thống kê, lọc và danh sách chưa hoàn thành trên PostgreSQL/SQLite."""
-    return and_(WatchSession.completed.is_(True), WatchSession.duration_seconds > 0,
+    # Cùng quy tắc với valid_watch_completion; không lệ thuộc completed cũ.
+    return and_(WatchSession.duration_seconds > 0, WatchSession.estimated_watch_seconds > 0,
                 WatchSession.estimated_watch_seconds >= WatchSession.duration_seconds * threshold)
+
+
+def watch_status_label(watch, threshold: float) -> str:
+    """Trạng thái SV dựa vào thời lượng đã ghi nhận, không tin cờ completed cũ.
+
+    00:00 -> Chưa xem; dưới 95% -> Chưa hoàn thành; từ 95% -> Hoàn thành.
+    """
+    if watch is None or round(safe_watch_number(watch.estimated_watch_seconds)) == 0:
+        return "Chưa xem"
+    return "Hoàn thành" if valid_watch_completion(watch, threshold) else "Chưa hoàn thành"
 
 
 def apply_watch_event(ws, event_type, state, position, duration, now, heartbeat, threshold):
@@ -3070,7 +3083,9 @@ def register_routes(app):
                     "class_name": r["class_name"], "course_name": r["course_name"],
                     "media_name": ", ".join(r.get("missing_videos") or []) or r["qr_title"],
                     "result": "Chưa quét" if status == "not_scanned" else "Đã mở học liệu",
-                    "watch_time": "00:00", "watch_status": r["status"],
+                    # Hàng đối chiếu sĩ số không phải một phiên xem cụ thể:
+                    # không giả lập thời lượng xem 00:00 gây hiểu nhầm.
+                    "watch_time": "—", "watch_status": r["status"],
                     "success": status != "not_scanned",
                 })
         else:
@@ -3129,7 +3144,10 @@ def register_routes(app):
             if status == "completed":
                 sv_query = sv_query.filter(valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"]))
             elif status == "unwatched":
-                sv_query = sv_query.filter(WatchSession.id.is_(None), ScanLog.success.is_(True))
+                # Kể cả phiên xem đã được khởi tạo nhưng chưa ghi nhận giây xem.
+                sv_query = sv_query.filter(
+                    or_(WatchSession.id.is_(None), WatchSession.estimated_watch_seconds <= 0.5),
+                    ScanLog.success.is_(True))
             elif status == "failed":
                 sv_query = sv_query.filter(ScanLog.success.is_(False))
             sv_total = sv_query.order_by(None).count()
@@ -3164,8 +3182,7 @@ def register_routes(app):
                     "media_name": played_video,
                     "result": ("Thành công" if success else "Không thành công") if success is not None else "Chưa có dữ liệu quét",
                     "watch_time": watch_time,
-                    "watch_status": (("Hoàn thành" if valid_watch_completion(watch, current_app.config["COMPLETION_THRESHOLD"]) else
-                                     "Chưa đủ dữ liệu xác nhận" if watch.completed else "Chưa hoàn thành")
+                    "watch_status": (watch_status_label(watch, current_app.config["COMPLETION_THRESHOLD"])
                                      if watch else ("Chưa xem" if success else "Không mở được")),
                     "success": success,
                 })
