@@ -29,7 +29,7 @@
 <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
   <h3 class="h4 mb-0">Kho mã QR</h3>
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if not total_qrs else '' }}" href="{{ url_for('qr_download_all') }}">Tải ZIP tất cả mã QR</a>
+    <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if not qrs else '' }}" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}">{{ 'Tải ZIP mã QR theo bộ lọc' if selected_course_id is not none else 'Tải ZIP tất cả mã QR' }}</a>
     <form method="post" action="{{ url_for('delete_all_qrs') }}" onsubmit="return confirm('Xóa toàn bộ mã QR đã tạo của tài khoản này? Các mã QR đã in sẽ ngừng hoạt động, nhưng lịch sử quét/xem trước đây vẫn được giữ lại.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-outline-danger btn-sm" {{ 'disabled' if not total_qrs else '' }}>Xóa toàn bộ mã QR đã tạo (mọi môn)</button>
@@ -62,8 +62,10 @@
           <td class="text-nowrap">{{ q.created_at.strftime('%d/%m/%Y') if q.created_at else '—' }}</td>
           <td>
             <div class="d-flex gap-1 flex-wrap align-items-center">
-              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('qr_png', qr_id=q.id) }}">Tải mã QR (PNG)</a>
-              <a class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener" href="{{ url_for('public_qr', slug=q.slug, preview=1) }}">Mở thử</a>
+              {% if not q.is_playlist %}
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('qr_png', qr_id=q.id) }}">Tải mã QR (PNG)</a>
+                <a class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener" href="{{ url_for('public_qr', slug=q.slug, preview=1) }}">Mở thử</a>
+              {% endif %}
               {% if not q.is_playlist %}<button class="btn btn-outline-warning btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#qr-edit-{{ q.id }}" aria-expanded="false">Đổi video đích</button>{% endif %}
               <form method="post" action="{{ url_for('delete_qr', qr_id=q.id) }}" onsubmit="return confirm('Ngừng sử dụng mã QR này? Mã đã in không còn mở học liệu; lịch sử quét và xem được giữ nguyên.');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm">Xóa</button>

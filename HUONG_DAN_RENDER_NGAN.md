@@ -1,29 +1,34 @@
-# Web App v4.3.8 – Cập nhật chức năng bàn giao môn học/mô đun
+# Hướng dẫn nâng cấp Web App v4.3.9 trên Render
 
-## Trước khi cập nhật
+## 1. Sao lưu trước khi cập nhật
 
-1. **Sao lưu PostgreSQL hiện tại** qua mục **Sao lưu & khôi phục** (Quản trị viên) và lưu bản ZIP ở nơi an toàn. Tuyệt đối không đưa ZIP sao lưu (có dữ liệu riêng tư/token mã hóa) lên GitHub.
-2. Giải nén tệp mã nguồn v4.3.8, cập nhật **các tệp nằm bên trong** lên nhánh GitHub Render đang chạy. Không đưa nguyên tệp ZIP mã nguồn lên nhánh để thay cho các tệp mã nguồn.
-3. Để Render chạy bản triển khai mới. **Không chọn xóa dữ liệu** hoặc tạo PostgreSQL mới. Với biến môi trường mặc định `AUTO_CREATE_DB=1`, hệ thống sẽ tự tạo **bảng mới `course_transfers`** để ghi lịch sử bàn giao; không xóa bảng/dữ liệu cũ.
+Đăng nhập Quản trị viên → **Sao lưu & khôi phục** → tải tệp sao lưu hệ thống; bảo quản riêng và **không đưa tệp chứa dữ liệu/token lên GitHub**.
 
-## Kiểm thử sau khi Render deploy thành công
+## 2. Cập nhật mã nguồn
 
-1. Đăng nhập tài khoản **Quản trị viên** → **Môn học/mô đun** → **Bàn giao môn học/mô đun cho giảng viên khác**.
-2. Chọn môn đang thuộc GV A, chọn GV B, tích xác nhận rồi bấm **Bàn giao môn học/mô đun**. Không chọn giảng viên đã có môn cùng tên; phải xử lý trùng môn trước.
-3. Xác nhận GV A không còn nhìn thấy môn bàn giao trong danh sách môn và không có quyền sửa/xóa/tải QR của môn đó; QR riêng không gắn môn của GV A vẫn thuộc GV A.
-4. Đăng nhập GV B: môn được bàn giao hiển thị, lớp học giữ nguyên, QR cũ xuất hiện trong **Mã QR động**; có thể tải PNG và ZIP QR theo môn, mở thử và (nếu cần) đổi video đích sang video thuộc kênh GV B đã kết nối.
-5. **Quan trọng:** Lấy một mã QR đã in/đã phát hành từ trước, quét bằng tài khoản SV thử: URL `/q/...` không đổi và học liệu vẫn phát nếu video/playlist YouTube nguồn còn khả dụng. Kiểm tra lịch sử quét/xem trước và sau bàn giao trong **Thống kê khai thác**.
-6. Quản trị viên kiểm tra mục **Lịch sử bàn giao gần đây**. Kiểm tra chức năng sao lưu có tệp `course_transfers.json`.
-7. Nếu video/playlist cũ do kênh GV A sở hữu, **không xóa tài khoản/kênh YouTube GV A** khi còn được tham chiếu. Hệ thống ngăn xóa giảng viên có nguồn học liệu hoặc mã QR đã bàn giao. Bàn giao **không chuyển quyền sở hữu kênh YouTube**.
+Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.9_RENDER.zip`. Cập nhật toàn bộ tệp nguồn bên trong vào nhánh GitHub đang được Render triển khai (không tải nguyên ZIP thay cho mã nguồn). Đợi Render báo deploy thành công, sau đó mở Web App để kiểm tra.
 
-## Quy tắc được áp dụng
+Không tạo PostgreSQL mới, không sử dụng chức năng xóa dữ liệu. Bản này bổ sung **ba cột nullable trong bảng `error_logs`**. Nếu biến `AUTO_CREATE_DB=1` (mặc định trong bản đóng gói), máy chủ tự cập nhật cột khi khởi động. Nếu dùng `AUTO_CREATE_DB=0`, phải bổ sung các cột `actor_user_id INTEGER`, `actor_student_code VARCHAR(64)`, `actor_class_code VARCHAR(64)` vào bảng `error_logs` trước khi dùng phiên bản mới.
 
-- **Bàn giao có hiệu lực ngay**, chỉ Quản trị viên thực hiện và có xác nhận trước khi lưu; lưu lịch sử người bàn giao, GV cũ, GV mới và ngày thực hiện.
-- **Mã môn, mã QR, slug/URL QR, hình ảnh QR, lớp áp dụng, liên kết học liệu, lịch sử quét/xem và tác giả QR ban đầu đều không thay đổi.** Quyền quản lý QR thuộc môn đi theo GV đang phụ trách.
-- Không tự tạo thêm QR từ video/playlist chưa thuộc kênh YouTube GV B kết nối. Những QR cũ đã tạo từ nguồn GV A vẫn tiếp tục hoạt động và có thể được GV B quản lý.
-- Tài khoản/kênh YouTube gốc vẫn cần duy trì; nếu video bị xóa, chuyển riêng tư hoặc khóa nhúng ở YouTube, **Web App không thể đảm bảo video tiếp tục phát**, dù hình QR vẫn giữ nguyên.
-- Với dự án cài đặt `AUTO_CREATE_DB=0`, cần thực hiện tạo bảng `course_transfers` theo `models.py` bằng quy trình triển khai CSDL của đơn vị trước khi sử dụng chức năng này.
+## 3. Kiểm tra sau triển khai
 
-## Mức độ kiểm thử
+1. **Môn học/Mô đun:** mở và xác nhận cảnh báo chống môn trùng được làm to, chữ quan trọng in đậm.
+2. **Kho video học liệu:** cuộn đến playlist ở giữa trang; chọn hoặc bỏ môn → **Lưu**; đảm bảo vẫn đứng nguyên chỗ, cùng dòng hiển thị xác nhận. Kiểm tra danh sách môn áp dụng đã lưu khi mở lại trang.
+3. Với playlist **đã tạo QR**, chọn môn phù hợp để thấy **Tải mã QR / Mở thử**. Với môn khác chưa tạo QR, nút **Tạo mã QR** phải xuất hiện. Đảm bảo mã PNG tải được, URL mở thử phát được.
+4. **Mã QR động:** xác nhận hàng playlist không còn nút tải/mở thử riêng; các mã video vẫn còn nút như cũ.
+5. **Tải ZIP:** khi đang xem tất cả, mở ZIP để kiểm tra mỗi môn có thư mục riêng; sau đó lọc đúng môn → ZIP chỉ chứa mã thuộc môn đó; kiểm tra mục chưa gán môn nếu có.
+6. **Nhật ký lỗi:** kiểm tra cột Người thực hiện thất bại; sau lỗi thật của GV, họ tên và email xuất hiện (nếu đã xác định được); lỗi tự động ghi tác vụ hệ thống; các bản ghi cũ có thể để Không xác định. Không cố ý gây lỗi trên hệ thống đang phục vụ SV.
+7. **QR trên điện thoại:** SV chọn tên lớp; danh sách chỉ có **Họ tên (3 số cuối mã HSSV)**. Tiếp tục xem video, xác nhận lượt quét và phiên xem vẫn thống kê đúng sinh viên.
 
-Đã chạy kiểm tra cú pháp Python, 22 mẫu Jinja2, kiểm thử SQLite trên mô hình dữ liệu thực về quy tắc quyền QR khi bàn giao và bàn giao tiếp lần hai, cùng các bài kiểm tra giao diện hiện có. **Chưa kiểm thử Google OAuth/PostgreSQL/Render trực tiếp trong môi trường thực tế**.
+## 4. Lưu ý vận hành
+
+- **Không thay đổi mã QR, slug hoặc URL đã phát hành**, không xóa lịch sử quét/xem.
+- Chỉ thay đổi cách hiển thị và thao tác, ngoại trừ ba cột bổ sung cho nhật ký lỗi.
+- Bản ghi nhật ký lỗi cũ không chứa định danh thì không thể tự suy luận chính xác người thực hiện. Các sự cố trước bước nhận diện SV cũng không thể gán chắc chắn cho một SV.
+- Nếu trình duyệt tắt JavaScript, lưu môn playlist sẽ sử dụng cách gửi trang thông thường; cập nhật tại chỗ chỉ khả dụng khi JavaScript đang hoạt động.
+- Cần **kiểm thử trên Render/PostgreSQL thật** trước khi thông báo triển khai rộng rãi.
+
+## 5. Kết quả kiểm tra tĩnh
+
+`python -m compileall -q .` · Jinja2 22 trang · `node --check` phần JavaScript mới · `python tests/test_v439_interface.py` · `python tests/test_v439_zip.py` · các bộ kiểm tra giao diện/nghiệp vụ trước.
+

@@ -96,16 +96,22 @@
           <td>
             {% set active_links = p.course_links | selectattr('active') | list %}
             {% if active_course_ids %}
-              <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap">
+              <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap playlist-qr-actions align-items-center">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-                <select class="form-select form-select-sm" name="course_id" aria-label="Chọn môn học/mô đun tạo QR playlist" required>
+                <select class="form-select form-select-sm playlist-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR playlist" required>
                   {% if active_course_ids|length > 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
                   {% for l in active_links if l.course.owner_id == me.id and l.course.active %}
-                    <option value="{{ l.course.id }}">{{ l.course.name }}{{ ' – đã có QR' if l.qr and l.qr.active else '' }}</option>
+                    <option value="{{ l.course.id }}"
+                      {% if l.qr and l.qr.active %}
+                      data-qr-png="{{ url_for('qr_png', qr_id=l.qr.id) }}"
+                      data-qr-preview="{{ url_for('public_qr', slug=l.qr.slug, preview=1) }}"
+                      {% endif %}>{{ l.course.name }}{{ ' – đã có mã QR' if l.qr and l.qr.active else '' }}</option>
                   {% endfor %}
                 </select>
-                <button class="btn btn-primary btn-sm" {{ 'disabled' if not p.is_available else '' }}>Tạo mã QR</button>
+                <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available else '' }}>Tạo mã QR</button>
+                <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#">Tải mã QR</a>
+                <a class="btn btn-outline-primary btn-sm playlist-qr-preview" hidden href="#" target="_blank" rel="noopener">Mở thử</a>
               </form>
             {% else %}<div class="text-muted small">Hãy chọn môn học/mô đun và bấm Lưu trước.</div>{% endif %}
           </td>
@@ -234,6 +240,89 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+// Chỉ cập nhật dòng playlist vừa lưu, không tải lại trang, không đổi vị trí cuộn.
+(function () {
+  'use strict';
+  document.addEventListener('submit', async function (event) {
+    const form = event.target.closest('form.playlist-course-form');
+    if (!form) return;
+    event.preventDefault();
+    const button = form.querySelector('button[type="submit"], button:not([type])');
+    if (form.dataset.saving === '1') return;
+    form.dataset.saving = '1';
+    if (button) button.disabled = true;
+    const row = form.closest('tr.library-target-row');
+    const rowId = row && row.id;
+    const oldScrollY = window.scrollY;
+    const oldScrollX = window.scrollX;
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST', body: new FormData(form), credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }, redirect: 'follow', cache: 'no-store'
+      });
+      if (!response.ok || !response.url.includes('/videos')) throw new Error('Không thể lưu dữ liệu.');
+      const html = await response.text();
+      const updatedPage = new DOMParser().parseFromString(html, 'text/html');
+      const newRow = updatedPage.getElementById(rowId);
+      if (!newRow) throw new Error('Không tìm thấy playlist sau khi lưu.');
+      const feedback = document.createElement('div');
+      feedback.className = 'library-save-feedback text-success fw-semibold';
+      feedback.setAttribute('role','status');
+      feedback.textContent = 'Đã lưu môn học/mô đun áp dụng.';
+      const summary = newRow.querySelector('.course-picker-summary');
+      row.replaceWith(newRow);
+      // Hàng mới cần gắn lại trình xử lý thay đổi danh sách môn học.
+      const newForm = newRow.querySelector('.playlist-course-form');
+      if (newForm) {
+        newForm.querySelectorAll('.playlist-course-check').forEach(check =>
+          check.addEventListener('change', () => updateCoursePicker(newForm)));
+        updateCoursePicker(newForm);
+      }
+      newRow.querySelectorAll('.playlist-qr-course-select').forEach(updatePlaylistQrActions);
+      if (summary) summary.appendChild(feedback);
+      window.scrollTo(oldScrollX, oldScrollY);
+    } catch (error) {
+      // Không tự gửi lại yêu cầu: tránh việc ghi dữ liệu hai lần nếu mạng chập chờn.
+      if (button) button.disabled = false;
+      let feedback = form.querySelector('.library-save-feedback');
+      if (!feedback) {
+        feedback = document.createElement('div');
+        feedback.className = 'library-save-feedback text-danger';
+        feedback.setAttribute('role', 'alert');
+        form.appendChild(feedback);
+      }
+      feedback.textContent = 'Chưa xác nhận được kết quả lưu. Vui lòng kiểm tra và thử lại nếu cần.';
+    } finally {
+      form.dataset.saving = '0';
+    }
+  });
+
+  // Mỗi playlist có thể áp dụng cho nhiều MH/MĐ, nên trạng thái QR thay đổi theo môn đã chọn.
+  function updatePlaylistQrActions(select) {
+    const area = select.closest('.playlist-qr-actions');
+    if (!area) return;
+    const option = select.selectedOptions[0];
+    const hasQr = !!(option && option.dataset.qrPng);
+    const validCourse = !!select.value;
+    const create = area.querySelector('.playlist-qr-create');
+    const download = area.querySelector('.playlist-qr-download');
+    const preview = area.querySelector('.playlist-qr-preview');
+    if (create) { create.hidden = hasQr; create.disabled = !validCourse; }
+    for (const link of [download, preview]) {
+      if (!link) continue;
+      link.hidden = !hasQr;
+      if (hasQr) link.href = link === download ? option.dataset.qrPng : option.dataset.qrPreview;
+      else link.removeAttribute('href');
+    }
+  }
+  document.addEventListener('change', function (event) {
+    if (event.target.matches('.playlist-qr-course-select')) updatePlaylistQrActions(event.target);
+  });
+  document.querySelectorAll('.playlist-qr-course-select').forEach(updatePlaylistQrActions);
+})();
+</script>
+
 <script>
 function bindSelectAll(masterId, itemSelector, countId, suffix){
   const master=document.getElementById(masterId);

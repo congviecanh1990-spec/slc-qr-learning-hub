@@ -1,7 +1,10 @@
 {% extends 'base.html' %}
 {% block content %}
 <h2 class="mb-3">Quản lý môn học/ mô đun</h2>
-<div class="alert alert-info small">Mỗi môn học/mô đun chỉ cần tạo một lần cho mỗi giảng viên. Khi dạy nhiều lớp, chọn bổ sung các lớp tại cùng một môn học/mô đun; không cần tạo thêm môn học trùng tên.</div>
+<div class="alert alert-info shadow-sm course-creation-notice" role="note">
+  <div class="fw-bold mb-1">Lưu ý khi tạo môn học/mô đun</div>
+  <div><strong>Mỗi môn học/mô đun chỉ cần tạo một lần</strong> cho mỗi giảng viên. Khi dạy <strong>nhiều lớp</strong>, hãy <strong>bổ sung các lớp vào cùng môn học/mô đun</strong>; <strong>không tạo thêm môn học trùng tên</strong>.</div>
+</div>
 {% if me.role == 'admin' %}
 <div id="admin-course-transfer" class="card shadow-sm mb-4 border-primary">
   <div class="card-header fw-bold">Bàn giao môn học/mô đun cho giảng viên khác (Quản trị viên)</div>

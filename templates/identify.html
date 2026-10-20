@@ -18,7 +18,7 @@
             <div class="fw-bold mt-2">{{ school_name }}</div>
           </div>
           <h3>Truy cập học liệu</h3>
-          <p class="text-muted">Sinh viên không cần đăng nhập. Hãy nhập tên lớp và chọn đúng họ tên của mình (kèm mã sinh viên) để xem học liệu do giảng viên cung cấp.</p>
+          <p class="text-muted">Sinh viên không cần đăng nhập. Hãy nhập tên lớp và chọn đúng họ tên của mình (kèm 3 số cuối mã HSSV) để xem học liệu do giảng viên cung cấp.</p>
           <p class="small text-muted">Chỉ chọn thông tin của chính mình. Lượt quét và quá trình xem sẽ được thống kê theo mã sinh viên đã chọn.</p>
           {% if message %}<div class="alert alert-warning py-2" role="alert">{{ message }}</div>{% endif %}
           {% if not class_choices %}
@@ -84,9 +84,10 @@
       if (!response.ok) throw new Error('Không tải được danh sách sinh viên.');
       const data = await response.json();
       if (seq !== requestNumber) return;
-      select.replaceChildren(new Option('Chọn họ tên (mã sinh viên)', ''));
+      select.replaceChildren(new Option('Chọn họ tên sinh viên (3 số cuối mã HSSV)', ''));
       for (const student of data.students || []) {
-        select.add(new Option(student.name + ' (' + student.code + ')', String(student.id)));
+        // API chỉ trả ba ký tự nhận biết, không chuyển mã SV đầy đủ xuống trình duyệt.
+        select.add(new Option(student.name + ' (' + student.short_code + ')', String(student.id)));
       }
       select.disabled = !data.students || !data.students.length;
       if (select.disabled) notice.textContent = 'Lớp này chưa có sinh viên đang học trong danh sách. Vui lòng liên hệ giảng viên.';

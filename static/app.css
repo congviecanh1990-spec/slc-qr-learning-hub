@@ -30,3 +30,9 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 /* v4.3.7: Sau lưu gán playlist, tạo mã QR hoặc sửa lớp, quay về đúng dòng. */
 .library-target-row{scroll-margin-top:110px}
 #playlists,#videos,#qr-course-filter{scroll-margin-top:110px}
+
+/* v4.3.9: làm nổi bật hướng dẫn chống tạo trùng môn học. */
+.course-creation-notice{font-size:1.06rem;line-height:1.7;border-left:5px solid #0a6696}.course-creation-notice strong{font-weight:800}.library-save-feedback{font-size:.88rem;margin-top:.3rem}
+
+/* Tránh quy tắc .btn của Bootstrap hiển thị link khi đã ẩn. */
+.playlist-qr-actions [hidden]{display:none!important}

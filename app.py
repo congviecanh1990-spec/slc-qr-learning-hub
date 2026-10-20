@@ -368,6 +368,12 @@ def ensure_schema_upgrades():
                 conn.execute(text("ALTER TABLE error_logs ADD COLUMN action VARCHAR(128)"))
             if "course_module" not in error_columns:
                 conn.execute(text("ALTER TABLE error_logs ADD COLUMN course_module VARCHAR(255)"))
+            if "actor_user_id" not in error_columns:
+                conn.execute(text("ALTER TABLE error_logs ADD COLUMN actor_user_id INTEGER"))
+            if "actor_student_code" not in error_columns:
+                conn.execute(text("ALTER TABLE error_logs ADD COLUMN actor_student_code VARCHAR(64)"))
+            if "actor_class_code" not in error_columns:
+                conn.execute(text("ALTER TABLE error_logs ADD COLUMN actor_class_code VARCHAR(64)"))
         # Chỉ mục phục vụ thống kê phân trang và ghép lượt quét với phiên xem.
         # Không thay đổi dữ liệu cũ; các chỉ mục chỉ được tạo nếu chưa có.
         if "scan_logs" in tables:
@@ -890,6 +896,37 @@ def register_routes(app):
             return jsonify({"error": "khong_tim_thay_du_lieu"}), 404
         return render_template("http_error.html", title="Không tìm thấy trang", message="Trang hoặc dữ liệu bạn yêu cầu không tồn tại."), 404
 
+    @app.errorhandler(500)
+    def handle_unexpected_error(error):
+        """Ghi nhật ký lỗi thật kèm người thao tác khi đã được định danh.
+
+        Ngoại lệ không có phiên đăng nhập (ví dụ OAuth trước khi hoàn thành) để trống
+        thông tin người dùng thay vì gán nhầm cho một GV/SV khác.
+        """
+        try:
+            db.session.rollback()
+            uid = session.get("user_id")
+            user = db.session.get(User, uid) if uid else None
+            is_student = session.get("participant_role") == "SV" and not user
+            code = session.get("participant_code") if is_student else None
+            class_code = session.get("participant_class_code") if is_student else None
+            db.session.add(ErrorLog(
+                module="viewer" if request.path.startswith("/q/") or request.path.startswith("/identify") else "system",
+                action="Truy cập học liệu" if is_student else "Thao tác hệ thống",
+                course_module="Hệ thống", message="Lỗi xử lý yêu cầu",
+                details=str(getattr(error, "original_exception", None) or error)[:2000],
+                actor_user_id=(user.id if user else None),
+                actor_student_code=(str(code)[:64] if code else None),
+                actor_class_code=(str(class_code)[:64] if class_code else None),
+            ))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "loi_he_thong"}), 500
+        return render_template("http_error.html", title="Có lỗi hệ thống",
+                               message="Hệ thống gặp sự cố. Vui lòng thử lại sau."), 500
+
     @app.context_processor
     def inject_globals():
         endpoint = request.endpoint or ""
@@ -1147,7 +1184,7 @@ def register_routes(app):
             return jsonify({"ok": bool(channels), "message": f"Đã đồng bộ {len(channels)} kênh YouTube và {video_count} video." + (" Một số kênh cần kiểm tra: " + "; ".join(sync_errors) if sync_errors else "")})
         except Exception as exc:
             db.session.rollback()
-            db.session.add(ErrorLog(module="youtube", action="Tự động đồng bộ sau đăng nhập", course_module="Hệ thống",
+            db.session.add(ErrorLog(module="youtube", action="Tự động đồng bộ sau đăng nhập", course_module="Hệ thống", actor_user_id=user.id,
                                     message="Không thể tự động đồng bộ kênh YouTube", details=str(exc)[:10000]))
             record_functional_test("YT_SYNC", "Đồng bộ kênh/video YouTube", False, owner_id=user.id, note=str(exc)[:1000])
             db.session.commit()
@@ -1201,7 +1238,7 @@ def register_routes(app):
             db.session.rollback()
             elapsed = time.perf_counter() - t0
             db.session.add(ErrorLog(
-                module="youtube", action="Đồng bộ kênh/video", course_module="Hệ thống",
+                module="youtube", action="Đồng bộ kênh/video", course_module="Hệ thống", actor_user_id=user.id,
                 message="Đồng bộ kênh/video YouTube thất bại", details=str(exc)
             ))
             record_functional_test(
@@ -2281,23 +2318,46 @@ def register_routes(app):
     @app.get("/qr/download-all.zip")
     @login_required
     def qr_download_all():
+        """Xuất ZIP đúng phạm vi đang lọc; khi xem tất cả, chia thư mục theo MH/MĐ.
+
+        Tên thư mục có mã môn để tách được những môn có tên giống nhau.
+        Chỉ QR được quản lý theo phân quyền hiện hành mới có trong ZIP.
+        """
         user = current_user()
-        qrs = QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True)).all()
+        selected = request.args.get("course_id", type=int)
+        if request.args.get("course_id") not in (None, "") and selected is None:
+            abort(400)
+        if selected is not None and selected < 0:
+            abort(404)
+        course = None
+        if selected and selected > 0:
+            course = db.session.get(Course, selected) or abort(404)
+            if not course.active or not course_owned_by_user(course, user):
+                abort(403)
+        qry = QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True))
+        if selected is not None:
+            qry = qry.filter(QrCode.course_id == selected if selected > 0 else QrCode.course_id.is_(None))
+        qrs = qry.order_by(QrCode.course_id, QrCode.created_at, QrCode.id).all()
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
             for q in qrs:
+                # Có thể lọc tất cả: các môn được nhóm theo mã môn, QR chưa gán tách riêng.
+                folder = (safe_filename(f"{q.course.code}_{q.course.name}")
+                          if q.course else "Chua_gan_mon_hoc")
                 img = generate_branded_qr(q)
                 png = io.BytesIO()
                 img.save(png, format="PNG")
-                name = qr_download_name(q)
+                name = f"{folder}/{qr_download_name(q)}"
                 if name in used_names:
                     stem, ext = os.path.splitext(name)
                     name = f"{stem}_{q.slug}{ext}"
                 used_names.add(name)
                 zf.writestr(name, png.getvalue())
         bio.seek(0)
-        return send_file(bio, mimetype="application/zip", as_attachment=True, download_name="Ma_QR_hoc_lieu.zip")
+        filename = (f"Ma_QR_{safe_filename(course.code)}.zip" if course else
+                    "Ma_QR_chua_gan_mon.zip" if selected == 0 else "Ma_QR_theo_mon_hoc.zip")
+        return send_file(bio, mimetype="application/zip", as_attachment=True, download_name=filename)
 
     @app.get("/q/<slug>")
     def public_qr(slug):
@@ -2469,7 +2529,8 @@ def register_routes(app):
             school_class = db.session.get(SchoolClass, class_id)
             students = current_students_in_class(school_class)
             response = jsonify({"students": [
-                {"id": student.id, "name": student.full_name, "code": student.student_code}
+                {"id": student.id, "name": student.full_name,
+                 "short_code": (re.sub(r"\D", "", student.student_code) or student.student_code)[-3:]}
                 for student in students
             ]})
         response.headers["Cache-Control"] = "no-store"
@@ -3787,7 +3848,7 @@ def register_routes(app):
                 return redirect(url_for("index"))
             except Exception as exc:
                 db.session.rollback()
-                db.session.add(ErrorLog(module="restore", action="Khôi phục dữ liệu", course_module="Hệ thống", message="Khôi phục bản sao lưu thất bại", details=str(exc)))
+                db.session.add(ErrorLog(module="restore", action="Khôi phục dữ liệu", course_module="Hệ thống", actor_user_id=user.id, message="Khôi phục bản sao lưu thất bại", details=str(exc)))
                 record_functional_test("RESTORE", "Khôi phục dữ liệu từ bản sao lưu", False, owner_id=user.id, note=str(exc))
                 db.session.commit()
                 flash(f"Khôi phục thất bại: {exc}", "danger")
@@ -3846,11 +3907,31 @@ def register_routes(app):
             "scan": "Quét mã QR",
             "viewer": "Phát video",
         }
-        error_rows = [{
-            "log": e,
-            "action": e.action or action_fallback.get((e.module or "").lower(), "Xử lý hệ thống"),
-            "course_module": e.course_module or "Hệ thống",
-        } for e in logs]
+        student_codes = {e.actor_student_code for e in logs if e.actor_student_code}
+        class_codes = {e.actor_class_code for e in logs if e.actor_class_code}
+        student_by_code = {s.student_code: s for s in Student.query.filter(Student.student_code.in_(student_codes)).all()} if student_codes else {}
+        class_by_code = {c.code: c for c in SchoolClass.query.filter(SchoolClass.code.in_(class_codes)).all()} if class_codes else {}
+        error_rows = []
+        for e in logs:
+            actor = "Không xác định (bản ghi cũ)"
+            if e.actor_user_id:
+                teacher = e.actor or db.session.get(User, e.actor_user_id)
+                actor = f"{teacher.name} ({teacher.email})" if teacher else "Giảng viên (tài khoản đã xóa)"
+            elif e.actor_student_code:
+                st = student_by_code.get(e.actor_student_code)
+                cl = class_by_code.get(e.actor_class_code)
+                digits = re.sub(r"\D", "", e.actor_student_code)
+                short = (digits or e.actor_student_code)[-3:]
+                actor = f"{st.full_name if st else 'Sinh viên'} ({short} – {cl.name if cl else (e.actor_class_code or 'Chưa rõ lớp')})"
+            elif (e.module or "").lower() in {"websub", "reconcile"}:
+                actor = "Tác vụ đồng bộ tự động"
+            elif (e.module or "").lower() == "oauth":
+                actor = "Người đăng nhập chưa xác định"
+            error_rows.append({
+                "log": e, "actor_name": actor,
+                "action": e.action or action_fallback.get((e.module or "").lower(), "Xử lý hệ thống"),
+                "course_module": e.course_module or "Hệ thống",
+            })
         return render_template("errors.html", error_rows=error_rows)
 
     @app.post("/tasks/reconcile")

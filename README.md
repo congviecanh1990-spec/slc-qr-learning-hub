@@ -1,3 +1,17 @@
+# Thay đổi v4.3.9 – Kho học liệu, ZIP theo môn và nhật ký lỗi (20/10/2026)
+
+- **Môn học/Mô đun:** phóng to cảnh báo chỉ tạo một môn một lần; làm đậm thông tin về dạy nhiều lớp và tránh môn trùng tên.
+- **Kho video học liệu:** thao tác Lưu môn áp dụng cho playlist chạy bằng yêu cầu nền, chỉ cập nhật dòng vừa lưu, giữ nguyên vị trí cuộn; có thông báo ngay trong dòng. Khi JavaScript không hoạt động, vẫn cho gửi biểu mẫu theo cơ chế cũ.
+- **Playlist đã có mã QR:** trong cột Mã QR, khi chọn môn đã có mã QR, hiện **Tải mã QR** và **Mở thử**; nếu môn chưa có QR, hiện **Tạo mã QR**. Không hiện hai nút tải/mở thử của playlist ở bảng Kho mã QR động để tránh trùng thao tác.
+- **ZIP trong Mã QR động:** khi xem tất cả, ZIP chứa thư mục riêng theo **mã môn + tên môn**, và một thư mục riêng cho mã QR không gán môn. Khi đang lọc môn thì ZIP chỉ chứa QR thuộc môn đang lọc. Giữ kiểm tra phân quyền phía máy chủ, chặn yêu cầu tải môn ngoài quyền.
+- **Nhật ký lỗi:** thêm người thực hiện thất bại, lưu định danh GV hoặc mã SV/lớp khi có thể xác định; hiển thị GV theo họ tên + email, SV theo họ tên + ba số cuối mã SV + tên lớp. Sự kiện tự đồng bộ không bị gán nhầm cho GV. Lỗi cũ thiếu danh tính ghi “Không xác định”, không suy đoán. Bổ sung ghi nhật ký lỗi bất thường (HTTP 500) theo danh tính phiên hợp lệ, nếu có.
+- **Nhận diện sinh viên:** danh sách chọn hiển thị họ tên kèm **3 số cuối mã HSSV**; API danh sách chỉ trả mã rút gọn (không trả toàn bộ mã); biểu mẫu vẫn gửi ID sinh viên, máy chủ tiếp tục kiểm tra thông tin và lưu mã đầy đủ trong PostgreSQL.
+- **Nâng cấp CSDL không phá hủy dữ liệu:** bổ sung các cột tùy chọn `error_logs.actor_user_id`, `actor_student_code`, `actor_class_code` vào bảng hiện có khi `AUTO_CREATE_DB=1`; không xóa bảng/hồ sơ trước đây. Với `AUTO_CREATE_DB=0` cần nâng cấp cấu trúc riêng trước khi khởi chạy phiên bản mới.
+
+**Kiểm tra tại môi trường đóng gói:** chạy qua cú pháp Python, 22 mẫu Jinja2, JavaScript Node syntax, kiểm tra bố cục playlist có/chưa QR theo môn, ZIP toàn bộ/lọc/không gán/bảo vệ phân quyền, và các bộ kiểm tra độc lập kế thừa. Chưa kiểm thử tích hợp với Render, PostgreSQL thực tế hoặc Google OAuth.
+
+---
+
 # Thay đổi v4.3.8 – Bàn giao môn học/mô đun (20/10/2026)
 
 - Thêm chức năng **Bàn giao môn học/mô đun** cho tài khoản Quản trị viên tại trang **Môn học/mô đun**; lịch sử bàn giao được lưu ở bảng `course_transfers` và nằm trong bản sao lưu.
