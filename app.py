@@ -293,6 +293,36 @@ def current_students_in_class(school_class: SchoolClass, on_date: date | None = 
     return sorted(rows, key=lambda item: ((item.full_name or "").casefold(), item.student_code))
 
 
+def analytics_students_for_filters(user: User, course_id: int | None = None,
+                                   class_code: str = ""):
+    """Danh sách SV đang học theo giao môn/lớp, áp dụng quyền GV ở SQL.
+
+    - Có môn: chỉ lấy SV thuộc các lớp đang được gán môn đó.
+    - Có lớp: chỉ lấy SV đang học lớp đó.
+    - Có cả hai: bắt buộc lớp đang được gán đúng môn đã chọn.
+    Không suy ra SV học một môn chỉ từ lịch sử xem; dùng danh sách lớp
+    hiện hành và quan hệ CourseClass đang hoạt động.
+    """
+    today = utcnow().date()
+    query = (Student.query
+        .join(ClassEnrollment, ClassEnrollment.student_id == Student.id)
+        .join(SchoolClass, SchoolClass.id == ClassEnrollment.school_class_id)
+        .filter(SchoolClass.active.is_(True),
+                ClassEnrollment.started_on <= today,
+                or_(ClassEnrollment.ended_on.is_(None), ClassEnrollment.ended_on > today)))
+    if class_code:
+        query = query.filter(SchoolClass.code == class_code)
+    if course_id is not None or user.role != "admin":
+        query = (query.join(CourseClass, CourseClass.school_class_id == SchoolClass.id)
+            .join(Course, Course.id == CourseClass.course_id)
+            .filter(CourseClass.active.is_(True), Course.active.is_(True)))
+        if course_id is not None:
+            query = query.filter(Course.id == course_id)
+        if user.role != "admin":
+            query = query.filter(Course.owner_id == user.id)
+    return query.distinct().order_by(Student.full_name, Student.student_code)
+
+
 def validate_student_selection_for_qr(qr: QrCode, school_class_id: int, student_id: int, class_name: str):
     """Đối chiếu lựa chọn với lớp, liên kết môn học và sĩ số tại thời điểm hiện tại."""
     school_class = db.session.get(SchoolClass, school_class_id)
@@ -2866,6 +2896,19 @@ def register_routes(app):
             "completed": ws.completed,
         })
 
+    @app.get("/api/analytics/students")
+    @login_required
+    def analytics_student_options():
+        """Danh sách chọn SV phụ thuộc môn/lớp; không trả về mã HSSV đầy đủ."""
+        user = current_user()
+        course_id = request.args.get("course_id", type=int)
+        class_code = (request.args.get("class_code") or "").strip()
+        students = analytics_students_for_filters(user, course_id, class_code).all()
+        return jsonify({"students": [
+            {"id": st.id, "label": f"{st.full_name} ({student_code_tail(st.student_code)})"}
+            for st in students
+        ]})
+
     @app.get("/analytics")
     @login_required
     def analytics():
@@ -2909,23 +2952,10 @@ def register_routes(app):
             # Không cho dùng mã lớp tùy ý ngoài quyền người dùng.
             class_code = "__unauthorized__"
 
-        # Chỉ đưa sinh viên thuộc phạm vi được phân quyền vào danh sách chọn.
-        # HTML chỉ xuất ID nội bộ và tên (3 số cuối), KHÔNG xuất mã SV đầy đủ.
-        students_query = Student.query
-        if class_code:
-            students_query = (students_query.join(ClassEnrollment,
-                ClassEnrollment.student_id == Student.id)
-                .join(SchoolClass, SchoolClass.id == ClassEnrollment.school_class_id)
-                .filter(SchoolClass.code == class_code))
-        if user.role != "admin":
-            students_query = (students_query.join(ClassEnrollment,
-                ClassEnrollment.student_id == Student.id) if not class_code else students_query)
-            students_query = (students_query.join(CourseClass,
-                CourseClass.school_class_id == ClassEnrollment.school_class_id)
-                .join(Course, Course.id == CourseClass.course_id)
-                .filter(Course.owner_id == user.id, Course.active.is_(True),
-                        CourseClass.active.is_(True)))
-        student_options = students_query.distinct().order_by(Student.full_name, Student.student_code).all()
+        # Bộ chọn SV chỉ gồm các em đang học đúng môn/lớp được chọn:
+        # môn -> lớp được gán môn; lớp -> SV của lớp; cả hai -> giao hai điều kiện.
+        # Kiểm tra quyền GV ngay trong truy vấn, chỉ hiển thị 3 số cuối mã SV.
+        student_options = analytics_students_for_filters(user, course_id, class_code).all()
         student_id = request.args.get("student_id", type=int)
         selected_student = next((st for st in student_options if st.id == student_id), None)
         selected_student_code = selected_student.student_code if selected_student else None

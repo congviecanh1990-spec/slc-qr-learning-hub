@@ -92,7 +92,7 @@
         <select class="form-select form-select-sm" name="course_id" id="filterCourse"><option value="">Tất cả</option>
           {% for c in course_options %}<option value="{{ c.id }}" {{ 'selected' if request.args.get('course_id') == c.id|string else '' }}>{{ c.name }}</option>{% endfor %}</select></div>
       <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Lớp</label>
-        <select class="form-select form-select-sm" name="class_code"><option value="">Tất cả</option>
+        <select class="form-select form-select-sm" name="class_code" id="filterClass"><option value="">Tất cả</option>
           {% for c in class_options %}<option value="{{ c.code }}" {{ 'selected' if request.args.get('class_code') == c.code else '' }}>{{ c.name }}</option>{% endfor %}</select></div>
       <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Học liệu được giao</label>
         <select class="form-select form-select-sm" name="qr_id" id="filterQr"><option value="">Tất cả</option>
@@ -102,12 +102,12 @@
           {% for value,label in [('all','Tất cả lịch sử'),('not_scanned','SV chưa quét QR'),('not_completed','Chưa hoàn thành'),('roster_not_completed','SV chưa hoàn thành học liệu (đối chiếu lớp)'),('unwatched','Đã quét, chưa xem'),('completed','Đã hoàn thành'),('failed','Mở QR thất bại')] %}
           <option value="{{ value }}" {{ 'selected' if status == value else '' }}>{{ label }}</option>{% endfor %}</select></div>
       <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Tên sinh viên</label>
-        <select class="form-select form-select-sm" name="student_id" id="filterStudent">
+        <select class="form-select form-select-sm" name="student_id" id="filterStudent" data-options-url="{{ url_for('analytics_student_options') }}">
           <option value="">Tất cả sinh viên</option>
           {% for st in student_options %}
           <option value="{{ st.id }}" {{ 'selected' if student_id == st.id else '' }}>{{ st.full_name }} ({{ student_code_tail(st.student_code) }})</option>
           {% endfor %}
-        </select></div>
+        </select><div class="form-text" id="filterStudentHint" aria-live="polite">Danh sách sinh viên theo môn học và lớp đang chọn.</div></div>
 
       <div class="col-md-auto d-flex gap-2 flex-wrap align-items-end"><button class="btn btn-primary btn-sm">Lọc kết quả</button>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sys_args) }}#khai-thac-sinh-vien">Xóa lọc</a></div>
@@ -138,6 +138,56 @@
 (function(){
   const course=document.getElementById('filterCourse'),qr=document.getElementById('filterQr');
   if(course&&qr){const update=()=>{let reset=false;for(const option of qr.options){if(!option.value)continue; option.hidden=!!course.value&&option.dataset.course!==course.value; if(option.hidden&&option.selected)reset=true;}if(reset)qr.value='';};course.addEventListener('change',update);update();}
+  const cls=document.getElementById('filterClass');
+  const student=document.getElementById('filterStudent');
+  const studentHint=document.getElementById('filterStudentHint');
+  if(course && cls && student){
+    let requestNumber=0;
+    let pendingRequest=null;
+    const updateStudents=async()=>{
+      const thisRequest=++requestNumber;
+      if(pendingRequest) pendingRequest.abort();
+      pendingRequest=new AbortController();
+      const previousId=student.value;
+      student.disabled=true;
+      student.replaceChildren(new Option('Đang tải danh sách sinh viên…',''));
+      if(studentHint) studentHint.textContent='Đang cập nhật danh sách sinh viên theo môn học/lớp…';
+      const params=new URLSearchParams({course_id:course.value,class_code:cls.value});
+      try{
+        const response=await fetch(student.dataset.optionsUrl+'?'+params.toString(),{
+          method:'GET',credentials:'same-origin',signal:pendingRequest.signal,
+          headers:{Accept:'application/json'}
+        });
+        if(!response.ok) throw new Error('Không thể tải danh sách sinh viên');
+        const data=await response.json();
+        if(thisRequest!==requestNumber) return;
+        student.replaceChildren(new Option('Tất cả sinh viên',''));
+        for(const item of data.students||[]){
+          student.add(new Option(item.label,String(item.id)));
+        }
+        // Chỉ giữ SV đã chọn nếu vẫn thuộc tập SV của môn/lớp mới.
+        if(previousId && [...student.options].some(option=>option.value===previousId)){
+          student.value=previousId;
+        }else{
+          student.value='';
+        }
+        student.disabled=false;
+        if(studentHint){
+          const count=(data.students||[]).length;
+          studentHint.textContent=count?`${count} sinh viên phù hợp với môn học/lớp đã chọn.`:
+            'Không có sinh viên đang học phù hợp với môn học/lớp đã chọn.';
+        }
+      }catch(error){
+        if(error.name==='AbortError'||thisRequest!==requestNumber) return;
+        student.replaceChildren(new Option('Không tải được danh sách – thử chọn lại',''));
+        student.disabled=false;
+        student.value='';
+        if(studentHint) studentHint.textContent='Không tải được danh sách sinh viên. Vui lòng chọn lại môn/lớp hoặc tải lại trang.';
+      }
+    };
+    course.addEventListener('change',updateStudents);
+    cls.addEventListener('change',updateStudents);
+  }
   for(const [id,box] of [['testPeriod','testCustomDates']]){
     const s=document.getElementById(id),d=document.getElementById(box);if(s&&d)s.addEventListener('change',()=>d.classList.toggle('d-none',s.value!=='custom'));
   }

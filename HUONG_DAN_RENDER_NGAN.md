@@ -1,3 +1,19 @@
+# Hướng dẫn nâng cấp v4.3.16 trên Render
+
+1. **Sao lưu trước khi cập nhật:** dùng chức năng Sao lưu & Khôi phục của Web App. Không xóa/reset PostgreSQL và không đưa khóa bí mật, `.env` hoặc bản sao lưu lên GitHub.
+2. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.16_RENDER.zip`, cập nhật các tệp nguồn lên nhánh GitHub mà Render đang kết nối; đợi triển khai hoàn tất. Không cần đổi các biến môi trường.
+3. Mở **Thống kê khai thác → 2. Thống kê khai thác học liệu của sinh viên**. Chọn **Môn học/Mô đun A**: ô **Tên sinh viên** phải chỉ liệt kê sinh viên đang học trong các lớp được áp dụng môn A. Không cần bấm Lọc kết quả để danh sách tên cập nhật.
+4. Chuyển **Môn học/Mô đun** về Tất cả; chọn **Lớp B**: danh sách tên phải chỉ có sinh viên hiện đang học lớp B.
+5. Chọn **Môn A + Lớp B**: chỉ sinh viên lớp B nếu lớp B được phân công môn A. Với tổ hợp môn/lớp không áp dụng cho nhau, danh sách trống và hiển thị thông báo. Chọn **Tên sinh viên** rồi bấm **Lọc kết quả** để kiểm tra bảng thống kê đúng sinh viên đã chọn.
+6. Kiểm tra một sinh viên chuyển lớp hoặc đã nghỉ/bảo lưu: sinh viên đó không còn trong danh sách lớp hiện tại nếu không còn đăng ký học hợp lệ. Các lịch sử cũ không bị xóa.
+7. Kiểm tra bằng tài khoản giảng viên khác: danh sách không được hiện sinh viên ngoài phạm vi môn/lớp giảng viên được giao. Kiểm tra phân trang 10 dòng và quy tắc xem video ≥95% vẫn nguyên vẹn.
+
+**Nếu trình duyệt vẫn hiển thị danh sách cũ:** nhấn `Ctrl + F5` sau triển khai để tải lại JavaScript của trang.
+
+**Lưu ý:** Phiên bản này không thay đổi cấu trúc PostgreSQL, đường dẫn QR hay dữ liệu lịch sử. Đã kiểm thử bằng SQLite mô phỏng và kiểm tra giao diện tĩnh, chưa kiểm chứng trực tiếp trên Render.
+
+---
+
 # Hướng dẫn nâng cấp v4.3.15 trên Render
 
 1. Trước khi cập nhật, sao lưu cơ sở dữ liệu bằng chức năng Sao lưu & Khôi phục. Không xóa hoặc đặt lại PostgreSQL.
