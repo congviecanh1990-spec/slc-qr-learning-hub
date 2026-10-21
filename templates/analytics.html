@@ -107,7 +107,7 @@
           {% for st in student_options %}
           <option value="{{ st.id }}" {{ 'selected' if student_id == st.id else '' }}>{{ st.full_name }} ({{ student_code_tail(st.student_code) }})</option>
           {% endfor %}
-        </select><div class="form-text" id="filterStudentHint" aria-live="polite">Danh sách sinh viên theo môn học và lớp đang chọn.</div></div>
+        </select></div>
 
       <div class="col-md-auto d-flex gap-2 flex-wrap align-items-end"><button class="btn btn-primary btn-sm">Lọc kết quả</button>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sys_args) }}#khai-thac-sinh-vien">Xóa lọc</a></div>
@@ -140,7 +140,6 @@
   if(course&&qr){const update=()=>{let reset=false;for(const option of qr.options){if(!option.value)continue; option.hidden=!!course.value&&option.dataset.course!==course.value; if(option.hidden&&option.selected)reset=true;}if(reset)qr.value='';};course.addEventListener('change',update);update();}
   const cls=document.getElementById('filterClass');
   const student=document.getElementById('filterStudent');
-  const studentHint=document.getElementById('filterStudentHint');
   if(course && cls && student){
     let requestNumber=0;
     let pendingRequest=null;
@@ -151,7 +150,6 @@
       const previousId=student.value;
       student.disabled=true;
       student.replaceChildren(new Option('Đang tải danh sách sinh viên…',''));
-      if(studentHint) studentHint.textContent='Đang cập nhật danh sách sinh viên theo môn học/lớp…';
       const params=new URLSearchParams({course_id:course.value,class_code:cls.value});
       try{
         const response=await fetch(student.dataset.optionsUrl+'?'+params.toString(),{
@@ -172,17 +170,11 @@
           student.value='';
         }
         student.disabled=false;
-        if(studentHint){
-          const count=(data.students||[]).length;
-          studentHint.textContent=count?`${count} sinh viên phù hợp với môn học/lớp đã chọn.`:
-            'Không có sinh viên đang học phù hợp với môn học/lớp đã chọn.';
-        }
       }catch(error){
         if(error.name==='AbortError'||thisRequest!==requestNumber) return;
         student.replaceChildren(new Option('Không tải được danh sách – thử chọn lại',''));
         student.disabled=false;
         student.value='';
-        if(studentHint) studentHint.textContent='Không tải được danh sách sinh viên. Vui lòng chọn lại môn/lớp hoặc tải lại trang.';
       }
     };
     course.addEventListener('change',updateStudents);

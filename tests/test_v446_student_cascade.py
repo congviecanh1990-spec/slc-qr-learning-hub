@@ -21,6 +21,7 @@ assert '"id": st.id' in app_src
 assert 'student_code_tail(st.student_code)' in app_src
 assert '"student_code":' not in app_src[app_src.index('def analytics_student_options():'):app_src.index('@app.get("/analytics")')]
 assert 'id="filterCourse"' in html and 'id="filterClass"' in html and 'id="filterStudent"' in html
+assert 'filterStudentHint' not in html and 'Danh sách sinh viên theo môn học và lớp đang chọn.' not in html
 assert "url_for('analytics_student_options')" in html
 assert "course.addEventListener('change',updateStudents)" in html
 assert "cls.addEventListener('change',updateStudents)" in html

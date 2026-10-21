@@ -1,16 +1,12 @@
-# Hướng dẫn nâng cấp v4.3.16 trên Render
+# Hướng dẫn cập nhật v4.3.16 – lọc sinh viên theo môn/lớp
 
-1. **Sao lưu trước khi cập nhật:** dùng chức năng Sao lưu & Khôi phục của Web App. Không xóa/reset PostgreSQL và không đưa khóa bí mật, `.env` hoặc bản sao lưu lên GitHub.
-2. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.16_RENDER.zip`, cập nhật các tệp nguồn lên nhánh GitHub mà Render đang kết nối; đợi triển khai hoàn tất. Không cần đổi các biến môi trường.
-3. Mở **Thống kê khai thác → 2. Thống kê khai thác học liệu của sinh viên**. Chọn **Môn học/Mô đun A**: ô **Tên sinh viên** phải chỉ liệt kê sinh viên đang học trong các lớp được áp dụng môn A. Không cần bấm Lọc kết quả để danh sách tên cập nhật.
-4. Chuyển **Môn học/Mô đun** về Tất cả; chọn **Lớp B**: danh sách tên phải chỉ có sinh viên hiện đang học lớp B.
-5. Chọn **Môn A + Lớp B**: chỉ sinh viên lớp B nếu lớp B được phân công môn A. Với tổ hợp môn/lớp không áp dụng cho nhau, danh sách trống và hiển thị thông báo. Chọn **Tên sinh viên** rồi bấm **Lọc kết quả** để kiểm tra bảng thống kê đúng sinh viên đã chọn.
-6. Kiểm tra một sinh viên chuyển lớp hoặc đã nghỉ/bảo lưu: sinh viên đó không còn trong danh sách lớp hiện tại nếu không còn đăng ký học hợp lệ. Các lịch sử cũ không bị xóa.
-7. Kiểm tra bằng tài khoản giảng viên khác: danh sách không được hiện sinh viên ngoài phạm vi môn/lớp giảng viên được giao. Kiểm tra phân trang 10 dòng và quy tắc xem video ≥95% vẫn nguyên vẹn.
+1. Sao lưu dữ liệu trên Web App trước khi cập nhật. Không xóa PostgreSQL, mã QR hay lịch sử.
+2. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.16_RENDER.zip`, cập nhật nội dung lên GitHub đang nối với Render và chờ triển khai thành công.
+3. Trên **Thống kê khai thác → Mục 2**, kiểm tra bộ chọn **Tên sinh viên**: chọn môn học chỉ hiện SV theo học môn đó; chọn lớp chỉ hiện SV lớp đó; chọn cả hai chỉ hiện SV của môn học trong lớp được chọn.
+4. Bỏ chú thích dưới ô chọn sinh viên; danh sách vẫn tự cập nhật khi thay đổi môn học hoặc lớp. Chọn **Lọc kết quả** để truy vấn lại bảng thống kê.
+5. Nhấn **Ctrl+F5** nếu giao diện còn hiển thị bản cũ.
 
-**Nếu trình duyệt vẫn hiển thị danh sách cũ:** nhấn `Ctrl + F5` sau triển khai để tải lại JavaScript của trang.
-
-**Lưu ý:** Phiên bản này không thay đổi cấu trúc PostgreSQL, đường dẫn QR hay dữ liệu lịch sử. Đã kiểm thử bằng SQLite mô phỏng và kiểm tra giao diện tĩnh, chưa kiểm chứng trực tiếp trên Render.
+Không thay đổi cấu trúc PostgreSQL hoặc đường dẫn QR. Chưa kiểm thử tích hợp trên Render.
 
 ---
 

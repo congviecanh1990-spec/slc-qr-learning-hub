@@ -1,22 +1,3 @@
-# Thay đổi v4.3.16 – 21/10/2026
-
-## Thống kê khai thác → Mục 2: Bộ lọc Tên sinh viên phụ thuộc môn/lớp
-
-- **Chỉ chọn môn học/mô đun:** danh sách Tên sinh viên chỉ gồm sinh viên **đang học ở các lớp đang được gán môn đó**; không hiển thị sinh viên các môn khác.
-- **Chỉ chọn lớp:** chỉ hiển thị sinh viên **đang học lớp đó**.
-- **Chọn cả môn và lớp:** chỉ hiển thị sinh viên **đang học lớp được chọn, đồng thời lớp ấy đang được gán môn đã chọn**. Nếu môn không áp dụng cho lớp đó, danh sách trống kèm thông báo.
-- **Không chọn cả hai:** hiển thị sinh viên đang học thuộc phạm vi quản lý (quản trị viên: các lớp còn hoạt động; giảng viên: các lớp liên kết với môn được phân công).
-- Bộ chọn được làm mới bằng yêu cầu GET có xác thực khi đổi môn hoặc lớp, không tải lại toàn trang và **không thay đổi vị trí cuộn**. Sinh viên đang chọn chỉ được giữ nếu vẫn nằm trong danh sách phù hợp.
-- Bộ lọc được **kiểm tra lại ở máy chủ khi nhấn Lọc kết quả**, không phụ thuộc kiểm tra JavaScript. Với dữ liệu SV đã chuyển lớp/nghỉ học, danh sách chọn dựa trên tình trạng **đang học hiện tại** để phù hợp danh sách lớp chính thức; nhật ký lịch sử quét và xem không bị xóa.
-- Dữ liệu trả về trình duyệt chỉ gồm ID nội bộ và **họ tên (ba số cuối mã SV)**; mã SV đầy đủ tiếp tục lưu trong PostgreSQL.
-- Giữ nguyên bộ lọc học liệu, trạng thái xem, phân trang 10 dòng, quy tắc hoàn thành **≥95%**, các mục giao diện khác và mã QR đã phát hành.
-
-**Kiểm thử offline:** chạy `python tests/test_v446_student_cascade.py`; đã thử quan hệ nhiều môn/nhiều lớp, lớp không gán môn, sinh viên chuyển lớp/nghỉ học, quyền giảng viên/quản trị. Ngoài ra chạy toàn bộ các bài kiểm tra trong `tests/`, cú pháp Python/JavaScript và 22 mẫu Jinja. Chưa kiểm thử kết nối với PostgreSQL, Google OAuth hoặc Render thực tế.
-
-**CSDL:** không bổ sung cột/bảng; không cần reset hoặc xóa dữ liệu.
-
----
-
 # Thay đổi v4.3.15 – 21/10/2026
 
 ## Sửa mục 2 – Thống kê khai thác học liệu của sinh viên
