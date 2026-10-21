@@ -105,6 +105,19 @@ def valid_watch_completion_expr(threshold: float):
                 WatchSession.estimated_watch_seconds >= WatchSession.duration_seconds * threshold)
 
 
+def incomplete_watch_expr(threshold: float):
+    """Phiên có thời lượng xem > 00:00 nhưng chưa đạt 95%, kể cả thiếu độ dài video.
+
+    Bộ lọc SQL phải khớp nhãn `watch_status_label` trong bảng và không
+    phụ thuộc cờ completed cũ (trước v4.3.14). Giá trị xem >0,5 giây
+    mới được làm tròn thành ít nhất 1 giây trong bảng báo cáo.
+    """
+    seconds = func.coalesce(WatchSession.estimated_watch_seconds, 0)
+    duration = func.coalesce(WatchSession.duration_seconds, 0)
+    return and_(WatchSession.id.isnot(None), seconds > 0.5,
+                or_(duration <= 0, seconds < duration * threshold))
+
+
 def watch_status_label(watch, threshold: float) -> str:
     """Trạng thái SV dựa vào thời lượng đã ghi nhận, không tin cờ completed cũ.
 
@@ -2881,39 +2894,43 @@ def register_routes(app):
         for legacy in ClassGroup.query.all():
             class_name_map.setdefault(legacy.code, legacy.name)
 
-        # Bộ lọc theo tên học liệu, lớp, môn học và thời gian; mã QR chỉ dùng nội bộ.
+        # Bộ lọc theo môn, lớp, học liệu và TÊN sinh viên; mã SV/QR đầy đủ chỉ dùng nội bộ.
         course_id = request.args.get("course_id", type=int)
         class_code = (request.args.get("class_code") or "").strip()
         qr_id = request.args.get("qr_id", type=int)
         status = (request.args.get("status") or "all").strip()
-        if status not in {"all", "not_scanned", "not_completed", "unwatched", "completed", "failed"}:
+        if status not in {"all", "not_scanned", "not_completed", "roster_not_completed", "unwatched", "completed", "failed"}:
             status = "all"
         selected_course = next((c for c in course_options if c.id == course_id), None)
         selected_qr = next((q for q in qr_options if q.id == qr_id), None)
         selected_class = next((c for c in class_options if c.code == class_code), None)
-        media_search = (request.args.get("media_search") or "").strip()[:120]
-        sv_period = (request.args.get("sv_period") or "all").strip()
-        if sv_period not in {"all", "today", "7", "30", "custom"}:
-            sv_period = "30"
-        sv_from, sv_to = (request.args.get("sv_from") or "").strip(), (request.args.get("sv_to") or "").strip()
-        sv_start_at, sv_end_at = None, None
-        if sv_period == "today":
-            sv_start_at = datetime.combine(utcnow().date(), datetime.min.time())
-        elif sv_period in {"7", "30"}:
-            sv_start_at = utcnow() - timedelta(days=int(sv_period))
-        elif sv_period == "custom":
-            try:
-                sv_start_at = datetime.combine(date.fromisoformat(sv_from), datetime.min.time()) if sv_from else None
-                sv_end_at = datetime.combine(date.fromisoformat(sv_to) + timedelta(days=1), datetime.min.time()) if sv_to else None
-                if sv_start_at and sv_end_at and sv_end_at <= sv_start_at:
-                    raise ValueError("Ngày kết thúc phải từ ngày bắt đầu trở đi")
-            except ValueError:
-                flash("Khoảng ngày tra cứu của sinh viên không hợp lệ; vui lòng chọn lại.", "warning")
-                sv_period, sv_start_at, sv_end_at = "all", None, None
         sv_page = max(1, request.args.get("sv_page", default=1, type=int))
         if class_code and not selected_class:
             # Không cho dùng mã lớp tùy ý ngoài quyền người dùng.
             class_code = "__unauthorized__"
+
+        # Chỉ đưa sinh viên thuộc phạm vi được phân quyền vào danh sách chọn.
+        # HTML chỉ xuất ID nội bộ và tên (3 số cuối), KHÔNG xuất mã SV đầy đủ.
+        students_query = Student.query
+        if class_code:
+            students_query = (students_query.join(ClassEnrollment,
+                ClassEnrollment.student_id == Student.id)
+                .join(SchoolClass, SchoolClass.id == ClassEnrollment.school_class_id)
+                .filter(SchoolClass.code == class_code))
+        if user.role != "admin":
+            students_query = (students_query.join(ClassEnrollment,
+                ClassEnrollment.student_id == Student.id) if not class_code else students_query)
+            students_query = (students_query.join(CourseClass,
+                CourseClass.school_class_id == ClassEnrollment.school_class_id)
+                .join(Course, Course.id == CourseClass.course_id)
+                .filter(Course.owner_id == user.id, Course.active.is_(True),
+                        CourseClass.active.is_(True)))
+        student_options = students_query.distinct().order_by(Student.full_name, Student.student_code).all()
+        student_id = request.args.get("student_id", type=int)
+        selected_student = next((st for st in student_options if st.id == student_id), None)
+        selected_student_code = selected_student.student_code if selected_student else None
+        # ID không thuộc phạm vi được phép: không trả về dữ liệu.
+        invalid_student = student_id is not None and selected_student is None
         # Truy vấn tại máy chủ: chỉ tải 10 dòng đang xem, không đưa toàn bộ
         # nhật ký toàn trường vào bộ nhớ hay vào trang HTML.
         test_period = (request.args.get("sys_period") or "30").strip()
@@ -2988,7 +3005,7 @@ def register_routes(app):
         # Hai loại sự kiện này chỉ xuất hiện trong mục 2.
         
         pending_rows, pending_notice, participant_stats = [], "", None
-        if status in {"not_scanned", "not_completed"}:
+        if status in {"not_scanned", "roster_not_completed"}:
             selected_class = next((c for c in class_options if c.code == class_code), None)
             if not selected_class or not selected_qr:
                 pending_notice = "Vui lòng chọn lớp và tên học liệu để xác định chính xác danh sách sinh viên chưa tham gia."
@@ -3018,12 +3035,6 @@ def register_routes(app):
                         WatchSession.role == "SV", WatchSession.qr_id == selected_qr.id,
                         WatchSession.class_code == selected_class.code,
                         valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"]), WatchSession.participant_code.in_(roster_codes))
-                    if sv_start_at:
-                        roster_scans = roster_scans.filter(ScanLog.scanned_at >= sv_start_at)
-                        roster_watches = roster_watches.filter(WatchSession.started_at >= sv_start_at)
-                    if sv_end_at:
-                        roster_scans = roster_scans.filter(ScanLog.scanned_at < sv_end_at)
-                        roster_watches = roster_watches.filter(WatchSession.started_at < sv_end_at)
                     valid_scan_codes = {r[0] for r in roster_scans.distinct().all()}
                     completed_pairs = {(r[0], r[1]) for r in roster_watches.distinct().all()}
                 target_video_names = {}
@@ -3045,17 +3056,19 @@ def register_routes(app):
                                      "completed": complete_count,
                                      "not_completed": max(0, len(valid_scan_codes) - complete_count),
                                      "video_total": len(target_video_ids)}
-                if status == "not_completed" and not target_video_ids:
+                if status == "roster_not_completed" and not target_video_ids:
                     pending_notice = "Học liệu hiện không có video khả dụng; chưa thể xác định tình trạng hoàn thành."
                 else:
                     for student in roster:
+                        if invalid_student or (selected_student_code and student.student_code != selected_student_code):
+                            continue
                         scanned = student.student_code in valid_scan_codes
                         count_completed = sum((student.student_code, vid) in completed_pairs for vid in target_video_ids)
                         if status == "not_scanned" and not scanned:
                             pending_rows.append({"student": student, "class_name": selected_class.name,
                                                  "course_name": selected_qr.course.name if selected_qr.course else "—",
                                                  "qr_title": selected_qr.title, "status": "Chưa quét thành công"})
-                        elif status == "not_completed" and scanned and count_completed < len(target_video_ids):
+                        elif status == "roster_not_completed" and scanned and count_completed < len(target_video_ids):
                             missing = [target_video_names[vid] for vid in target_video_ids
                                        if (student.student_code, vid) not in completed_pairs]
                             pending_rows.append({"student": student, "class_name": selected_class.name,
@@ -3064,15 +3077,10 @@ def register_routes(app):
                                                  "missing_videos": missing,
                                                  "status": f"Đã hoàn thành {count_completed}/{len(target_video_ids)} video"})
 
-        if status in {"not_scanned", "not_completed"} and media_search:
-            term = media_search.casefold()
-            pending_rows = [r for r in pending_rows if
-                            term in (r["qr_title"] or "").casefold() or
-                            any(term in video_name.casefold() for video_name in r.get("missing_videos", []))]
         sv_rows = []
         sv_total = 0
         sv_pages = 1
-        if status in {"not_scanned", "not_completed"}:
+        if status in {"not_scanned", "roster_not_completed"}:
             sv_total = len(pending_rows)
             sv_pages = max(1, (sv_total + 9) // 10)
             sv_page = min(sv_page, sv_pages)
@@ -3134,20 +3142,20 @@ def register_routes(app):
                 sv_query = sv_query.filter(course_expr == course_id if selected_course else course_expr == -1)
             if qr_id:
                 sv_query = sv_query.filter(qr_expr == qr_id if selected_qr else qr_expr == -1)
-            if media_search:
-                like = f"%{media_search}%"
-                sv_query = sv_query.filter(or_(Video.title.ilike(like), QrCode.title.ilike(like)))
-            if sv_start_at:
-                sv_query = sv_query.filter(events.c.stamp >= sv_start_at)
-            if sv_end_at:
-                sv_query = sv_query.filter(events.c.stamp < sv_end_at)
-            if status == "completed":
+            if invalid_student:
+                sv_query = sv_query.filter(literal(False))
+            elif selected_student_code:
+                sv_query = sv_query.filter(
+                    func.coalesce(ScanLog.participant_code, WatchSession.participant_code) == selected_student_code)
+            if status == "not_completed":
+                sv_query = sv_query.filter(incomplete_watch_expr(current_app.config["COMPLETION_THRESHOLD"]))
+            elif status == "completed":
                 sv_query = sv_query.filter(valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"]))
             elif status == "unwatched":
-                # Kể cả phiên xem đã được khởi tạo nhưng chưa ghi nhận giây xem.
-                sv_query = sv_query.filter(
-                    or_(WatchSession.id.is_(None), WatchSession.estimated_watch_seconds <= 0.5),
-                    ScanLog.success.is_(True))
+                # Quét thành công, chưa có giây phát video (hoặc dưới 0,5 giây).
+                sv_query = sv_query.filter(ScanLog.success.is_(True),
+                    or_(WatchSession.id.is_(None),
+                        WatchSession.estimated_watch_seconds <= 0.5))
             elif status == "failed":
                 sv_query = sv_query.filter(ScanLog.success.is_(False))
             sv_total = sv_query.order_by(None).count()
@@ -3200,7 +3208,8 @@ def register_routes(app):
             participant_stats=participant_stats, sv_rows=sv_rows, sv_total=sv_total,
             sv_page=sv_page, sv_pages=sv_pages, sv_page_numbers=sv_page_numbers,
             sv_nav=sv_nav, sys_nav=sys_nav, sys_args=sys_args, sv_args=sv_args,
-            sv_period=sv_period, sv_from=sv_from, sv_to=sv_to, media_search=media_search,
+            student_options=student_options, student_id=student_id,
+            student_code_tail=student_code_tail,
             test_rows=test_rows, tests_total=tests_total, tests_pass=tests_pass,
             tests_fail=tests_fail, test_rate=test_rate, test_page=test_page,
             test_pages=test_pages, test_page_numbers=test_page_numbers,

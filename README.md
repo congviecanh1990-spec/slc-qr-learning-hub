@@ -1,3 +1,17 @@
+# Thay đổi v4.3.15 – 21/10/2026
+
+## Sửa mục 2 – Thống kê khai thác học liệu của sinh viên
+
+- **Khắc phục bộ lọc “Chưa hoàn thành”**: trước đây mục này chuyển sang danh sách đối chiếu sĩ số, nên khi chưa chọn **Lớp** và **Học liệu được giao** thì không có dòng dữ liệu. Từ v4.3.15, nó lọc trực tiếp các **phiên xem** đã ghi nhận thời lượng > 00:00 nhưng **dưới 95%** độ dài video; không yêu cầu chọn lớp/học liệu. Các phiên chưa có độ dài video hợp lệ nhưng đã ghi nhận thời lượng xem được xem là **Chưa hoàn thành**, không tự xác nhận hoàn thành.
+- Tách lựa chọn **“SV chưa hoàn thành học liệu (đối chiếu lớp)”** để giữ chức năng so sánh danh sách lớp với số video phải xem trong QR. Đối chiếu lớp và “SV chưa quét QR” yêu cầu chọn lớp và học liệu cụ thể.
+- Thay bộ lọc **Thời gian** tại **mục 2** bằng danh sách **Tên sinh viên**; chỉ liệt kê sinh viên thuộc phạm vi người dùng được phép tra cứu. Hiển thị tên và **ba số cuối mã SV**; mã đầy đủ vẫn được đối chiếu ở phía máy chủ. Bộ lọc Thời gian ở **mục 1 (hoạt động hệ thống)** vẫn giữ nguyên.
+- Giữ nguyên **10 dòng/trang**, thanh phân trang có số và neo về mục 2, dữ liệu lịch sử và ngưỡng hoàn thành 95%.
+- Không thay đổi cấu trúc PostgreSQL, không xóa dữ liệu hoặc mã QR đã in.
+
+**Lưu ý kỹ thuật:** các phiên cũ có thời lượng bằng 0 không được tính là “Chưa hoàn thành”; chúng thuộc “Chưa xem”. Chức năng đối chiếu lớp xem xét cả những video chưa có phiên xem, nên số SV trong kết quả đối chiếu khác số dòng phiên xem chưa hoàn thành là điều bình thường.
+
+---
+
 # Thay đổi v4.3.14 – 20/10/2026
 
 - **Thanh điều hướng:** mục đang mở màu **đỏ, in đậm**; các mục còn lại nét thường. Nút chức năng không in đậm hàng loạt.

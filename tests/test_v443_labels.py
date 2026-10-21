@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import tinycss2
 import re
 P = Path(__file__).resolve().parents[1]
-assert (P/'VERSION.txt').read_text().strip()=='4.3.14'
+assert tuple(map(int,(P/'VERSION.txt').read_text().strip().split('.'))) >= (4,3,14)
 css=(P/'static/app.css').read_text()
 parsed=tinycss2.parse_stylesheet(css, skip_comments=True, skip_whitespace=True)
 assert not [t for t in parsed if t.type=='error']

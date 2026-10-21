@@ -1,3 +1,16 @@
+# Hướng dẫn nâng cấp v4.3.15 trên Render
+
+1. Trước khi cập nhật, sao lưu cơ sở dữ liệu bằng chức năng Sao lưu & Khôi phục. Không xóa hoặc đặt lại PostgreSQL.
+2. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.15_RENDER.zip` rồi cập nhật mã nguồn lên nhánh GitHub đang kết nối Render; chờ bản triển khai thành công.
+3. Mở Thống kê khai thác → mục 2. Chọn **Chưa hoàn thành**, để lớp, học liệu và tên SV ở **Tất cả**, bấm **Lọc kết quả**. Các phiên có thời lượng > 00:00 nhưng dưới 95% phải hiển thị.
+4. Chọn **Tên sinh viên** từ danh sách và lọc lại; kiểm tra chỉ các phiên thuộc SV đó hiển thị. Xóa lọc và kiểm tra 10 dòng/trang.
+5. Chọn **SV chưa hoàn thành học liệu (đối chiếu lớp)** để kiểm tra trường hợp cần đối chiếu **lớp + học liệu được giao**; chức năng này tách biệt với bộ lọc phiên xem chưa hoàn thành.
+6. Thử trên dữ liệu thực tế: video dài 05:35 xem 03:50 → Chưa hoàn thành; từ 05:18,25 trở lên → Hoàn thành; 00:00 → Chưa xem.
+
+Không thay đổi schema PostgreSQL; không ảnh hưởng đường dẫn mã QR và lịch sử quét/xem. Chưa thử kết nối tích hợp thực tế với hệ thống Render.
+
+---
+
 # Hướng dẫn cập nhật Web App v4.3.14 trên Render
 
 ## 1. Sao lưu và triển khai
