@@ -97,12 +97,12 @@ with Session(engine) as session:
     assert len(entries)==7,[(k,r[3],r[4]) for k,r in entries.items()]
     assert (entries[('SV-A',10)][3],entries[('SV-A',10)][4],entries[('SV-A',10)][5])==(3,1,98),entries[('SV-A',10)]
     assert (entries[('SV-A',20)][3],entries[('SV-A',20)][4],entries[('SV-A',20)][5])==(2,0,96),entries[('SV-A',20)]
-    assert (entries[('SV-A',21)][3],entries[('SV-A',21)][4],entries[('SV-A',21)][5])==(0,0,30),entries[('SV-A',21)]
+    assert (entries[('SV-A',21)][3],entries[('SV-A',21)][4],entries[('SV-A',21)][5])==(1,0,30),entries[('SV-A',21)]
     assert (entries[('SV-A',-3)][3],entries[('SV-A',-3)][4])==(1,0)
     assert (entries[('SV-A',-4)][3],entries[('SV-A',-4)][4])==(0,1)
     assert (entries[('SV-B',10)][3],entries[('SV-B',10)][4])==(1,0)
     assert (entries[('SV-C',10)][3],entries[('SV-C',10)][4],entries[('SV-C',10)][5])==(0,0,20)
-    assert sum(r[3] for r in entries.values())==7
+    assert sum(r[3] for r in entries.values())==8  # 7 lượt QR duy nhất; 1 playlist phục vụ 2 video
     assert sum(r[4] for r in entries.values())==2
     # Video completed khi có 1 phiên >=95%, không tụt khi xem lại.
     for pair,expect in [(('SV-A',10),True),(('SV-A',20),True),(('SV-A',21),False),(('SV-B',10),False)]:
@@ -125,4 +125,4 @@ with Session(engine) as session:
     assert {(r[0],r[1]) for r in q.filter(fail_count>0).all()}=={('SV-A',10),('SV-A',-4)}
     assert len(q.order_by(latest.desc()).offset(0).limit(3).all())==3
     assert len(q.order_by(latest.desc()).offset(3).limit(3).all())==3
-    print('PASS v4.3.18: 7 dòng SV–video/playlist; 7 lượt thành công, 2 lượt thất bại; playlist không nhân lượt; lọc/trạng thái/phân trang đạt')
+    print('PASS v4.3.19: 7 dòng; 7 lượt QR thành công gốc, 8 lượt gắn cho các video; 2 thất bại; lọc/trạng thái/phân trang đạt')

@@ -85,7 +85,6 @@
       <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_scans') }}">Xuất lượt quét (CSV)</a>
       <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_watch') }}">Xuất quá trình xem (CSV)</a>
     </div>
-    <p class="small text-muted">Bảng tổng hợp <strong>mỗi sinh viên – video chỉ một dòng</strong>, dù sinh viên quét hoặc xem lại nhiều lần. Hai cột lượt quét cho biết số lần mở QR thành công/không thành công; trạng thái xem là <strong>mức tốt nhất từng đạt</strong> (đủ 95% thì giữ Hoàn thành). Với QR playlist, mỗi lượt quét chỉ được tính <strong>một lần</strong>, gắn với video đầu tiên thực sự phát; nếu chưa phát video nào thì được hiển thị riêng dưới tên playlist để không tính nhầm. Bộ lọc <strong>Chưa hoàn thành</strong> chỉ gồm video đã xem nhưng chưa đủ ngưỡng; các chức năng <strong>đối chiếu lớp</strong> yêu cầu chọn lớp cùng học liệu.</p>
     <form method="get" action="{{ url_for('analytics') }}#khai-thac-sinh-vien" class="row g-2 align-items-end border rounded p-3 bg-light mb-3">
       {% for k, v in sys_args.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
       <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Môn học/Mô đun</label>
@@ -112,6 +111,13 @@
       <div class="col-md-auto d-flex gap-2 flex-wrap align-items-end"><button class="btn btn-primary btn-sm">Lọc kết quả</button>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sys_args) }}#khai-thac-sinh-vien">Xóa lọc</a></div>
     </form>
+    <div class="row g-3 mb-3" aria-label="Tổng hợp lượt quét QR của sinh viên">
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tổng lượt quét</div><div class="display-6 fw-bold">{{ student_metrics.total }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Quét thành công</div><div class="display-6 fw-bold text-success">{{ student_metrics.successful }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Quét không thành công</div><div class="display-6 fw-bold text-danger">{{ student_metrics.unsuccessful }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tỷ lệ quét thành công</div><div class="display-6 fw-bold">{{ (student_metrics.rate|string + '%') if student_metrics.rate is not none else '—' }}</div></div></div>
+    </div>
+    <p class="small text-muted mb-3">Các chỉ số lấy từ nhật ký quét QR gốc theo môn, lớp, học liệu và sinh viên đã chọn, không nhân lượt khi một QR playlist mở nhiều video; bộ lọc tình trạng chỉ áp dụng cho bảng chi tiết.</p>
     {% if pending_notice %}<div class="alert alert-info">{{ pending_notice }}</div>{% endif %}
     {% if participant_stats %}<div class="d-flex flex-wrap gap-3 small mb-3">
       <span><b>Sĩ số đang học:</b> {{ participant_stats.roster }}</span>
@@ -130,7 +136,7 @@
       {% else %}<tr><td colspan="9" class="text-center text-muted py-4">Chưa có kết quả phù hợp.</td></tr>{% endfor %}
       </tbody></table></div>
     {{ pagination(sv_page, sv_pages, sv_page_numbers, sv_nav, 'sv_page', 'khai-thac-sinh-vien') }}
-    <p class="small text-muted mt-3 mb-0">Thời lượng xem là thời lượng lớn nhất của <strong>một phiên xem</strong> (không cộng các phiên trùng đoạn); trạng thái là kết quả tốt nhất của SV đối với video. Số lượt quét tính theo nhật ký QR thực tế; các lần tải lại trong vòng 30 giây có thể được gộp theo cơ chế chống trùng hiện tại. Bộ lọc lớp/môn/QR giới hạn số lượt quét đang tổng hợp; dữ liệu nhật ký gốc vẫn được giữ nguyên để đối chứng.</p>
+    <p class="small text-muted mt-3 mb-0">Thời lượng xem là thời lượng lớn nhất của <strong>một phiên xem</strong> (không cộng các phiên trùng đoạn); trạng thái là kết quả tốt nhất của SV đối với video. Hai cột lượt quét sử dụng nhật ký đã lưu, bao gồm các lần quét trước khi cập nhật. Khi một lượt quét playlist mở nhiều video, lượt đó được thể hiện tại từng video đã truy cập; tổng lượt quét toàn hệ thống vẫn tính theo từng lần quét QR, không cộng số lượt từ các dòng video. Dữ liệu nhật ký gốc vẫn được giữ nguyên để đối chứng.</p>
   </div>
 </section>
 {% endblock %}

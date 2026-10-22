@@ -1,3 +1,34 @@
+# Cập nhật v4.3.20 – 22/10/2026
+
+**Mục 2 – Thống kê khai thác học liệu của sinh viên**
+
+- Thêm 4 ô thống kê: **Tổng lượt quét**, **Quét thành công**, **Quét không thành công**, **Tỷ lệ quét thành công** (`thành công / tổng lượt quét × 100%`). Nếu chưa có lượt quét, hiển thị 0 ở các ô đếm và `—` ở tỷ lệ.
+- Các ô dùng số lượt quét từ **ScanLog gốc**, không cộng các cột theo video, không nhân lượt quét khi một QR playlist mở nhiều video; tính đủ lịch sử, không giới hạn trong 10 dòng phân trang.
+- Phạm vi các ô theo 4 bộ lọc **Môn học/Mô đun, Lớp, Học liệu được giao, Tên sinh viên**, tuân thủ quyền GV/Quản trị viên. **Tình trạng** chỉ lọc các dòng ở bảng video, không làm thay đổi thống kê nhật ký QR gốc.
+- Bảng thông tin chi tiết sắp theo **Lớp → Môn → Tên gọi sinh viên**, tiếp đến họ tên và học liệu; sắp trong truy vấn trước khi chia 10 dòng/trang. Ưu tiên tên lớp trong `SchoolClass`, tương thích lớp cũ `ClassGroup`.
+- Giữ một dòng/SV–video, 9 cột, trạng thái xem tốt nhất, các bộ lọc và file CSV nhật ký gốc; không thay đổi bảng dữ liệu PostgreSQL hoặc URL QR.
+- Bổ sung `tests/test_v4320_student_metrics_sort.py` để kiểm tra tổng gốc playlist, quyền truy cập, bộ lọc, tỷ lệ, thứ tự giữa các trang và biểu thức sắp tên trên PostgreSQL.
+
+# Thay đổi v4.3.19 – 22/10/2026
+
+## Sửa lỗi số lượt quét bằng 0 ở bảng Thống kê khai thác học liệu SV
+
+- Bỏ hoàn toàn đoạn mô tả dài bắt đầu bằng **“Bảng tổng hợp mỗi sinh viên – video chỉ một dòng…”** ở phần đầu mục 2. Giữ bảng với 9 cột và một hàng cho mỗi cặp SV–video.
+- Tính các lượt quét thành công/thất bại **từ tất cả bản ghi `ScanLog` đã tồn tại** trong CSDL, không chỉ lượt phát sinh sau khi cập nhật. Không sửa, xóa hoặc tự tạo bản ghi quét lịch sử.
+- Đối với QR video, số lượt quét theo `video_id` đã ghi trong nhật ký.
+- Đối với QR **playlist**, nhật ký lưu lượt quét QR (`video_id` có thể rỗng). Mỗi lượt quét được liên kết với các video mà đúng sinh viên đã thực sự mở trong khoảng từ lượt quét đó tới lượt quét tiếp theo của cùng QR. Không giới hạn 24 giờ như cách ghép trước đây. Nếu mở 5 video từ một lượt quét playlist, mỗi dòng video sẽ thể hiện 1 lần truy cập từ QR, thay vì cả 5 dòng đều bằng 0.
+- Một sinh viên mở lại cùng video nhiều lần trong **cùng một lượt quét** vẫn chỉ tính 1 lượt cho video đó. Những lượt quét **khác nhau** được cộng đúng số lần.
+- **Phân biệt hai thước đo:** tổng số lượt quét QR trên Tổng quan, nhật ký quét và tệp CSV vẫn là `COUNT(DISTINCT ScanLog.id)` (không nhân theo số video). Số lượt quét tại **từng dòng video của playlist** có thể xuất hiện ở nhiều dòng video cùng truy cập từ một lượt QR; **không cộng các dòng video để suy ra tổng lượt quét toàn hệ thống.**
+- Nếu một lượt quét playlist không có video nào được phát, nó được giữ trong hàng `(chưa phát video)`; lượt quét thất bại không bị suy đoán là truy cập thành công video nào. Nếu một phiên xem không có bản ghi quét tương ứng, không tự đặt số lượt quét thành 1.
+- Giữ nguyên trạng thái tốt nhất (`Hoàn thành` không bị hạ khi xem lại), thời lượng xem cao nhất của một phiên, bộ lọc, phân trang và các tệp CSV gốc.
+- Không thay đổi sơ đồ PostgreSQL, không cần đặt lại mã QR hoặc xóa dữ liệu. Cần sao lưu CSDL trước khi triển khai và đối chiếu trên Render bằng CSV gốc.
+
+## Kiểm thử
+
+`python tests/test_v4319_historical_playlist_scans.py` – kiểm tra 5 video trong playlist đã xem sau 3 ngày kể từ lượt quét, các lần xem lại, lượt quét thành công/thất bại và không nhân bản dữ liệu gốc.
+
+---
+
 # Thay đổi v4.3.18 – 22/10/2026
 
 ## Một dòng cho mỗi sinh viên – video ở mục 2 (Thống kê khai thác học liệu)
