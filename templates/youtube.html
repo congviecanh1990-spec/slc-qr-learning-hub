@@ -20,6 +20,9 @@
       <div class="small text-muted">Mã kênh YouTube: {{ c.channel_id }}</div>
       <div class="small text-muted">Lần cập nhật gần nhất: {{ c.last_synced_at or '—' }}</div>
       <div class="small">Số video đã đồng bộ: <b>{{ c.videos|length }}</b> · Danh sách phát: <b>{{ c.playlists|length }}</b></div>
+      {% if c.videos|selectattr('is_available')|list|length == 0 %}
+      <div class="small text-muted mt-2">Chưa có video học liệu khả dụng từ kênh này. Nếu kênh chưa đăng video, hãy đăng video lên YouTube rồi chọn <strong>Đồng bộ lại</strong>.</div>
+      {% endif %}
     </div>
     <div>
       {% if c.hub_subscription %}<span class="badge {{ 'text-bg-success' if c.hub_subscription.verified else 'text-bg-warning' }}">Cập nhật tự động: {{ 'Đang hoạt động' if c.hub_subscription.verified else 'Đang thiết lập' }}</span>{% else %}<span class="badge text-bg-secondary">Cập nhật tự động: Chưa kích hoạt</span>{% endif %}
@@ -28,7 +31,7 @@
   </div>
 
 </div></div>
-{% else %}<div class="card"><div class="card-body text-muted">Chưa có dữ liệu kênh. Nhấn “Đồng bộ dữ liệu từ YouTube”.</div></div>{% endfor %}
+{% else %}<div class="card"><div class="card-body text-muted">Chưa có kênh YouTube nào được đồng bộ. Hãy kiểm tra tài khoản Google, tạo kênh YouTube nếu chưa có hoặc kết nối một tài khoản khác; sau đó nhấn <strong>Đồng bộ lại</strong>.</div></div>{% endfor %}
 
 {% if hub_events %}<div class="card shadow-sm mt-4"><div class="card-header fw-semibold">Nhật ký cập nhật học liệu gần đây</div><div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Thời gian</th><th>Kênh YouTube</th><th>Video</th><th>Loại thay đổi</th><th>Trạng thái xử lý</th></tr></thead><tbody>{% for e in hub_events %}<tr><td>{{ e.received_at }}</td><td>{{ e.channel.title if e.channel else '' }}</td><td>{{ e.youtube_video_id or '—' }}</td><td>{{ e.event_type }}</td><td>{{ 'Đã xử lý' if e.processed else 'Đang chờ' }}</td></tr>{% endfor %}</tbody></table></div></div>{% endif %}
 {% endblock %}

@@ -1,3 +1,22 @@
+# Cập nhật v4.3.21 – 22/10/2026
+
+**Giao diện mục 2 – Thống kê khai thác học liệu của sinh viên**
+
+- Bỏ đúng đoạn chú thích bắt đầu “Các chỉ số lấy từ nhật ký quét QR gốc…” dưới bốn ô chỉ số. Giữ nguyên số liệu, bộ lọc và bảng thông tin chi tiết.
+
+**Trạng thái đồng bộ YouTube khi đăng nhập và tại trang Kênh YouTube**
+
+- Trường hợp API trả về kênh hợp lệ nhưng không có video học liệu khả dụng: thông báo **“Kênh đã kết nối, chưa có video học liệu”**, hướng dẫn đăng video lên YouTube rồi chọn **Đồng bộ lại**; người dùng vẫn vào hệ thống bình thường. Không tự lặp đồng bộ.
+- Tài khoản Google chưa có kênh (API trả về danh sách kênh rỗng): thông báo riêng **“Chưa tìm thấy kênh YouTube”**, hướng dẫn kiểm tra tài khoản hoặc tạo kênh.
+- Lỗi API **403 Forbidden**, quyền tài khoản, giới hạn API hoặc lỗi cấu hình: không suy đoán là kênh không có video. Hiển thị thông báo tiếng Việt phù hợp, ẩn URL Google API và chuỗi lỗi kỹ thuật; nhật ký máy chủ vẫn ghi lỗi gốc để quản trị viên xử lý. Trường hợp nhiều tài khoản, cho biết những tài khoản có vấn đề mà không báo “đã thành công” khi vẫn còn lỗi.
+- Màn hình chờ có nút **Thử đồng bộ lại**, **Vào hệ thống** và **Kiểm tra kênh YouTube**, hiển thị trạng thái riêng. Chỉ tự chuyển trang khi đồng bộ thành công và có video; nếu kênh trống hoặc lỗi thì để người dùng đọc hướng dẫn trước khi vào hệ thống.
+- Trang **Kênh YouTube** hiển thị hướng dẫn khi chưa có kênh, hoặc kênh hiện không có video khả dụng.
+- Không thay đổi cấu trúc PostgreSQL, QR, thông tin học liệu/sinh viên, lịch sử quét hoặc lịch sử xem; bảo toàn dữ liệu hiện có.
+
+**Kiểm thử**: `python tests/test_v4321_youtube_sync_empty_and_403.py` (phân biệt kênh trống / chưa có kênh / 403 / quota / cấu hình). Ngoài ra cần chạy toàn bộ bộ kiểm thử của các phiên bản trước. Kiểm tra trên Render/PostgreSQL và Google API thật sau triển khai; không thể dùng kiểm thử offline để xác nhận quyền truy cập của từng tài khoản.
+
+---
+
 # Cập nhật v4.3.20 – 22/10/2026
 
 **Mục 2 – Thống kê khai thác học liệu của sinh viên**

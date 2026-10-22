@@ -36,7 +36,7 @@ from models import (
     ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, utcnow
 )
 from security import encrypt_json, decrypt_json
-from services.youtube import sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels
+from services.youtube import sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels, build_sync_summary, _friendly_sync_error
 from services.websub import subscribe_channel, verify_callback, parse_notification
 
 csrf = CSRFProtect()
@@ -1560,18 +1560,18 @@ def register_routes(app):
             return jsonify({"ok": False, "message": "Bạn chưa hoàn tất thông tin giảng viên."}), 400
         try:
             channels, sync_errors = sync_all_connected_channels(user)
-            video_count = sum(len(c.videos) for c in channels)
-            record_functional_test("YT_SYNC", "Đồng bộ kênh/video YouTube", True, owner_id=user.id,
-                                   note=f"Tự đồng bộ {len(channels)} kênh và {video_count} video sau đăng nhập.")
+            result = build_sync_summary(channels, sync_errors)
+            record_functional_test("YT_SYNC", "Đồng bộ kênh/video YouTube", result["ok"], owner_id=user.id,
+                                   note=f"Kết quả {result['status']}: {result['channel_count']} kênh và {result['video_count']} video sau đăng nhập.")
             db.session.commit()
-            return jsonify({"ok": bool(channels), "message": f"Đã đồng bộ {len(channels)} kênh YouTube và {video_count} video." + (" Một số kênh cần kiểm tra: " + "; ".join(sync_errors) if sync_errors else "")})
+            return jsonify(result)
         except Exception as exc:
             db.session.rollback()
             db.session.add(ErrorLog(module="youtube", action="Tự động đồng bộ sau đăng nhập", course_module="Hệ thống", actor_user_id=user.id,
                                     message="Không thể tự động đồng bộ kênh YouTube", details=str(exc)[:10000]))
             record_functional_test("YT_SYNC", "Đồng bộ kênh/video YouTube", False, owner_id=user.id, note=str(exc)[:1000])
             db.session.commit()
-            return jsonify({"ok": False, "message": "Chưa đồng bộ được kênh YouTube. Bạn vẫn có thể vào hệ thống và thử lại sau."})
+            return jsonify({"ok": False, "status": "error", "message": "Không thể hoàn tất đồng bộ YouTube lúc này. Bạn vẫn có thể vào hệ thống và thử lại tại mục Kênh YouTube."})
 
     @app.post("/profile/display-name")
     @login_required
@@ -1609,14 +1609,13 @@ def register_routes(app):
             channels, sync_errors = sync_all_connected_channels(user)
             # sync_my_channel đã đồng bộ uploads, các playlist do GV tạo và trạng thái
             # video hiện có; không gọi đối soát lần hai để tránh tiêu tốn hạn mức API.
-            checked = sum(len(c.videos) for c in channels)
-            elapsed = time.perf_counter() - t0
+            result = build_sync_summary(channels, sync_errors)
             record_functional_test(
-                "YT_SYNC", "Đồng bộ kênh/video YouTube", True, owner_id=user.id,
-                note=f"Đồng bộ {len(channels)} kênh; đối soát {checked} video."
+                "YT_SYNC", "Đồng bộ kênh/video YouTube", result["ok"], owner_id=user.id,
+                note=f"Kết quả {result['status']}: {result['channel_count']} kênh; {result['video_count']} video."
             )
             db.session.commit()
-            flash(f"Đã đồng bộ {len(channels)} kênh YouTube, kiểm tra {checked} video." + (" Lỗi kênh khác: " + "; ".join(sync_errors) if sync_errors else ""), "success" if channels else "warning")
+            flash(result["message"], "success" if result["status"] == "synced" else ("info" if result["status"] == "empty" else "warning"))
         except Exception as exc:
             db.session.rollback()
             elapsed = time.perf_counter() - t0
@@ -1628,7 +1627,7 @@ def register_routes(app):
                 "YT_SYNC", "Đồng bộ kênh/video YouTube", False, owner_id=user.id, note=str(exc)
             )
             db.session.commit()
-            flash(f"Đồng bộ thất bại: {exc}", "danger")
+            flash(f"Đồng bộ chưa hoàn tất: {_friendly_sync_error(exc)}", "warning")
         return redirect(url_for("youtube_page"))
 
     @app.get("/youtube/connect-another")

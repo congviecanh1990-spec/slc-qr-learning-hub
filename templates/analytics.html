@@ -117,7 +117,6 @@
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Quét không thành công</div><div class="display-6 fw-bold text-danger">{{ student_metrics.unsuccessful }}</div></div></div>
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tỷ lệ quét thành công</div><div class="display-6 fw-bold">{{ (student_metrics.rate|string + '%') if student_metrics.rate is not none else '—' }}</div></div></div>
     </div>
-    <p class="small text-muted mb-3">Các chỉ số lấy từ nhật ký quét QR gốc theo môn, lớp, học liệu và sinh viên đã chọn, không nhân lượt khi một QR playlist mở nhiều video; bộ lọc tình trạng chỉ áp dụng cho bảng chi tiết.</p>
     {% if pending_notice %}<div class="alert alert-info">{{ pending_notice }}</div>{% endif %}
     {% if participant_stats %}<div class="d-flex flex-wrap gap-3 small mb-3">
       <span><b>Sĩ số đang học:</b> {{ participant_stats.roster }}</span>

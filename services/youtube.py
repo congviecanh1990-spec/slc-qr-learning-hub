@@ -11,6 +11,97 @@ YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
+class YouTubeSyncError(RuntimeError):
+    """Thông báo an toàn cho người dùng; lý do API gốc được ghi tại nhật ký lỗi."""
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
+class SyncIssues(list):
+    """Giữ tương thích với các nơi đang nối chuỗi lỗi, kèm mã phân loại."""
+    def __init__(self):
+        super().__init__()
+        self.codes = []
+
+
+def _api_error_code(response):
+    """Đọc mã lỗi YouTube nếu có; không đưa URL/token/JSON kỹ thuật lên giao diện."""
+    try:
+        details = (response.json() or {}).get("error") or {}
+        reasons = [e.get("reason", "") for e in details.get("errors", []) if isinstance(e, dict)]
+        for item in details.get("details", []):
+            if isinstance(item, dict):
+                reasons.append(item.get("reason", ""))
+        reasons = {str(r).lower() for r in reasons}
+    except (ValueError, TypeError, AttributeError):
+        reasons = set()
+    if reasons & {"quotaexceeded", "dailylimitexceeded", "userratelimitexceeded", "ratelimitexceeded", "resourceexhausted"}:
+        return "quota"
+    if reasons & {"accessnotconfigured", "servicedisabled", "apidisabled"}:
+        return "configuration"
+    if reasons & {"insufficientpermissions", "forbidden", "autherror", "youtubesignuprequired", "accountdelegationforbidden"}:
+        return "permission"
+    return None
+
+
+def _friendly_http_error(response):
+    status = response.status_code
+    code = _api_error_code(response)
+    if code == "quota" or status == 429:
+        return YouTubeSyncError("quota", "YouTube đang giới hạn số lượt truy cập. Hãy thử đồng bộ lại sau.")
+    if code == "configuration":
+        return YouTubeSyncError("configuration", "Dịch vụ YouTube Data API chưa sẵn sàng trên ứng dụng. Vui lòng liên hệ quản trị viên.")
+    if status in (401, 403):
+        return YouTubeSyncError("permission", "YouTube chưa cho phép truy cập dữ liệu kênh của tài khoản này (lỗi quyền truy cập). Hãy kiểm tra tài khoản Google đã chọn và cấp lại quyền khi kết nối.")
+    if status == 404:
+        return YouTubeSyncError("not_found", "Một kênh hoặc danh sách phát không còn truy cập được trên YouTube. Hãy kiểm tra lại nội dung kênh.")
+    if status >= 500:
+        return YouTubeSyncError("temporary", "YouTube đang gặp sự cố kết nối. Hãy thử đồng bộ lại sau.")
+    return YouTubeSyncError("error", "YouTube chưa trả về được dữ liệu kênh. Hãy thử đồng bộ lại sau.")
+
+
+def _friendly_sync_error(exc):
+    if isinstance(exc, YouTubeSyncError):
+        return exc
+    if isinstance(exc, requests.exceptions.Timeout):
+        return YouTubeSyncError("temporary", "Kết nối tới YouTube bị quá thời gian. Hãy thử lại sau.")
+    if isinstance(exc, requests.exceptions.RequestException):
+        return YouTubeSyncError("temporary", "Không kết nối được tới YouTube. Hãy kiểm tra đường truyền và thử lại.")
+    # Các lỗi nội bộ bất ngờ không được hiển thị trực tiếp dưới dạng traceback/URL.
+    if isinstance(exc, RuntimeError) and str(exc) in (
+        "Không tìm thấy kênh YouTube thuộc tài khoản này.",
+        "Kênh YouTube này đã được kết nối với hồ sơ giảng viên khác.",
+    ):
+        return YouTubeSyncError("no_channel" if "Không tìm thấy" in str(exc) else "conflict", str(exc))
+    return YouTubeSyncError("error", "Chưa thể hoàn tất đồng bộ YouTube. Hãy thử lại hoặc liên hệ quản trị viên.")
+
+
+def build_sync_summary(channels, issues):
+    """Kết quả có thể hiển thị công khai; không suy đoán kênh trống từ lỗi API."""
+    channel_count = len(channels)
+    video_count = sum(sum(1 for video in channel.videos if video.is_available) for channel in channels)
+    if issues:
+        causes = "; ".join(issues)
+        if channel_count:
+            return {"ok": False, "status": "partial", "channel_count": channel_count,
+                    "video_count": video_count,
+                    "message": f"Đã cập nhật được {channel_count} kênh, nhưng một số tài khoản chưa đồng bộ được: {causes} Dữ liệu đã có vẫn được giữ nguyên."}
+        codes = getattr(issues, "codes", [])
+        priority = ("configuration", "quota", "permission", "conflict", "no_channel", "temporary", "error")
+        status = next((code for code in priority if code in codes), "error")
+        return {"ok": False, "status": status, "channel_count": 0, "video_count": 0,
+                "message": "Chưa đồng bộ được kênh YouTube. " + causes + " Bạn vẫn có thể vào hệ thống và kiểm tra kết nối tại mục Kênh YouTube."}
+    if not channel_count:
+        return {"ok": False, "status": "no_channel", "channel_count": 0, "video_count": 0,
+                "message": "Chưa tìm thấy kênh YouTube được kết nối. Vui lòng kiểm tra tài khoản Google và kết nối kênh YouTube."}
+    if not video_count:
+        return {"ok": True, "status": "empty", "channel_count": channel_count, "video_count": 0,
+                "message": f"Đã kết nối và kiểm tra {channel_count} kênh YouTube, nhưng chưa tìm thấy video học liệu có thể đồng bộ. Bạn có thể vào hệ thống bình thường. Nếu kênh chưa đăng video, hãy đăng video lên YouTube rồi chọn 'Đồng bộ lại' trong mục Kênh YouTube."}
+    return {"ok": True, "status": "synced", "channel_count": channel_count, "video_count": video_count,
+            "message": f"Đã đồng bộ {channel_count} kênh YouTube và {video_count} video học liệu."}
+
+
 def _log_error(module, message, details=None):
     db.session.add(ErrorLog(module=module, message=message[:500], details=(details or "")[:10000]))
     db.session.commit()
@@ -63,7 +154,7 @@ def _get(user, path, params, credential=None):
         resp = requests.get(f"{YOUTUBE_API}/{path}", params=params, headers=headers, timeout=30)
     if not resp.ok:
         _log_error("youtube_api", f"GET {path} lỗi {resp.status_code}", resp.text)
-        resp.raise_for_status()
+        raise _friendly_http_error(resp)
     return resp.json()
 
 
@@ -341,7 +432,7 @@ def sync_video_ids(user, channel, video_ids, credential=None):
 
 def sync_all_connected_channels(user):
     """Đồng bộ kênh chính và các tài khoản Google bổ sung; trả về các lỗi riêng lẻ."""
-    channels, errors = [], []
+    channels, errors = [], SyncIssues()
     credentials = [None] + ConnectedGoogleAccount.query.filter_by(user_id=user.id).all()
     for credential in credentials:
         try:
@@ -349,7 +440,9 @@ def sync_all_connected_channels(user):
         except Exception as exc:
             db.session.rollback()
             label = credential.email if credential is not None else user.email
-            errors.append(f"{label}: {exc}")
+            friendly = _friendly_sync_error(exc)
+            errors.codes.append(friendly.code)
+            errors.append(f"{label}: {friendly}")
     return channels, errors
 
 

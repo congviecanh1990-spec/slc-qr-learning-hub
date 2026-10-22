@@ -3,13 +3,14 @@
 <div class="row justify-content-center"><div class="col-lg-7">
   <div class="card shadow-sm text-center"><div class="card-body py-5 px-4">
     <div id="sync-spinner" class="spinner-border text-primary mb-3" role="status" aria-label="Đang đồng bộ"></div>
-    <h2 class="h4">Chờ trong giây lát để hệ thống đồng bộ kênh YouTube…</h2>
-    <p class="text-muted">Hệ thống đang nhận diện kênh YouTube, cập nhật playlist và video của bạn.</p>
+    <h2 id="sync-title" class="h4">Đang đồng bộ kênh YouTube…</h2>
+    <p id="sync-intro" class="text-muted">Hệ thống đang nhận diện kênh YouTube, cập nhật playlist và video của bạn.</p>
     <div id="sync-progress" role="status" aria-live="polite" class="mb-4">Đang kết nối với YouTube…</div>
     <form id="sync-form" method="post" action="{{ url_for('sync_run') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"></form>
     <div class="d-flex justify-content-center flex-wrap gap-2">
       <button id="retry-sync" type="button" class="btn btn-outline-primary" hidden>Thử đồng bộ lại</button>
       <a id="go-home" href="{{ url_for('index') }}" class="btn btn-outline-secondary">Vào hệ thống</a>
+      <a id="go-youtube" href="{{ url_for('youtube_page') }}" class="btn btn-outline-primary" hidden>Kiểm tra kênh YouTube</a>
     </div>
     <div class="small text-muted mt-3">Bạn vẫn có thể vào hệ thống nếu việc đồng bộ mất nhiều thời gian. Có thể đồng bộ thủ công lại tại mục Kênh YouTube.</div>
   </div></div>
@@ -17,25 +18,60 @@
 {% endblock %}
 {% block scripts %}<script>
 (() => {
+  const title=document.getElementById('sync-title');
+  const intro=document.getElementById('sync-intro');
   const progress=document.getElementById('sync-progress');
   const spinner=document.getElementById('sync-spinner');
   const retry=document.getElementById('retry-sync');
   const home=document.getElementById('go-home');
+  const youtube=document.getElementById('go-youtube');
   const form=document.getElementById('sync-form');
   let launched=false;
   async function run(){
-    if(launched) return;launched=true;retry.hidden=true;spinner.hidden=false;
-    progress.textContent='Đang đồng bộ kênh, playlist và video…';
+    if(launched) return;
+    launched=true;retry.hidden=true;spinner.hidden=false;youtube.hidden=true;
+    title.textContent='Đang đồng bộ kênh YouTube…';
+    intro.textContent='Hệ thống đang kiểm tra kênh, playlist và video của bạn.';
+    progress.textContent='Đang kết nối với YouTube…';
     const controller=new AbortController();
     const timeout=setTimeout(()=>controller.abort(),75000);
     try {
       const response=await fetch(form.action,{method:'POST',body:new FormData(form),signal:controller.signal,credentials:'same-origin'});
       if(!response.ok) throw new Error('Không thể hoàn thành đồng bộ.');
       const result=await response.json();
-      if(result.ok){progress.textContent=result.message+' Đang chuyển vào hệ thống…';window.location.assign(home.href);return;}
+      const status=result.status || (result.ok?'synced':'error');
       progress.textContent=result.message||'Chưa đồng bộ được kênh YouTube.';
-    }catch(e){progress.textContent=e.name==='AbortError'?'Đồng bộ đang mất nhiều thời gian. Bạn có thể vào hệ thống hoặc thử lại.':'Có lỗi khi đồng bộ. Bạn có thể vào hệ thống hoặc thử lại.';}
-    finally{clearTimeout(timeout);spinner.hidden=true;retry.hidden=false;launched=false;}
+      if(status==='synced'){
+        title.textContent='Đồng bộ kênh YouTube thành công';
+        intro.textContent='Đang chuyển vào hệ thống…';
+        window.location.assign(home.href);
+        return;
+      }
+      youtube.hidden=false;
+      if(status==='empty'){
+        title.textContent='Kênh đã kết nối, chưa có video học liệu';
+        intro.textContent='Đồng bộ kênh hoàn tất. Bạn vẫn có thể sử dụng các chức năng của hệ thống.';
+      }else if(status==='no_channel'){
+        title.textContent='Chưa tìm thấy kênh YouTube';
+        intro.textContent='Hãy kiểm tra tài khoản Google hoặc tạo kênh YouTube trước khi đồng bộ.';
+      }else if(['permission','configuration','quota'].includes(status)){
+        title.textContent='Chưa thể truy cập YouTube';
+        intro.textContent='Đây là lỗi kết nối hoặc quyền truy cập, không có nghĩa là kênh chưa đăng video.';
+      }else if(status==='partial'){
+        title.textContent='Đồng bộ được một phần';
+        intro.textContent='Các kênh đã đồng bộ vẫn sử dụng được. Một số kênh cần kiểm tra kết nối.';
+      }else{
+        title.textContent='Chưa hoàn tất đồng bộ YouTube';
+        intro.textContent='Dữ liệu đã lưu vẫn được giữ nguyên. Bạn có thể thử lại hoặc vào hệ thống.';
+      }
+    }catch(e){
+      title.textContent='Chưa hoàn tất đồng bộ YouTube';
+      intro.textContent='Bạn vẫn có thể vào hệ thống và đồng bộ lại tại mục Kênh YouTube.';
+      progress.textContent=e.name==='AbortError'?'YouTube phản hồi quá lâu. Vui lòng thử lại sau.':'Có lỗi kết nối khi đồng bộ. Vui lòng thử lại sau.';
+      youtube.hidden=false;
+    }finally{
+      clearTimeout(timeout);spinner.hidden=true;retry.hidden=false;launched=false;
+    }
   }
   retry.addEventListener('click',run);
   run();
