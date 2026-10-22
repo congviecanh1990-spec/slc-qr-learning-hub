@@ -17,10 +17,14 @@ assert 'name="sv_period"' not in html
 assert 'student_code_tail(st.student_code)' in html
 assert "('not_completed','Chưa hoàn thành')" in html
 assert "('roster_not_completed','SV chưa hoàn thành học liệu (đối chiếu lớp)')" in html
-assert 'incomplete_watch_expr(current_app.config["COMPLETION_THRESHOLD"])' in source
+# Bản v4.3.18 lọc sau khi gộp theo SV-video; ca SQLite cũ vẫn thử
+# riêng cách xác định thiếu thời lượng xem.
+assert 'best_watch_completed_expr(' in source
+assert 'best_watch_started_expr(student_code_expr, media_key)' in source
+assert 'sv_query = sv_query.filter(media_key > 0, started_expr, ~completed_expr)' in source
 assert 'status in {"not_scanned", "roster_not_completed"}' in source
-assert 'selected_student_code' in source
-assert 'func.coalesce(ScanLog.participant_code, WatchSession.participant_code) == selected_student_code' in source
+assert 'student_video_summary_query(' in source
+assert 'student_code=selected_student_code' in source
 
 Base = declarative_base()
 class ScanLog(Base):

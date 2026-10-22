@@ -24,7 +24,7 @@ from flask import (
     render_template, request, send_file, session, url_for
 )
 from flask_wtf.csrf import CSRFProtect
-from sqlalchemy import func, text, DateTime, inspect, or_, and_, select, union_all, literal
+from sqlalchemy import func, text, DateTime, inspect, or_, and_, select, union_all, literal, case
 from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy.orm import aliased
 
@@ -126,6 +126,151 @@ def watch_status_label(watch, threshold: float) -> str:
     if watch is None or round(safe_watch_number(watch.estimated_watch_seconds)) == 0:
         return "Chưa xem"
     return "Hoàn thành" if valid_watch_completion(watch, threshold) else "Chưa hoàn thành"
+
+
+def best_watch_completed_expr(student_code, video_id, threshold: float):
+    """Đã có BẤT KỲ phiên xem hợp lệ >= ngưỡng cho SV và video này.
+
+    Sử dụng dữ liệu thực tế của các phiên cũ thay vì cờ completed cũ;
+    cùng một video mở từ QR khác vẫn được công nhận. Không cộng chồng
+    các lượt xem lại một đoạn thành thời lượng toàn video.
+    """
+    previous = aliased(WatchSession)
+    return (select(previous.id).where(
+        previous.role == "SV", previous.participant_code == student_code,
+        previous.video_id == video_id, previous.video_id.isnot(None),
+        previous.duration_seconds > 0, previous.estimated_watch_seconds > 0,
+        previous.estimated_watch_seconds >= previous.duration_seconds * threshold,
+    ).correlate_except(previous).exists())
+
+
+def best_watch_started_expr(student_code, video_id):
+    """SV đã thực sự xem >0,5 giây trong ít nhất một phiên của video."""
+    previous = aliased(WatchSession)
+    return (select(previous.id).where(
+        previous.role == "SV", previous.participant_code == student_code,
+        previous.video_id == video_id, previous.video_id.isnot(None),
+        previous.estimated_watch_seconds > 0.5,
+    ).correlate_except(previous).exists())
+
+
+def best_video_statuses(keys, threshold: float):
+    """Trả về trạng thái TỐT NHẤT cho các cặp (mã SV, ID video).
+
+    Truy vấn theo lô để không tạo N+1 câu SQL ở màn báo cáo và CSV.
+    Thang trạng thái: Chưa xem < Chưa hoàn thành < Hoàn thành.
+    """
+    pairs = {(code, vid) for code, vid in keys if code and vid is not None}
+    if not pairs:
+        return {}
+    codes, video_ids = zip(*pairs)
+    rows = (db.session.query(
+        WatchSession.participant_code, WatchSession.video_id,
+        func.max(case((valid_watch_completion_expr(threshold), 1), else_=0)),
+        func.max(case((WatchSession.estimated_watch_seconds > 0.5, 1), else_=0)),
+    ).filter(
+        WatchSession.role == "SV",
+        WatchSession.participant_code.in_(set(codes)),
+        WatchSession.video_id.in_(set(video_ids)),
+    ).group_by(WatchSession.participant_code, WatchSession.video_id).all())
+    return {(code, vid): ("Hoàn thành" if complete else
+                          "Chưa hoàn thành" if started else "Chưa xem")
+            for code, vid, complete, started in rows}
+
+
+def student_video_summary_query(user, course_id=None, class_code="", qr_id=None, student_code=None,
+                                invalid_scope=False):
+    """Một dòng/cặp (SV, video) trong phạm vi lọc; chỉ đếm mỗi ScanLog một lần.
+
+    Mỗi lượt quét playlist được gán cho video đầu tiên thực sự phát trong lượt đó.
+    Các video còn lại có WatchSession nhưng không nhân thêm lượt quét. Nếu QR
+    playlist chưa có video được phát, giữ một nhóm riêng theo QR (media_key âm),
+    KHÔNG suy đoán rằng SV đã mở bất kỳ video cụ thể nào trong playlist.
+    Nhật ký gốc và thời lượng của từng phiên xem không thay đổi.
+    """
+    scan_ref = aliased(ScanLog)
+    view_ref = aliased(WatchSession)
+    closest_scan = (select(scan_ref.id).where(
+        scan_ref.role == "SV", scan_ref.qr_id == view_ref.qr_id,
+        scan_ref.participant_code == view_ref.participant_code,
+        or_(scan_ref.class_code == view_ref.class_code,
+            and_(scan_ref.class_code.is_(None), view_ref.class_code.is_(None))),
+        scan_ref.scanned_at <= view_ref.started_at,
+        scan_ref.scanned_at >= view_ref.started_at - timedelta(days=1),
+    ).order_by(scan_ref.scanned_at.desc(), scan_ref.id.desc())
+     .limit(1).correlate(view_ref).scalar_subquery())
+    first_playlist_video = (select(view_ref.video_id).where(
+        view_ref.role == "SV", view_ref.video_id.isnot(None),
+        closest_scan == ScanLog.id,
+    ).order_by(view_ref.started_at.asc(), view_ref.id.asc())
+     .limit(1).correlate(ScanLog).scalar_subquery())
+
+    # ID video > 0; ID âm chỉ là nhóm tạm cho QR chưa phát video.
+    scan_media_key = func.coalesce(ScanLog.video_id, first_playlist_video, -ScanLog.qr_id)
+    scan_facts = (select(
+        ScanLog.participant_code.label("code"), scan_media_key.label("media_key"),
+        ScanLog.class_code.label("class_code"), ScanLog.course_id.label("course_id"),
+        ScanLog.qr_id.label("qr_id"), ScanLog.scanned_at.label("stamp"),
+        case((ScanLog.success.is_(True), 1), else_=0).label("successful"),
+        case((ScanLog.success.is_(False), 1), else_=0).label("unsuccessful"),
+        literal(0.0).label("watch_seconds"),
+    ).select_from(ScanLog).join(QrCode, ScanLog.qr_id == QrCode.id)
+     .where(ScanLog.role == "SV"))
+    view_facts = (select(
+        WatchSession.participant_code.label("code"),
+        func.coalesce(WatchSession.video_id, -WatchSession.qr_id).label("media_key"),
+        WatchSession.class_code.label("class_code"), WatchSession.course_id.label("course_id"),
+        WatchSession.qr_id.label("qr_id"), WatchSession.started_at.label("stamp"),
+        literal(0).label("successful"), literal(0).label("unsuccessful"),
+        WatchSession.estimated_watch_seconds.label("watch_seconds"),
+    ).select_from(WatchSession).join(QrCode, WatchSession.qr_id == QrCode.id)
+     .where(WatchSession.role == "SV"))
+    if user.role != "admin":
+        scan_facts = scan_facts.where(managed_qr_scope(user.id))
+        view_facts = view_facts.where(managed_qr_scope(user.id))
+    if class_code:
+        scan_facts = scan_facts.where(ScanLog.class_code == class_code)
+        view_facts = view_facts.where(WatchSession.class_code == class_code)
+    if course_id is not None:
+        scan_facts = scan_facts.where(ScanLog.course_id == course_id)
+        view_facts = view_facts.where(WatchSession.course_id == course_id)
+    if qr_id is not None:
+        scan_facts = scan_facts.where(ScanLog.qr_id == qr_id)
+        view_facts = view_facts.where(WatchSession.qr_id == qr_id)
+    if invalid_scope:
+        scan_facts = scan_facts.where(literal(False))
+        view_facts = view_facts.where(literal(False))
+    if student_code:
+        scan_facts = scan_facts.where(ScanLog.participant_code == student_code)
+        view_facts = view_facts.where(WatchSession.participant_code == student_code)
+
+    facts = union_all(scan_facts, view_facts).subquery("student_media_facts")
+    grouped = (select(
+        facts.c.code, facts.c.media_key,
+        func.max(facts.c.stamp).label("latest_at"),
+        func.sum(facts.c.successful).label("successful_count"),
+        func.sum(facts.c.unsuccessful).label("unsuccessful_count"),
+        func.max(func.coalesce(facts.c.watch_seconds, 0)).label("best_watch_seconds"),
+    ).group_by(facts.c.code, facts.c.media_key).subquery("student_media_totals"))
+    latest = (select(
+        facts.c.code, facts.c.media_key, facts.c.class_code, facts.c.course_id,
+        facts.c.qr_id, facts.c.stamp,
+        func.row_number().over(
+            partition_by=(facts.c.code, facts.c.media_key),
+            order_by=(facts.c.stamp.desc(), facts.c.qr_id.desc()),
+        ).label("row_num"),
+    ).subquery("student_media_latest"))
+    # Metadata lớp, môn, QR của dòng là lần hoạt động gần nhất của cặp SV–video;
+    # số lượt quét và trạng thái tổng hợp từ TOÀN BỘ dữ liệu trong phạm vi lọc.
+    return (db.session.query(
+        grouped.c.code, grouped.c.media_key, grouped.c.latest_at,
+        grouped.c.successful_count, grouped.c.unsuccessful_count,
+        grouped.c.best_watch_seconds, latest.c.class_code, Course, QrCode, Video,
+    ).join(latest, and_(latest.c.code == grouped.c.code,
+                        latest.c.media_key == grouped.c.media_key, latest.c.row_num == 1))
+     .outerjoin(Course, Course.id == latest.c.course_id)
+     .outerjoin(QrCode, QrCode.id == latest.c.qr_id)
+     .outerjoin(Video, Video.id == grouped.c.media_key))
 
 
 def apply_watch_event(ws, event_type, state, position, duration, now, heartbeat, threshold):
@@ -494,6 +639,7 @@ def ensure_schema_upgrades():
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_scan_logs_match_viewer ON scan_logs (qr_id, participant_code, class_code, scanned_at)"))
         if "watch_sessions" in tables:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_watch_sessions_match_viewer ON watch_sessions (qr_id, participant_code, class_code, started_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_watch_sessions_best_video ON watch_sessions (role, participant_code, video_id)"))
         if "functional_test_runs" in tables:
             test_columns = {c["name"] for c in inspector.get_columns("functional_test_runs")}
             if "source" not in test_columns:
@@ -1120,17 +1266,30 @@ def register_routes(app):
         if not whole_system:
             scan_q = scan_q.filter(managed_qr_scope(user.id))
             watch_q = watch_q.filter(managed_qr_scope(user.id))
-        scans = scan_q.count()
-        watch = watch_q.count()
-        completed = watch_q.filter(valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"])).count()
-        completion_rate = round(100 * completed / watch, 1) if watch else 0
+        scans = scan_q.count()  # Mỗi ScanLog tính là một lần mở QR, không phụ thuộc trạng thái xem.
+        successful_scans = scan_q.filter(ScanLog.success.is_(True)).count()
+        watch = watch_q.count()  # Số phiên thực tế vẫn được giữ riêng để đối chứng.
+        # Tỷ lệ hoàn thành dùng các cặp SV–video duy nhất, không dùng số phiên:
+        # xem lại một đoạn ngắn sau khi hoàn thành không thể kéo giảm tỷ lệ.
+        video_pairs = watch_q.filter(WatchSession.video_id.isnot(None)).with_entities(
+            WatchSession.participant_code, WatchSession.video_id).distinct()
+        total_video_pairs = video_pairs.count()
+        # Cặp SV–video thuộc phạm vi GV được tính theo trạng thái tốt nhất,
+        # kể cả khi SV hoàn thành chính video ấy qua QR khác.
+        pairs_scope = video_pairs.subquery("accessible_student_videos")
+        completed = db.session.query(pairs_scope.c.participant_code).filter(
+            best_watch_completed_expr(
+                pairs_scope.c.participant_code, pairs_scope.c.video_id,
+                current_app.config["COMPLETION_THRESHOLD"],
+            )).count()
+        completion_rate = round(100 * completed / total_video_pairs, 1) if total_video_pairs else 0
         recent_scans = scan_q.order_by(ScanLog.scanned_at.desc()).limit(10).all()
         lecturer_count = User.query.filter(User.last_login_at.isnot(None)).count()
         class_count = (SchoolClass.query.filter_by(active=True).count() if whole_system else
                        SchoolClass.query.filter_by(active=True, homeroom_teacher_id=user.id).count())
         return render_template(
             "dashboard.html", videos=videos, courses=courses, qrs=qrs, scans=scans, watch=watch,
-            completion_rate=completion_rate, recent_scans=recent_scans, lecturer_count=lecturer_count,
+            successful_scans=successful_scans, completion_rate=completion_rate, recent_scans=recent_scans, lecturer_count=lecturer_count,
             class_count=class_count, whole_system=whole_system,
         )
 
@@ -2713,6 +2872,7 @@ def register_routes(app):
                 "playlist_viewer.html", qr=qr, playlist=playlist, videos=videos,
                 unavailable_count=unavailable_count, preview_mode=preview_mode,
                 tracking_enabled=tracking_enabled, viewer_identity=viewer_identity,
+                student_viewer=(role == "SV"),
             )
 
         video = active_video_for_qr(qr)
@@ -2756,6 +2916,7 @@ def register_routes(app):
         return render_template(
             "viewer.html", qr=qr, video=video, preview_mode=preview_mode,
             tracking_enabled=tracking_enabled, viewer_identity=viewer_identity,
+            student_viewer=(role == "SV"),
         )
 
 
@@ -2854,7 +3015,14 @@ def register_routes(app):
         )
         db.session.add(ws)
         db.session.commit()
-        return jsonify({"session_key": ws.session_key})
+        # Cung cấp ngay trạng thái đã đạt trước đây để lần mở sau không làm tụt cấp.
+        best_completed = False
+        if ws.role == "SV":
+            best_completed = db.session.query(best_watch_completed_expr(
+                ws.participant_code, ws.video_id,
+                current_app.config["COMPLETION_THRESHOLD"],
+            )).scalar()
+        return jsonify({"session_key": ws.session_key, "completed": bool(best_completed)})
 
 
     @app.post("/api/watch/event")
@@ -2888,12 +3056,21 @@ def register_routes(app):
             counted_seconds=counted,
         ))
         db.session.commit()
+        # completed của một phiên giữ nguyên làm bằng chứng; trạng thái trả về
+        # là thành tích TỐT NHẤT của SV ở video, kể cả lần xem lại chỉ một đoạn.
+        best_completed = ws.completed
+        if ws.role == "SV":
+            best_completed = db.session.query(best_watch_completed_expr(
+                ws.participant_code, ws.video_id,
+                current_app.config["COMPLETION_THRESHOLD"],
+            )).scalar()
         return jsonify({
             "ok": True,
             "estimated_watch_seconds": round(ws.estimated_watch_seconds, 1),
             "max_position": round(ws.max_position, 1),
             "completion_percent": round(ws.completion_percent, 1),
-            "completed": ws.completed,
+            "completed": bool(best_completed),
+            "session_completed": ws.completed,
         })
 
     @app.get("/api/analytics/students")
@@ -3062,8 +3239,7 @@ def register_routes(app):
                         ScanLog.class_code == selected_class.code,
                         ScanLog.success.is_(True), ScanLog.participant_code.in_(roster_codes))
                     roster_watches = db.session.query(WatchSession.participant_code, WatchSession.video_id).filter(
-                        WatchSession.role == "SV", WatchSession.qr_id == selected_qr.id,
-                        WatchSession.class_code == selected_class.code,
+                        WatchSession.role == "SV", WatchSession.video_id.isnot(None),
                         valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"]), WatchSession.participant_code.in_(roster_codes))
                     valid_scan_codes = {r[0] for r in roster_scans.distinct().all()}
                     completed_pairs = {(r[0], r[1]) for r in roster_watches.distinct().all()}
@@ -3117,112 +3293,88 @@ def register_routes(app):
             for r in pending_rows[(sv_page - 1)*10:sv_page*10]:
                 code = r["student"].student_code
                 sv_rows.append({
-                    "time": None, "student": f"{r['student'].full_name} ({student_code_tail(code)})",
+                    "student": f"{r['student'].full_name} ({student_code_tail(code)})",
                     "class_name": r["class_name"], "course_name": r["course_name"],
                     "media_name": ", ".join(r.get("missing_videos") or []) or r["qr_title"],
-                    "result": "Chưa quét" if status == "not_scanned" else "Đã mở học liệu",
+                    "successful_count": 0 if status == "not_scanned" else "—",
+                    "unsuccessful_count": "—",  # Đối chiếu sĩ số, không phải nhật ký QR cụ thể.
                     # Hàng đối chiếu sĩ số không phải một phiên xem cụ thể:
                     # không giả lập thời lượng xem 00:00 gây hiểu nhầm.
                     "watch_time": "—", "watch_status": r["status"],
-                    "success": status != "not_scanned",
                 })
         else:
-            # Mỗi phiên xem ứng với một video thực tế. Một QR playlist có thể phát
-            # nhiều video nhưng chỉ có một bản ghi quét, không nhân lượt quét.
-            # Chỉ hiển thị lượt quét riêng khi chưa có phiên xem gắn với lượt đó.
-            scan_ref = aliased(ScanLog)
-            closest_scan_id = (select(scan_ref.id)
-                .where(scan_ref.role == "SV", scan_ref.qr_id == WatchSession.qr_id,
-                       scan_ref.participant_code == WatchSession.participant_code,
-                       or_(scan_ref.class_code == WatchSession.class_code,
-                           and_(scan_ref.class_code.is_(None), WatchSession.class_code.is_(None))),
-                       scan_ref.scanned_at <= WatchSession.started_at,
-                       scan_ref.scanned_at >= WatchSession.started_at - timedelta(days=1))
-                .order_by(scan_ref.scanned_at.desc(), scan_ref.id.desc()).limit(1)
-                .correlate(WatchSession).scalar_subquery())
-            scan_with_video = (select(ScanLog.id.label("scan_id"), WatchSession.id.label("watch_id"),
-                                      ScanLog.scanned_at.label("stamp"))
-                .select_from(ScanLog)
-                .outerjoin(WatchSession, and_(WatchSession.role == "SV", closest_scan_id == ScanLog.id))
-                .join(QrCode, ScanLog.qr_id == QrCode.id)
-                .where(ScanLog.role == "SV"))
-            orphan_video = (select(literal(None).label("scan_id"), WatchSession.id.label("watch_id"),
-                                   WatchSession.started_at.label("stamp"))
-                .select_from(WatchSession)
-                .outerjoin(ScanLog, ScanLog.id == closest_scan_id)
-                .join(QrCode, WatchSession.qr_id == QrCode.id)
-                .where(WatchSession.role == "SV", ScanLog.id.is_(None)))
-            if user.role != "admin":
-                scan_with_video = scan_with_video.where(managed_qr_scope(user.id))
-                orphan_video = orphan_video.where(managed_qr_scope(user.id))
-            events = union_all(scan_with_video, orphan_video).subquery("sv_events")
-            class_expr = func.coalesce(ScanLog.class_code, WatchSession.class_code)
-            course_expr = func.coalesce(ScanLog.course_id, WatchSession.course_id)
-            qr_expr = func.coalesce(ScanLog.qr_id, WatchSession.qr_id)
-            video_expr = func.coalesce(WatchSession.video_id, ScanLog.video_id)
-            sv_query = (db.session.query(events.c.scan_id, events.c.watch_id, events.c.stamp,
-                                         ScanLog, WatchSession, QrCode, Video)
-                .select_from(events).outerjoin(ScanLog, ScanLog.id == events.c.scan_id)
-                .outerjoin(WatchSession, WatchSession.id == events.c.watch_id)
-                .join(QrCode, QrCode.id == qr_expr)
-                .outerjoin(Video, Video.id == video_expr))
-            if class_code:
-                sv_query = sv_query.filter(class_expr == class_code)
-            if course_id:
-                sv_query = sv_query.filter(course_expr == course_id if selected_course else course_expr == -1)
-            if qr_id:
-                sv_query = sv_query.filter(qr_expr == qr_id if selected_qr else qr_expr == -1)
-            if invalid_student:
-                sv_query = sv_query.filter(literal(False))
-            elif selected_student_code:
-                sv_query = sv_query.filter(
-                    func.coalesce(ScanLog.participant_code, WatchSession.participant_code) == selected_student_code)
+            # SQL tổng hợp một hàng/cặp SV–video ngay tại CSDL; không tải toàn
+            # bộ nhật ký lịch sử lên RAM, không nhân lượt quét của QR playlist.
+            sv_query = student_video_summary_query(
+                user, course_id=course_id if selected_course else None,
+                class_code=class_code, qr_id=qr_id if selected_qr else None,
+                student_code=selected_student_code,
+                invalid_scope=(invalid_student or (bool(course_id) and not selected_course)
+                               or (bool(qr_id) and not selected_qr)),
+            )
+            # Các bộ lọc quyết định ở mức SV–VIDEO đã gộp, không lọc từng
+            # phiên trước khi đếm (sẽ làm mất các lần quét khác kết quả).
+            # Lọc qua đúng cột Query sau khi đã GROUP BY ở CSDL.
+            media_key = sv_query.column_descriptions[1]["expr"]
+            student_code_expr = sv_query.column_descriptions[0]["expr"]
+            completed_expr = best_watch_completed_expr(
+                student_code_expr, media_key, current_app.config["COMPLETION_THRESHOLD"])
+            started_expr = best_watch_started_expr(student_code_expr, media_key)
+            ok_count = sv_query.column_descriptions[3]["expr"]
+            bad_count = sv_query.column_descriptions[4]["expr"]
             if status == "not_completed":
-                sv_query = sv_query.filter(incomplete_watch_expr(current_app.config["COMPLETION_THRESHOLD"]))
+                sv_query = sv_query.filter(media_key > 0, started_expr, ~completed_expr)
             elif status == "completed":
-                sv_query = sv_query.filter(valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"]))
+                sv_query = sv_query.filter(media_key > 0, completed_expr)
             elif status == "unwatched":
-                # Quét thành công, chưa có giây phát video (hoặc dưới 0,5 giây).
-                sv_query = sv_query.filter(ScanLog.success.is_(True),
-                    or_(WatchSession.id.is_(None),
-                        WatchSession.estimated_watch_seconds <= 0.5))
+                sv_query = sv_query.filter(ok_count > 0, ~started_expr)
             elif status == "failed":
-                sv_query = sv_query.filter(ScanLog.success.is_(False))
+                sv_query = sv_query.filter(bad_count > 0)
             sv_total = sv_query.order_by(None).count()
             sv_pages = max(1, (sv_total + 9) // 10)
             sv_page = min(sv_page, sv_pages)
-            selection = (sv_query.order_by(events.c.stamp.desc(), events.c.scan_id.desc(), events.c.watch_id.desc())
-                         .offset((sv_page - 1)*10).limit(10).all())
-            codes = {s.participant_code if s else w.participant_code for _, _, _, s, w, _, _ in selection}
-            students = {x.student_code: x.full_name for x in Student.query.filter(Student.student_code.in_(codes)).all()} if codes else {}
-            for scan_id, watch_id, stamp, scan, watch, qr, video in selection:
-                code = (scan.participant_code if scan else "") or (watch.participant_code if watch else "")
-                class_ref = (scan.class_code if scan else "") or (watch.class_code if watch else "")
-                course_ref = (scan.course if scan else None) or (watch.course if watch else None)
-                played_video = video.title if video else (qr.title if qr else "Không xác định")
-                if not watch and qr and qr.is_playlist:
-                    # Giữ tên playlist đúng thời điểm quét, kể cả khi GV đã đổi
-                    # playlist đích của cùng một mã QR vào những ngày sau đó.
+            selection = (sv_query.order_by(
+                sv_query.column_descriptions[2]["expr"].desc(),
+                student_code_expr.asc(), media_key.asc(),
+            ).offset((sv_page - 1)*10).limit(10).all())
+            codes = {r[0] for r in selection}
+            status_keys = [(r[0], r[1]) for r in selection if r[1] > 0]
+            best_status_by_video = best_video_statuses(
+                status_keys, current_app.config["COMPLETION_THRESHOLD"])
+            students = {x.student_code: x.full_name for x in Student.query.filter(
+                Student.student_code.in_(codes)).all()} if codes else {}
+            for code, media_id, stamp, ok, bad, watched_seconds, class_ref, course, qr, video in selection:
+                ok, bad = int(ok or 0), int(bad or 0)
+                # Video thật: tên video; chưa mở video playlist: nhãn playlist
+                # có phân biệt rõ để không nhầm một lần quét thành nhiều video.
+                if media_id > 0:
+                    played_video = video.title if video else (
+                        f"{qr.title} (video không còn hồ sơ)" if qr else "Video không còn hồ sơ")
+                elif qr and qr.is_playlist:
+                    # Với QR playlist từng đổi đích, giữ tên ở thời điểm
+                    # quét mới nhất thay vì gán nhầm playlist hiện tại.
                     next_change = (EditHistory.query.filter_by(
                         entity_kind="qr_playlist", entity_id=qr.id, field="playlist_target")
                         .filter(EditHistory.changed_at > stamp)
                         .order_by(EditHistory.changed_at.asc(), EditHistory.id.asc()).first())
-                    historical_name = ((next_change.old_value or "").split(" | ", 1)[-1]
-                                       if next_change else qr.title)
-                    played_video = f"{historical_name or qr.title} (chưa phát video)"
-                seconds = max(0, round(watch.estimated_watch_seconds)) if watch else 0
-                watch_time = f"{seconds//3600:02d}:{(seconds//60)%60:02d}:{seconds%60:02d}" if seconds >= 3600 else f"{seconds//60:02d}:{seconds%60:02d}"
-                success = scan.success if scan else None
+                    old_title = ((next_change.old_value or "").split(" | ", 1)[-1]
+                                 if next_change else qr.title)
+                    played_video = f"{old_title or qr.title} (chưa phát video)"
+                else:
+                    played_video = (f"{qr.title} (chưa xác định video)"
+                                    if qr else "Học liệu chưa xác định")
+                secs = max(0, round(safe_watch_number(watched_seconds)))
+                watch_time = (f"{secs//3600:02d}:{(secs//60)%60:02d}:{secs%60:02d}"
+                              if secs >= 3600 else f"{secs//60:02d}:{secs%60:02d}")
+                best_status = best_status_by_video.get((code, media_id))
                 sv_rows.append({
-                    "time": stamp, "student": f"{students.get(code, 'Chưa có hồ sơ SV')} ({student_code_tail(code)})",
+                    "student": f"{students.get(code, 'Chưa có hồ sơ SV')} ({student_code_tail(code)})",
                     "class_name": class_name_map.get(class_ref, class_ref or "—"),
-                    "course_name": course_ref.name if course_ref else "—",
+                    "course_name": course.name if course else "—",
                     "media_name": played_video,
-                    "result": ("Thành công" if success else "Không thành công") if success is not None else "Chưa có dữ liệu quét",
+                    "successful_count": ok, "unsuccessful_count": bad,
                     "watch_time": watch_time,
-                    "watch_status": (watch_status_label(watch, current_app.config["COMPLETION_THRESHOLD"])
-                                     if watch else ("Chưa xem" if success else "Không mở được")),
-                    "success": success,
+                    "watch_status": best_status or ("Không mở được" if bad and not ok else "Chưa xem"),
                 })
         sv_page_numbers = list(range(max(1, sv_page-2), min(sv_pages, sv_page+2)+1))
         # Hai bộ lọc có tham số độc lập để chuyển trang hoặc lọc mục nào
@@ -3268,14 +3420,19 @@ def register_routes(app):
     def export_watch():
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["Mã phiên xem", "Mã sinh viên", "Mã lớp", "Mã QR", "Mã video YouTube", "Thời gian bắt đầu", "Thời lượng xem ước tính", "Vị trí xa nhất", "Thời lượng video", "Tỷ lệ hoàn thành", "Đã hoàn thành"])
+        w.writerow(["Mã phiên xem", "Mã sinh viên", "Mã lớp", "Mã QR", "Mã video YouTube", "Thời gian bắt đầu", "Thời lượng xem ước tính", "Vị trí xa nhất", "Thời lượng video", "Tỷ lệ hoàn thành (phiên)", "Đã hoàn thành (phiên)", "Trạng thái tốt nhất (SV–video)"])
         user = current_user()
         q = WatchSession.query.join(QrCode, WatchSession.qr_id == QrCode.id).filter(WatchSession.role == "SV")
         if user.role != "admin":
             q = q.filter(managed_qr_scope(user.id))
-        for s in q.order_by(WatchSession.started_at).all():
+        sessions = q.order_by(WatchSession.started_at).all()
+        best_status = best_video_statuses(
+            [(s.participant_code, s.video_id) for s in sessions],
+            current_app.config["COMPLETION_THRESHOLD"])
+        for s in sessions:
             w.writerow([s.session_key, s.participant_code, s.class_code, s.qr.slug if s.qr else "", s.video.youtube_video_id if s.video else "", s.started_at.isoformat(), round(s.estimated_watch_seconds, 2), round(s.max_position, 2), round(s.duration_seconds, 2), round(100 * s.estimated_watch_seconds / s.duration_seconds, 2) if s.duration_seconds > 0 else 0,
-                        int(valid_watch_completion(s, current_app.config["COMPLETION_THRESHOLD"]))])
+                        int(valid_watch_completion(s, current_app.config["COMPLETION_THRESHOLD"])),
+                        best_status.get((s.participant_code, s.video_id), "Chưa xem")])
         return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=watch_sessions.csv"})
 
 

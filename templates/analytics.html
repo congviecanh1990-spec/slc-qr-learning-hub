@@ -85,7 +85,7 @@
       <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_scans') }}">Xuất lượt quét (CSV)</a>
       <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_watch') }}">Xuất quá trình xem (CSV)</a>
     </div>
-    <p class="small text-muted">Một lượt quét QR được ghi nhận một lần; mỗi video sinh viên thực sự phát qua QR playlist được trình bày thành một dòng riêng. Bộ lọc <strong>Chưa hoàn thành</strong> hiển thị các phiên xem dưới 95% mà không cần chọn lớp hay học liệu; chức năng <strong>đối chiếu lớp</strong> và <strong>SV chưa quét QR</strong> yêu cầu chọn lớp cùng học liệu.</p>
+    <p class="small text-muted">Bảng tổng hợp <strong>mỗi sinh viên – video chỉ một dòng</strong>, dù sinh viên quét hoặc xem lại nhiều lần. Hai cột lượt quét cho biết số lần mở QR thành công/không thành công; trạng thái xem là <strong>mức tốt nhất từng đạt</strong> (đủ 95% thì giữ Hoàn thành). Với QR playlist, mỗi lượt quét chỉ được tính <strong>một lần</strong>, gắn với video đầu tiên thực sự phát; nếu chưa phát video nào thì được hiển thị riêng dưới tên playlist để không tính nhầm. Bộ lọc <strong>Chưa hoàn thành</strong> chỉ gồm video đã xem nhưng chưa đủ ngưỡng; các chức năng <strong>đối chiếu lớp</strong> yêu cầu chọn lớp cùng học liệu.</p>
     <form method="get" action="{{ url_for('analytics') }}#khai-thac-sinh-vien" class="row g-2 align-items-end border rounded p-3 bg-light mb-3">
       {% for k, v in sys_args.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
       <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Môn học/Mô đun</label>
@@ -118,18 +118,19 @@
       <span><b>Đã quét thành công:</b> {{ participant_stats.scanned }}</span>
       <span><b>Chưa quét:</b> {{ participant_stats.not_scanned }}</span>
       <span><b>Hoàn thành học liệu:</b> {{ participant_stats.completed }}</span></div>{% endif %}
-    <div class="small text-muted mb-2">Có <strong>{{ sv_total }}</strong> dòng theo bộ lọc · Trang {{ sv_page }}/{{ sv_pages }} · 10 dòng/trang</div>
+    <div class="small text-muted mb-2"><strong>Bảng thông tin chi tiết</strong> · Có <strong>{{ sv_total }}</strong> dòng theo bộ lọc · Trang {{ sv_page }}/{{ sv_pages }} · 10 dòng/trang</div>
     <div class="table-responsive"><table class="table table-striped table-sm align-middle mb-0">
-      <thead><tr><th>Thời gian</th><th>Tên SV (Mã)</th><th>Lớp</th><th>MH/MĐ</th><th>Tên học liệu số</th><th>Kết quả</th><th>Thời lượng xem</th><th>Trạng thái</th></tr></thead>
+      <thead><tr><th scope="col">STT</th><th scope="col">Tên SV (Mã)</th><th scope="col">Lớp</th><th scope="col">MH/MĐ</th><th scope="col">Tên học liệu số</th><th scope="col">Số lượt quét thành công</th><th scope="col">Số lượt quét không thành công</th><th scope="col">Thời lượng xem</th><th scope="col">Trạng thái</th></tr></thead>
       <tbody>{% for row in sv_rows %}
-        <tr><td class="text-nowrap">{{ row.time.strftime('%d/%m/%Y %H:%M:%S') if row.time else '—' }}</td>
+        <tr><td class="text-nowrap">{{ (sv_page - 1) * 10 + loop.index }}</td>
           <td>{{ row.student }}</td><td>{{ row.class_name }}</td><td>{{ row.course_name }}</td><td>{{ row.media_name }}</td>
-          <td>{{ row.result }}</td><td class="text-nowrap">{{ row.watch_time }}</td>
+          <td class="text-center">{{ row.successful_count }}</td><td class="text-center">{{ row.unsuccessful_count }}</td>
+          <td class="text-nowrap">{{ row.watch_time }}</td>
           <td><span class="badge {{ 'text-bg-success' if row.watch_status == 'Hoàn thành' else 'text-bg-secondary' }}">{{ row.watch_status }}</span></td></tr>
-      {% else %}<tr><td colspan="8" class="text-center text-muted py-4">Chưa có kết quả phù hợp.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="9" class="text-center text-muted py-4">Chưa có kết quả phù hợp.</td></tr>{% endfor %}
       </tbody></table></div>
     {{ pagination(sv_page, sv_pages, sv_page_numbers, sv_nav, 'sv_page', 'khai-thac-sinh-vien') }}
-    <p class="small text-muted mt-3 mb-0">Thời lượng xem là ước tính dựa trên hoạt động phát video. SV chưa quét QR được xác định bằng cách đối chiếu danh sách lớp với học liệu đã giao, không chỉ từ lượt quét.</p>
+    <p class="small text-muted mt-3 mb-0">Thời lượng xem là thời lượng lớn nhất của <strong>một phiên xem</strong> (không cộng các phiên trùng đoạn); trạng thái là kết quả tốt nhất của SV đối với video. Số lượt quét tính theo nhật ký QR thực tế; các lần tải lại trong vòng 30 giây có thể được gộp theo cơ chế chống trùng hiện tại. Bộ lọc lớp/môn/QR giới hạn số lượt quét đang tổng hợp; dữ liệu nhật ký gốc vẫn được giữ nguyên để đối chứng.</p>
   </div>
 </section>
 {% endblock %}

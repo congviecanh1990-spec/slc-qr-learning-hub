@@ -28,13 +28,20 @@ function snapshot(key, type, state) {
     position: playerNumber(() => player.getCurrentTime()),
     duration: playerNumber(() => player.getDuration())};
 }
+function updateLearningStatus(completed) {
+  const status = document.getElementById('learningStatus');
+  if (!status) return;
+  status.textContent = completed
+    ? 'Trạng thái tốt nhất: Hoàn thành (đã được ghi nhận, xem lại không làm mất kết quả).'
+    : 'Trạng thái: Đang theo dõi tiến độ xem video.';
+}
 async function startWatch() {
   if (cfg.trackingEnabled === false || !player || watchKey) return;
   if (!startPromise) {
     const v = currentVideo();
     startPromise = api('/api/watch/start', {slug: cfg.slug, video_id: v.id,
       duration: playerNumber(() => player.getDuration())})
-      .then(data => { watchKey = data.session_key; })
+      .then(data => { watchKey = data.session_key; updateLearningStatus(Boolean(data.completed)); })
       .catch(err => console.error('Không thể bắt đầu theo dõi video trong playlist:', err))
       .finally(() => { startPromise = null; });
   }
@@ -45,7 +52,10 @@ async function sendEvent(type, state) {
   const data = snapshot(watchKey, type, state);
   const pending = eventQueue.catch(() => {}).then(() => api('/api/watch/event', data));
   eventQueue = pending.catch(err => console.error('Lỗi ghi nhận tiến trình:', err));
-  return pending.catch(() => null);
+  return pending.then(result => {
+    if (result && result.completed) updateLearningStatus(true);
+    return result;
+  }).catch(() => null);
 }
 function showEndResult(verified) {
   const overlay = document.getElementById('endedOverlay');
@@ -106,6 +116,8 @@ async function selectVideo(index) {
     currentIndex = index;
     const v = currentVideo();
     document.getElementById('currentVideoTitle').textContent = v.title;
+    const status = document.getElementById('learningStatus');
+    if (status) status.textContent = 'Đang xác định trạng thái video đã ghi nhận…';
     document.getElementById('endedOverlay').classList.remove('show');
     document.querySelectorAll('.playlist-video-item').forEach((el, i) => el.classList.toggle('active', i === index));
     player.loadVideoById(v.youtubeId);

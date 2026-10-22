@@ -1,3 +1,29 @@
+# Thay đổi v4.3.18 – 22/10/2026
+
+## Một dòng cho mỗi sinh viên – video ở mục 2 (Thống kê khai thác học liệu)
+
+- Bảng thông tin chi tiết có các cột: **STT, Tên SV (Mã), Lớp, MH/MĐ, Tên học liệu số, Số lượt quét thành công, Số lượt quét không thành công, Thời lượng xem, Trạng thái**. Bỏ cột **Thời gian** và **Kết quả**; STT chạy tiếp qua các trang 10 dòng.
+- **Mỗi SV–video chỉ hiển thị một hàng**, dù SV quét lại hay có nhiều phiên xem cùng video, kể cả nhiều QR trỏ tới video đó. Số lượt quét thành công/thất bại là tổng bản ghi `ScanLog` được ghi nhận và thuộc phạm vi bộ lọc. Mọi `ScanLog` chỉ được đếm **một lần**; không tự tạo lượt quét từ một phiên xem.
+- QR **playlist** có thể phát nhiều video từ một lượt quét. Để tránh nhân lượt quét, lượt mở QR được gắn với video **được phát đầu tiên** trong lượt đó; các video còn lại vẫn có hàng và trạng thái riêng nhưng không cộng thêm lượt quét. Nếu QR playlist chưa phát video nào, số lượt quét của nó hiện trên một hàng **[Tên playlist] (chưa phát video)** (nhóm không phải video), không suy đoán gán cho video khác.
+- `Thời lượng xem` thể hiện **phiên xem có thời lượng thực lớn nhất** đối với SV–video trong phạm vi lọc, thay vì cộng các phiên có thể xem trùng một đoạn. `Trạng thái` luôn là **tốt nhất SV từng đạt** cho video (`Chưa xem` → `Chưa hoàn thành` → `Hoàn thành`) tính từ các phiên xem đã lưu; xem lại không làm hạ cấp.
+- Các lựa chọn **Đã hoàn thành, Chưa hoàn thành, Đã quét/chưa xem, Mở QR thất bại** lọc theo hàng SV–video **sau khi tổng hợp**, không lọc phiên trước khi tính số lượt quét. Hai lựa chọn đối chiếu danh sách lớp vẫn sử dụng logic đối chiếu riêng.
+- Chỉ thay đổi truy vấn và hiển thị; **không thay đổi database schema, dữ liệu gốc, QR đang sử dụng hoặc CSV nhật ký quét/xem**. Vẫn giữ chống trùng lượt tải lại trong 30 giây. Thử nghiệm offline bằng SQLite, cần xác minh trực tiếp với PostgreSQL trên Render sau triển khai.
+
+---
+
+# Thay đổi v4.3.17 – 22/10/2026
+
+## Trạng thái tốt nhất của SV theo từng video (không hạ cấp khi xem lại)
+
+- **Mỗi lần quét/mở QR vẫn lưu riêng** trong `ScanLog`; số lượt quét và số lượt quét thành công trên Tổng quan được tính từ các bản ghi quét, không dựa trên trạng thái học. Cơ chế ngăn ghi trùng khi mở lại trong vòng 30 giây được giữ như bản trước.
+- **Trạng thái học liệu** được suy ra theo cặp `(mã SV, ID video)` trên TẤT CẢ phiên xem đã có. Quy tắc: nếu từng có một phiên xem đủ ít nhất 95% độ dài video hợp lệ thì **Hoàn thành**; nếu chưa đạt nhưng từng xem >0,5 giây thì **Chưa hoàn thành**; nếu không có thời lượng xem thì **Chưa xem**. Về sau xem lại vài đoạn vẫn **Hoàn thành**.
+- **Không cộng dồn thời gian của các phiên khác nhau** để tránh xem lặp nhiều lần cùng một đoạn ngắn mà được chứng nhận hoàn thành. Thời lượng trên mỗi dòng vẫn là số giây của phiên thực tế, không sửa nội dung lịch sử.
+- Cập nhật cùng quy tắc cho API `/api/watch/start`, `/api/watch/event`, bộ lọc hoàn thành/chưa hoàn thành/chưa xem, bảng lịch sử, đối chiếu SV và CSV phiên xem. CSV giữ cả trạng thái chứng thực **của từng phiên** để đối chứng.
+- **Tổng quan**: giữ nguyên tổng phiên xem và lượt quét, thêm **lượt quét thành công**, thay tỷ lệ phiên hoàn thành thành **tỷ lệ hoàn thành SV–video** (đếm mỗi cặp SV–video một lần). Chỉ bổ sung chỉ mục tra cứu, không thêm bảng/cột, không xóa hay ghi đè dữ liệu.
+- Việc công nhận hoàn thành vẫn phải có thời lượng thực được xác minh, không chỉ dựa vào `ended` hoặc cờ `completed` cũ. Cần kiểm tra lại trên môi trường Render/PostgreSQL thực tế.
+
+---
+
 # Thay đổi v4.3.15 – 21/10/2026
 
 ## Sửa mục 2 – Thống kê khai thác học liệu của sinh viên
