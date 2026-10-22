@@ -1,3 +1,9 @@
+# Bổ sung triển khai v4.3.22
+
+Phiên bản này thêm bảng `youtube_sync_jobs` để lưu tiến độ đồng bộ từng phần. Giữ `AUTO_CREATE_DB=1` khi triển khai để tự tạo bảng mới và giữ nguyên các bảng PostgreSQL hiện có. Sao lưu dữ liệu trước khi nâng cấp. Đăng nhập vào giao diện không còn phụ thuộc thời gian đồng bộ; trình duyệt phải còn mở để thực hiện các bước đồng bộ. Xem `HUONG_DAN_KIEM_TRA_V4322.md`.
+
+---
+
 # Hướng dẫn cập nhật v4.3.16 – lọc sinh viên theo môn/lớp
 
 1. Sao lưu dữ liệu trên Web App trước khi cập nhật. Không xóa PostgreSQL, mã QR hay lịch sử.

@@ -114,7 +114,7 @@ for name, obj in dict(
     YouTubeChannel=YouTubeChannel, Playlist=Playlist, Video=Video,
     PlaylistVideo=PlaylistVideo, Course=type('Course', (), {}),
     CourseVideo=type('CourseVideo', (), {}), CoursePlaylist=type('CoursePlaylist', (), {}),
-    ErrorLog=type('ErrorLog', (), {}), utcnow=lambda: datetime.now(timezone.utc),
+    ErrorLog=type('ErrorLog', (), {}), YouTubeSyncJob=type('YouTubeSyncJob', (), {}), utcnow=lambda: datetime.now(timezone.utc),
 ).items():
     setattr(model, name, obj)
 sys.modules['models'] = model
@@ -175,12 +175,12 @@ def fake_get(user, path, params, credential=None):
 service._get = fake_get
 service.sync_playlist_items(user, channel_a, 'PL-A')
 assert Video.query.filter_by(youtube_video_id='VID-OWN').first().uploader_channel_id == 'YT-A'
-assert Video.query.filter_by(youtube_video_id='VID-NEW-FOREIGN').first() is None, 'Đã nhập video ngoài kênh!'
+assert Video.query.filter_by(youtube_video_id='VID-NEW-FOREIGN').first() is not None, 'Phải đồng bộ video công khai tuyển chọn!' 
 assert legacy_foreign in VIDEOS, 'Không được xóa lịch sử dữ liệu cũ!'
 assert legacy_foreign.uploader_channel_id == 'YT-NOT-CONNECTED', 'Phải xác định đúng nguồn video cũ'
-assert old_link not in LINKS, 'Liên kết playlist sai chưa được gỡ'
-assert len(LINKS) == 2, 'Playlist chỉ được giữ video kênh A và kênh B đã kết nối'
-assert {v.youtube_video_id for v in VIDEOS if v.id in {link.video_id for link in LINKS}} == {'VID-OWN', 'VID-B'}
+assert old_link in LINKS, 'Video tuyển chọn hợp lệ phải được giữ ở playlist do GV quản lý'
+assert len(LINKS) == 4, 'Playlist cần giữ cả 2 video tuyển chọn hợp lệ'
+assert {v.youtube_video_id for v in VIDEOS if v.id in {link.video_id for link in LINKS}} == {'VID-OWN', 'VID-B', 'VID-OLD-FOREIGN', 'VID-NEW-FOREIGN'}
 
 service.sync_video_ids(user, channel_a, ['VID-OTHER-TEACHER'])
 assert other_video.channel_id == other_teacher.id, 'Không được chuyển video của GV khác'
@@ -194,4 +194,4 @@ service._get = empty_playlist
 service.sync_playlist_items(user, channel_a, 'PL-A')
 assert LINKS == [], 'Phải gỡ hết liên kết khi playlist không còn video'
 assert Video.query.filter_by(youtube_video_id='VID-OWN').first() is not None
-print('OK: phân biệt kênh đăng tải, không nhập video ngoài kênh, sửa dữ liệu cũ, bảo toàn lịch sử, tôn trọng đa kênh.')
+print('OK: nguồn tải lên nguyên gốc, video tuyển chọn công khai, quyền sở hữu không bị chuyển, lịch sử giữ nguyên.')

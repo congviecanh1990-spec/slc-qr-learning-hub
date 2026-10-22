@@ -1,3 +1,14 @@
+# Cập nhật v4.3.22 – 22/10/2026
+
+- **Đăng nhập nhanh**: sau xác thực Google, vào Web App ngay; đồng bộ từng yêu cầu API ngắn và hiển thị tiến độ trên các trang, không ép chờ đồng bộ toàn bộ playlist/video. Có thể tiếp tục sau khi chuyển trang khi trình duyệt còn hoạt động.
+- **Đồng bộ video tuyển chọn**: playlist do tài khoản quản lý có thể chứa video của kênh khác. Chỉ liên kết video YouTube xác nhận có thể truy cập/phát nhúng, giữ nguyên kênh đăng tải thực tế. Video private/không nhúng không được thêm làm video phát được. Một video xuất hiện ở nhiều playlist/giảng viên chỉ có một bản ghi gốc.
+- **Giao diện playlist**: playlist hợp lệ nhưng chưa có video phát được hiển thị **Danh sách trống**, không gắn nhãn Có thể sử dụng hoặc tạo QR trống.
+- **Nghiệm thu**: đăng nhập Google và đồng bộ video là hai kết quả riêng; không đánh dấu YT_SYNC thành công nếu không có video đã xác minh hoặc còn bước lỗi.
+- **Database**: thêm bảng `youtube_sync_jobs` (tự tạo khi `AUTO_CREATE_DB=1`), không xóa dữ liệu/QR cũ. Phạm vi an toàn khi xóa giảng viên đã bao gồm video đang được playlist GV khác tuyển chọn. Cập nhật sao lưu/khôi phục hỗ trợ bảng mới.
+- **Kiểm thử**: `tests/test_v4322_incremental_curated.py` và toàn bộ kiểm thử hồi quy từ các bản trước. Hướng dẫn hiện hành: `HUONG_DAN_KIEM_TRA_V4322.md`.
+
+---
+
 # Cập nhật v4.3.21 – 22/10/2026
 
 **Giao diện mục 2 – Thống kê khai thác học liệu của sinh viên**

@@ -43,6 +43,20 @@ class ConnectedGoogleAccount(db.Model):
     user = db.relationship("User", backref=db.backref("extra_google_accounts", cascade="all,delete"))
 
 
+class YouTubeSyncJob(db.Model):
+    """Tiến độ đồng bộ từng bước, lưu trên PostgreSQL để tiếp tục sau khi chuyển trang.
+
+    Không lưu OAuth token hay dữ liệu riêng tư của video trong payload.
+    """
+    __tablename__ = "youtube_sync_jobs"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    status = db.Column(db.String(24), nullable=False, default="running")
+    payload_json = db.Column(db.Text, nullable=False, default="{}")
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
 class HomeroomChange(db.Model):
     """Lịch sử bàn giao GVCN; lớp và sinh viên giữ nguyên khi đổi giáo viên."""
     __tablename__ = "homeroom_changes"

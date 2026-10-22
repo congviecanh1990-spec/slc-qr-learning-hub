@@ -20,7 +20,7 @@ sys.modules['models'] = SimpleNamespace(
     Playlist=type('Playlist', (), {}), Video=type('Video', (), {}),
     PlaylistVideo=type('PlaylistVideo', (), {}), Course=type('Course', (), {}),
     CourseVideo=type('CourseVideo', (), {}), CoursePlaylist=type('CoursePlaylist', (), {}),
-    ErrorLog=type('ErrorLog', (), {}), utcnow=lambda: None,
+    ErrorLog=type('ErrorLog', (), {}), YouTubeSyncJob=type('YouTubeSyncJob', (), {}), utcnow=lambda: None,
 )
 sys.modules['security'] = SimpleNamespace(decrypt_json=lambda x: {}, encrypt_json=lambda x: '')
 path = Path(__file__).resolve().parents[1]
@@ -46,7 +46,7 @@ for reason, code in [('forbidden','permission'),('insufficientPermissions','perm
 
 # Dù cùng 0 video, có phản hồi kênh hợp lệ mới được coi là kênh trống.
 empty = service.build_sync_summary([SimpleNamespace(videos=[])], [])
-assert empty['ok'] is True and empty['status'] == 'empty'
+assert empty['ok'] is False and empty['status'] == 'empty'  # Không ghi nhận đồng bộ video khi rỗng
 assert 'chưa tìm thấy video' in empty['message']
 ready = service.build_sync_summary([SimpleNamespace(videos=[SimpleNamespace(is_available=True)])], [])
 assert ready['ok'] and ready['status'] == 'synced'

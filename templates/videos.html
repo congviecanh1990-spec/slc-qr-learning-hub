@@ -114,7 +114,11 @@
             </form>
           </td>
           <td>
-            <span class="badge {{ 'text-bg-success' if p.is_available else 'text-bg-danger' }}">{{ 'Có thể sử dụng' if p.is_available else 'Không còn khả dụng' }}</span>
+            {% set usable = namespace(count=0) %}
+            {% for link in p.video_links if link.video.is_available and link.video.embeddable is not sameas false and link.video.privacy_status != 'private' %}
+              {% set usable.count = usable.count + 1 %}
+            {% endfor %}
+            <span class="badge {{ 'text-bg-success' if p.is_available and usable.count > 0 else 'text-bg-secondary' if p.is_available else 'text-bg-danger' }}">{{ 'Có học liệu' if p.is_available and usable.count > 0 else 'Danh sách trống' if p.is_available else 'Không còn khả dụng' }}</span>
             {% if p.privacy_status %}<div class="small text-muted mt-1">{{ p.privacy_status }}</div>{% endif %}
           </td>
           <td>
@@ -134,7 +138,7 @@
                       {% endif %}>{{ l.course.name }}{{ ' – đã có mã QR' if l.qr and l.qr.active else '' }}</option>
                   {% endfor %}
                 </select>
-                <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available else '' }}>Tạo mã QR</button>
+                <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
                 <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#">Tải mã QR</a>
               </form>
               <form method="post" action="#" class="playlist-qr-delete-form mt-1 library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Ngừng sử dụng mã QR playlist này? Mã đã in sẽ không hoạt động nhưng lịch sử được giữ lại.');" hidden>
@@ -246,7 +250,7 @@
         {% for v in videos %}<tr id="video-{{ v.id }}" class="library-target-row">
           <td><input class="form-check-input video-check" type="checkbox" form="assignVideoForm" name="video_ids" value="{{ v.id }}"></td>
           <td><div class="d-flex gap-2 align-items-center">{% if v.thumbnail_url %}<img class="thumb" src="{{ v.thumbnail_url }}" alt="">{% endif %}<div><div class="fw-semibold">{{ v.title }}</div><div class="small text-muted">{{ v.youtube_video_id }}</div></div></div></td>
-          <td>{{ v.channel.title }}</td>
+          <td>{% if v.uploader_channel_id == v.channel.channel_id %}{{ v.channel.title }}{% else %}<span class="small">Video tuyển chọn</span><div class="text-muted small">Mã kênh gốc: {{ v.uploader_channel_id or 'Chưa rõ' }}</div>{% endif %}</td>
           <td>
             {% set pl_state = namespace(has_playlist=false, has_qr=false) %}
             {% for plink in v.playlist_links if plink.playlist.is_available and plink.playlist.youtube_playlist_id != v.channel.uploads_playlist_id %}

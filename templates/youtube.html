@@ -4,7 +4,16 @@
   <div><h2 class="mb-1">Kết nối và đồng bộ kênh YouTube</h2><div class="text-muted">Kết nối kênh YouTube, cập nhật danh sách video và tự động theo dõi các thay đổi của học liệu.</div></div>
   <form method="post" action="{{ url_for('youtube_sync') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-primary">Đồng bộ lại</button></form>
 </div>
-<div class="alert alert-info">Web App tự đồng bộ khi giảng viên đăng nhập. Khi thêm, chuyển hoặc xóa video trong playlist hay thay đổi quyền riêng tư trên YouTube, hãy bấm <b>Đồng bộ lại</b> để cập nhật. Hệ thống không chạy lịch đồng bộ mất phí.</div>
+<div class="alert alert-info">Đăng nhập Google xong, bạn được vào hệ thống ngay. Trình duyệt sẽ tiếp tục đồng bộ playlist và video <strong>theo từng phần</strong> trong khi bạn sử dụng Web App. Khi tạo hoặc sửa playlist, hãy bấm <strong>Đồng bộ lại</strong>. Nếu rời trang giữa chừng, lần mở tiếp theo có thể tiếp tục công việc đã lưu. Video do kênh khác đăng nhưng có thể nhúng, nằm trong playlist bạn quản lý, được sử dụng dưới dạng <strong>học liệu tuyển chọn</strong> (không phải video do bạn sở hữu). Video ở danh sách Xem sau không được YouTube API hỗ trợ lấy trực tiếp; hãy chuyển vào playlist thông thường.</div>
+{% set sync_state = sync_state|default({'status':'idle'}) %}
+{% if sync_state.status == 'done' %}
+<div class="alert {{ 'alert-success' if sync_state.videos_found > 0 and sync_state.failures == 0 else 'alert-warning' }}">
+  <strong>Kết quả đồng bộ gần nhất:</strong> {{ sync_state.message }}
+  {% if sync_state.failures > 0 %}<span class="small"> Có {{ sync_state.failures }} phần gặp lỗi, bạn có thể chọn Đồng bộ lại.</span>{% endif %}
+</div>
+{% elif sync_state.status == 'running' %}
+<div class="alert alert-info">Đang đồng bộ {{ sync_state.done }} phần; còn {{ sync_state.remaining }} phần đang chờ. Bạn vẫn có thể làm việc bình thường.</div>
+{% endif %}
 <div class="card mb-3"><div class="card-body">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2"><div><strong>Kết nối nhiều kênh YouTube</strong><div class="small text-muted">Liên kết với tài khoản Google khác để tích hợp thêm video học liệu</div></div>
   <a class="btn btn-outline-primary btn-sm" href="{{ url_for('connect_another_youtube') }}">Kết nối kênh YouTube khác</a></div>
@@ -19,9 +28,9 @@
       <h5 class="mb-1">{{ c.title }}</h5>
       <div class="small text-muted">Mã kênh YouTube: {{ c.channel_id }}</div>
       <div class="small text-muted">Lần cập nhật gần nhất: {{ c.last_synced_at or '—' }}</div>
-      <div class="small">Số video đã đồng bộ: <b>{{ c.videos|length }}</b> · Danh sách phát: <b>{{ c.playlists|length }}</b></div>
+      <div class="small">Số video đã đồng bộ: <b>{{ (channel_video_counts|default({})).get(c.id, c.videos|length) }}</b> · Danh sách phát: <b>{{ c.playlists|length }}</b></div>
       {% if c.videos|selectattr('is_available')|list|length == 0 %}
-      <div class="small text-muted mt-2">Chưa có video học liệu khả dụng từ kênh này. Nếu kênh chưa đăng video, hãy đăng video lên YouTube rồi chọn <strong>Đồng bộ lại</strong>.</div>
+      <div class="small text-muted mt-2">Chưa có video học liệu khả dụng từ kênh này. Nếu không tự đăng video, bạn có thể tạo playlist thông thường chứa video công khai từ các kênh khác rồi chọn <strong>Đồng bộ lại</strong>.</div>
       {% endif %}
     </div>
     <div>

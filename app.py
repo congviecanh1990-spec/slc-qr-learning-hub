@@ -33,10 +33,11 @@ from models import (
     db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ClassGroup,
     SchoolClass, Student, ClassEnrollment, CourseClass, Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
     HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
-    ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, utcnow
+    ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, YouTubeSyncJob, utcnow
 )
 from security import encrypt_json, decrypt_json
-from services.youtube import sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels, build_sync_summary, _friendly_sync_error
+from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
+    build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
 from services.websub import subscribe_channel, verify_callback, parse_notification
 
 csrf = CSRFProtect()
@@ -941,15 +942,24 @@ def qr_managed_by_user(qr: QrCode, user: User) -> bool:
 
 
 def visible_video_query(user: User):
-    """Chỉ trả về video đã xác minh do kênh kết nối của chính GV đăng tải.
+    """Video tự đăng hoặc video đã xác minh nằm trong playlist GV quản lý.
 
-    Việc một video xuất hiện trong playlist không chứng minh GV sở hữu video.
-    Những video nhập sai từ bản cũ được giữ trong CSDL để không mất lịch sử QR,
-    nhưng không được đưa vào Kho video hoặc danh sách tạo QR mới.
+    Playlist không cấp *quyền sở hữu video*: video tuyển chọn được dùng như
+    học liệu tham khảo, thông tin kênh tải lên vẫn giữ nguyên. DISTINCT video ID
+    để một video ở nhiều playlist không xuất hiện trùng.
     """
-    return (Video.query.join(YouTubeChannel)
-            .filter(YouTubeChannel.user_id == user.id,
-                    Video.uploader_channel_id == YouTubeChannel.channel_id))
+    uploaded = (db.session.query(Video.id).join(YouTubeChannel, Video.channel_id == YouTubeChannel.id)
+                .filter(YouTubeChannel.user_id == user.id,
+                        Video.uploader_channel_id == YouTubeChannel.channel_id))
+    curated = (db.session.query(PlaylistVideo.video_id)
+               .join(Playlist, Playlist.id == PlaylistVideo.playlist_id)
+               .join(YouTubeChannel, Playlist.channel_id == YouTubeChannel.id)
+               .filter(YouTubeChannel.user_id == user.id, Playlist.is_available.is_(True)))
+    return Video.query.filter(or_(Video.id.in_(uploaded), Video.id.in_(curated)))
+
+
+def video_accessible_to_lecturer(video: Video, user: User) -> bool:
+    return bool(video and user and visible_video_query(user).filter(Video.id == video.id).first())
 
 
 def visible_playlist_query(user: User):
@@ -1156,8 +1166,8 @@ def create_qr_for_course_video(course: Course, video: Video, user: User, link: C
             link.qr_id = existing.id
         existing.title = (video.title or "Video")[:255]
         return existing, False
-    if video.channel.user_id != user.id:
-        raise ValueError("Video thuộc kênh của giảng viên trước. QR đã phát hành vẫn hoạt động; mã QR mới chỉ được tạo từ kênh giảng viên đang phụ trách.")
+    if not video_accessible_to_lecturer(video, user):
+        raise ValueError("Video không thuộc kho học liệu được phép sử dụng của giảng viên này.")
     t0 = time.perf_counter()
     slug = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:12]
     qr = QrCode(owner_id=user.id, course_id=course.id, slug=slug, title=(video.title or "Video")[:255])
@@ -1460,8 +1470,9 @@ def register_routes(app):
             session["user_id"] = user.id
             session.pop("oauth_retry_attempt", None)
             session.permanent = True
+            session["yt_auto_sync_request"] = True
             # Mã GV được cấp sau khi xác nhận thông tin hồ sơ (cả Quản trị viên).
-            # Tự đồng bộ trên màn chờ mỗi lần đăng nhập thành công.
+            # Cho vào hệ thống ngay. Đồng bộ theo từng yêu cầu nhỏ trong trình duyệt.
             flash(f"Đăng nhập thành công với vai trò {role_label(user.role)}.", "success")
             session.pop("after_login", None)
             if not user.profile_completed:
@@ -1469,7 +1480,7 @@ def register_routes(app):
             if not user.lecturer_code:
                 allocate_lecturer_code(user)
                 db.session.commit()
-            return redirect(url_for("sync_wait"))
+            return redirect(url_for("index"))
         except Exception as exc:
             db.session.rollback()
             # OAuth state là biện pháp phòng chống CSRF: tuyệt đối KHÔNG bỏ qua
@@ -1539,7 +1550,7 @@ def register_routes(app):
                 user.profile_completed = True
                 db.session.commit()
                 flash("Đã lưu thông tin giảng viên và cấp mã định danh tự động.", "success")
-                return redirect(url_for("sync_wait"))
+                return redirect(url_for("index"))
             except Exception as exc:
                 db.session.rollback()
                 flash(f"Không thể hoàn tất khai báo: {exc}", "danger")
@@ -1548,30 +1559,59 @@ def register_routes(app):
     @app.get("/auth/sync-wait")
     @login_required
     def sync_wait():
-        if not current_user().profile_completed:
-            return redirect(url_for("profile_setup"))
-        return render_template("sync_wait.html")
+        # Liên kết cũ vẫn sử dụng được nhưng không ép người dùng chờ.
+        return redirect(url_for("index"))
 
     @app.post("/auth/sync-run")
     @login_required
     def sync_run():
+        # API tương thích cũ: chỉ khởi tạo hàng đợi, không đồng bộ 75 giây.
         user = current_user()
         if not user.profile_completed:
-            return jsonify({"ok": False, "message": "Bạn chưa hoàn tất thông tin giảng viên."}), 400
+            return jsonify({"ok": False, "message": "Chưa hoàn tất hồ sơ giảng viên."}), 400
+        if not YouTubeSyncJob.query.filter_by(user_id=user.id, status="running").first():
+            start_incremental_sync(user)
+        return jsonify(incremental_sync_state(user))
+
+    @app.get("/youtube/sync/state")
+    @login_required
+    def youtube_sync_state():
+        return jsonify(incremental_sync_state(current_user()))
+
+    @app.post("/youtube/sync/start")
+    @login_required
+    def youtube_sync_start():
+        user = current_user()
+        if not user.profile_completed:
+            return jsonify({"status": "error", "message": "Chưa hoàn tất hồ sơ."}), 400
+        force = bool(session.pop("yt_sync_force", False))
+        session.pop("yt_auto_sync_request", None)
+        start_incremental_sync(user, force=force)
+        return jsonify(incremental_sync_state(user))
+
+    @app.post("/youtube/sync/step")
+    @login_required
+    def youtube_sync_step():
+        user = current_user()
+        before = YouTubeSyncJob.query.filter_by(user_id=user.id).first()
+        was_running = bool(before and before.status == "running")
         try:
-            channels, sync_errors = sync_all_connected_channels(user)
-            result = build_sync_summary(channels, sync_errors)
-            record_functional_test("YT_SYNC", "Đồng bộ kênh/video YouTube", result["ok"], owner_id=user.id,
-                                   note=f"Kết quả {result['status']}: {result['channel_count']} kênh và {result['video_count']} video sau đăng nhập.")
-            db.session.commit()
+            result = step_incremental_sync(user)
+            if was_running and result.get("status") == "done":
+                # Điều kiện nghiệm thu: có video thực tế, không còn phần lỗi.
+                passed = result["videos_found"] > 0 and result["failures"] == 0
+                record_functional_test("YT_SYNC", "Đồng bộ video YouTube", passed,
+                    owner_id=user.id, note=(f"Video đã xác minh: {result['videos_found']}; "
+                                            f"phần lỗi: {result['failures']}."))
+                db.session.commit()
             return jsonify(result)
         except Exception as exc:
             db.session.rollback()
-            db.session.add(ErrorLog(module="youtube", action="Tự động đồng bộ sau đăng nhập", course_module="Hệ thống", actor_user_id=user.id,
-                                    message="Không thể tự động đồng bộ kênh YouTube", details=str(exc)[:10000]))
-            record_functional_test("YT_SYNC", "Đồng bộ kênh/video YouTube", False, owner_id=user.id, note=str(exc)[:1000])
+            db.session.add(ErrorLog(module="youtube", action="Đồng bộ từng bước",
+                course_module="Hệ thống", actor_user_id=user.id,
+                message="Một bước đồng bộ chưa hoàn tất", details=str(exc)[:3000]))
             db.session.commit()
-            return jsonify({"ok": False, "status": "error", "message": "Không thể hoàn tất đồng bộ YouTube lúc này. Bạn vẫn có thể vào hệ thống và thử lại tại mục Kênh YouTube."})
+            return jsonify({"status": "error", "message": "Chưa thực hiện được bước này. Dữ liệu trước đó vẫn được giữ; có thể tiếp tục trong mục Kênh YouTube."}), 503
 
     @app.post("/profile/display-name")
     @login_required
@@ -1598,36 +1638,25 @@ def register_routes(app):
         channels = YouTubeChannel.query.filter_by(user_id=user.id).all()
         channel_ids = [c.id for c in channels]
         hub_events = HubEvent.query.filter(HubEvent.channel_id.in_(channel_ids)).order_by(HubEvent.received_at.desc()).limit(20).all() if channel_ids else []
-        return render_template("youtube.html", channels=channels, hub_events=hub_events, extra_accounts=ConnectedGoogleAccount.query.filter_by(user_id=user.id).all())
+        channel_video_counts = {}
+        for channel in channels:
+            ids = {video.id for video in channel.videos if video_is_usable(video)}
+            for pl in channel.playlists:
+                ids.update(link.video_id for link in pl.video_links if video_is_usable(link.video))
+            channel_video_counts[channel.id] = len(ids)
+        return render_template("youtube.html", channels=channels, hub_events=hub_events,
+                               channel_video_counts=channel_video_counts,
+                               sync_state=incremental_sync_state(user),
+                               extra_accounts=ConnectedGoogleAccount.query.filter_by(user_id=user.id).all())
 
     @app.post("/youtube/sync")
     @login_required
     def youtube_sync():
-        user = current_user()
-        t0 = time.perf_counter()
-        try:
-            channels, sync_errors = sync_all_connected_channels(user)
-            # sync_my_channel đã đồng bộ uploads, các playlist do GV tạo và trạng thái
-            # video hiện có; không gọi đối soát lần hai để tránh tiêu tốn hạn mức API.
-            result = build_sync_summary(channels, sync_errors)
-            record_functional_test(
-                "YT_SYNC", "Đồng bộ kênh/video YouTube", result["ok"], owner_id=user.id,
-                note=f"Kết quả {result['status']}: {result['channel_count']} kênh; {result['video_count']} video."
-            )
-            db.session.commit()
-            flash(result["message"], "success" if result["status"] == "synced" else ("info" if result["status"] == "empty" else "warning"))
-        except Exception as exc:
-            db.session.rollback()
-            elapsed = time.perf_counter() - t0
-            db.session.add(ErrorLog(
-                module="youtube", action="Đồng bộ kênh/video", course_module="Hệ thống", actor_user_id=user.id,
-                message="Đồng bộ kênh/video YouTube thất bại", details=str(exc)
-            ))
-            record_functional_test(
-                "YT_SYNC", "Đồng bộ kênh/video YouTube", False, owner_id=user.id, note=str(exc)
-            )
-            db.session.commit()
-            flash(f"Đồng bộ chưa hoàn tất: {_friendly_sync_error(exc)}", "warning")
+        # Nút Đồng bộ lại chỉ kích hoạt hàng đợi trên trình duyệt, không giữ
+        # HTTP request cho đến khi đồng bộ tất cả playlist.
+        session["yt_auto_sync_request"] = True
+        session["yt_sync_force"] = True
+        flash("Đã yêu cầu đồng bộ học liệu theo từng phần. Bạn có thể tiếp tục sử dụng Web App.", "info")
         return redirect(url_for("youtube_page"))
 
     @app.get("/youtube/connect-another")
@@ -2351,15 +2380,14 @@ def register_routes(app):
         total_processing = 0.0
         for link in links:
             video = link.video
-            if not video_is_usable(video) or not video_is_from_connected_channel(video):
-                # Không sinh QR mới từ bản ghi video không đúng nguồn của phiên bản cũ.
+            if not video_is_usable(video) or not video_accessible_to_lecturer(video, user):
                 skipped += 1
                 continue
             # GV mới vẫn sử dụng QR cũ từ kênh GV trước; không tự tạo QR mới
             # cho nguồn YouTube chưa được GV mới kết nối.
             existing = (db.session.get(QrCode, link.qr_id) if link.qr_id else
                         active_qr_for_course_video(course.id, video.id, user.id))
-            if video.channel.user_id != user.id and not (existing and existing.active):
+            if not video_accessible_to_lecturer(video, user) and not (existing and existing.active):
                 skipped += 1
                 continue
             qr, was_created = create_qr_for_course_video(course, video, user, link)
@@ -2561,7 +2589,7 @@ def register_routes(app):
         for q in qrs:
             if q.course_id and not q.is_playlist:
                 target = active_video_for_qr(q)
-                if target and (not video_is_from_connected_channel(target) or
+                if target and (not video_accessible_to_lecturer(target, user) or
                                not CourseVideo.query.filter_by(course_id=q.course_id, video_id=target.id).first()):
                     qr_needs_review.add(q.id)
         # Danh sách video thay thế vẫn cần cho nút Đổi video đích trong Kho mã QR.
@@ -4204,6 +4232,21 @@ def register_routes(app):
             .join(Video, Video.id == CourseVideo.video_id)
             .join(YouTubeChannel, YouTubeChannel.id == Video.channel_id)
             .filter(YouTubeChannel.user_id == lecturer.id, Course.owner_id != lecturer.id).first())
+        # Nếu một video đã được giảng viên khác tuyển chọn vào playlist của họ,
+        # không được xóa kênh đang chứa bản ghi toàn cục đó.
+        playlist_owner = aliased(YouTubeChannel)
+        video_owner = aliased(YouTubeChannel)
+        shared_curated_video = (db.session.query(PlaylistVideo.id)
+            .join(Video, PlaylistVideo.video_id == Video.id)
+            .join(video_owner, Video.channel_id == video_owner.id)
+            .join(Playlist, Playlist.id == PlaylistVideo.playlist_id)
+            .join(playlist_owner, Playlist.channel_id == playlist_owner.id)
+            .filter(video_owner.user_id == lecturer.id,
+                    playlist_owner.user_id != lecturer.id).first())
+        if shared_curated_video:
+            flash("Chưa thể xóa giảng viên này vì có video tuyển chọn đang được sử dụng trong playlist của giảng viên khác. "
+                  "Cần giữ kênh nguồn để không làm mất dữ liệu hoặc mã QR đã phát hành.", "warning")
+            return redirect(url_for("lecturers_page"))
         if handed_off_qr or handed_off_playlist or handed_off_video:
             flash("Chưa thể xóa giảng viên này: mã QR hoặc học liệu của tài khoản vẫn đang phục vụ môn đã bàn giao. "
                   "Giữ tài khoản/kênh YouTube để bảo toàn QR đã phát hành và lịch sử khai thác.", "warning")
@@ -4480,6 +4523,7 @@ def backup_table_specs():
         ("users", User),
         ("oauth_accounts", OAuthAccount),
         ("connected_google_accounts", ConnectedGoogleAccount),
+        ("youtube_sync_jobs", YouTubeSyncJob),
         ("youtube_channels", YouTubeChannel),
         ("playlists", Playlist),
         ("videos", Video),
@@ -4542,7 +4586,7 @@ def restore_from_zip(fileobj):
             fn = f"{name}.json"
             if fn not in names:
                 # Các bảng bổ sung ở phiên bản sau là tùy chọn để backup cũ vẫn khôi phục được.
-                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes", "connected_google_accounts", "homeroom_changes", "edit_history", "course_transfers"}:
+                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes", "connected_google_accounts", "homeroom_changes", "edit_history", "course_transfers", "youtube_sync_jobs"}:
                     payload[name] = []
                     continue
                 raise ValueError(f"Thiếu {fn} trong backup.")
@@ -4661,10 +4705,15 @@ def acceptance_metrics(user):
         gv_non_it_count = 1 if user.professional_group == "other" else 0
     sv_count = participant_base.filter(ScanLog.role == "SV").distinct().count()
 
-    video_q = Video.query.join(YouTubeChannel).filter(
-        Video.uploader_channel_id == YouTubeChannel.channel_id)
-    if user.role != "admin":
-        video_q = video_q.filter(YouTubeChannel.user_id == user.id)
+    # Tính cả video tuyển chọn có thể sử dụng trong playlist do GV quản lý,
+    # không chỉ video do chính kênh giảng viên đăng tải.
+    if user.role == "admin":
+        video_q = Video.query.filter(or_(
+            Video.id.in_(db.session.query(PlaylistVideo.video_id)),
+            Video.id.in_(db.session.query(Video.id).join(YouTubeChannel)
+                         .filter(Video.uploader_channel_id == YouTubeChannel.channel_id))))
+    else:
+        video_q = visible_video_query(user)
 
     course_q = Course.query.filter_by(active=True) if user.role == "admin" else Course.query.filter_by(owner_id=user.id, active=True)
     course_count = course_q.count()

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import requests
 from flask import current_app
 
-from models import db, OAuthAccount, ConnectedGoogleAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ErrorLog, utcnow
+from models import db, OAuthAccount, ConnectedGoogleAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ErrorLog, YouTubeSyncJob, utcnow
 from security import decrypt_json, encrypt_json
 
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
@@ -77,10 +78,11 @@ def _friendly_sync_error(exc):
     return YouTubeSyncError("error", "Chưa thể hoàn tất đồng bộ YouTube. Hãy thử lại hoặc liên hệ quản trị viên.")
 
 
-def build_sync_summary(channels, issues):
+def build_sync_summary(channels, issues, video_count_override=None):
     """Kết quả có thể hiển thị công khai; không suy đoán kênh trống từ lỗi API."""
     channel_count = len(channels)
-    video_count = sum(sum(1 for video in channel.videos if video.is_available) for channel in channels)
+    video_count = (sum(sum(1 for video in channel.videos if video.is_available) for channel in channels)
+                   if video_count_override is None else video_count_override)
     if issues:
         causes = "; ".join(issues)
         if channel_count:
@@ -96,7 +98,7 @@ def build_sync_summary(channels, issues):
         return {"ok": False, "status": "no_channel", "channel_count": 0, "video_count": 0,
                 "message": "Chưa tìm thấy kênh YouTube được kết nối. Vui lòng kiểm tra tài khoản Google và kết nối kênh YouTube."}
     if not video_count:
-        return {"ok": True, "status": "empty", "channel_count": channel_count, "video_count": 0,
+        return {"ok": False, "status": "empty", "channel_count": channel_count, "video_count": 0,
                 "message": f"Đã kết nối và kiểm tra {channel_count} kênh YouTube, nhưng chưa tìm thấy video học liệu có thể đồng bộ. Bạn có thể vào hệ thống bình thường. Nếu kênh chưa đăng video, hãy đăng video lên YouTube rồi chọn 'Đồng bộ lại' trong mục Kênh YouTube."}
     return {"ok": True, "status": "synced", "channel_count": channel_count, "video_count": video_count,
             "message": f"Đã đồng bộ {channel_count} kênh YouTube và {video_count} video học liệu."}
@@ -125,7 +127,7 @@ def _token_for_user(user, credential=None):
                 "refresh_token": refresh,
                 "grant_type": "refresh_token",
             },
-            timeout=20,
+            timeout=9,
         )
         resp.raise_for_status()
         new_data = resp.json()
@@ -142,7 +144,7 @@ def _token_for_user(user, credential=None):
 def _get(user, path, params, credential=None):
     access = _token_for_user(user, credential)
     headers = {"Authorization": f"Bearer {access}"}
-    resp = requests.get(f"{YOUTUBE_API}/{path}", params=params, headers=headers, timeout=30)
+    resp = requests.get(f"{YOUTUBE_API}/{path}", params=params, headers=headers, timeout=9)
     if resp.status_code == 401:
         account = credential or OAuthAccount.query.filter_by(user_id=user.id).first()
         token = decrypt_json(account.token_encrypted)
@@ -151,7 +153,7 @@ def _get(user, path, params, credential=None):
         db.session.commit()
         access = _token_for_user(user, credential)
         headers = {"Authorization": f"Bearer {access}"}
-        resp = requests.get(f"{YOUTUBE_API}/{path}", params=params, headers=headers, timeout=30)
+        resp = requests.get(f"{YOUTUBE_API}/{path}", params=params, headers=headers, timeout=9)
     if not resp.ok:
         _log_error("youtube_api", f"GET {path} lỗi {resp.status_code}", resp.text)
         raise _friendly_http_error(resp)
@@ -290,137 +292,65 @@ def sync_playlists(user, channel, credential=None):
     return synced_playlists
 
 
-def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=False, credential=None):
-    """Đồng bộ playlist nhưng không coi video của kênh khác là video của GV.
+def sync_video_ids(user, channel, video_ids, credential=None, allow_curated=False):
+    """Đọc tối đa 50 video; giữ nguyên nguồn đăng tải thực tế của mỗi video.
 
-    Một playlist có thể chứa bất kỳ video công khai nào trên YouTube. Chỉ đưa
-    video do kênh đã được giảng viên kết nối thật sự đăng tải vào kho học liệu.
-    Những liên kết sai từ lần đồng bộ cũ bị bỏ; bản ghi Video/QR vẫn được giữ.
-    """
-    video_ids = []
-    item_meta = {}
-    page = None
-    while True:
-        params = {
-            "part": "snippet,contentDetails",
-            "playlistId": playlist_youtube_id,
-            "maxResults": 50,
-        }
-        if page:
-            params["pageToken"] = page
-        data = _get(user, "playlistItems", params, credential)
-        for item in data.get("items", []):
-            vid = item.get("contentDetails", {}).get("videoId") or item.get("snippet", {}).get("resourceId", {}).get("videoId")
-            if vid:
-                video_ids.append(vid)
-                item_meta[vid] = item
-        page = data.get("nextPageToken")
-        if not page:
-            break
-
-    for i in range(0, len(video_ids), 50):
-        sync_video_ids(user, channel, video_ids[i:i + 50], credential)
-
-    playlist = Playlist.query.filter_by(youtube_playlist_id=playlist_youtube_id).first()
-    if not playlist and uploads_playlist:
-        playlist = Playlist(
-            channel_id=channel.id,
-            youtube_playlist_id=playlist_youtube_id,
-            title="Uploads",
-            description="Danh sách video tải lên của kênh",
-            privacy_status="public",
-            is_available=True,
-            last_synced_at=utcnow(),
-        )
-        db.session.add(playlist)
-        db.session.flush()
-
-    if playlist:
-        playlist.is_available = True
-        playlist.last_synced_at = utcnow()
-        current_video_ids = set()
-        for vid in video_ids:
-            video = Video.query.filter_by(youtube_video_id=vid).first()
-            # Không phải video thuộc một kênh GV đã kết nối thì không nhận.
-            if not video or video.channel.user_id != user.id or not video.uploader_channel_id:
-                continue
-            if video.uploader_channel_id != video.channel.channel_id:
-                continue
-            current_video_ids.add(video.id)
-            link = PlaylistVideo.query.filter_by(playlist_id=playlist.id, video_id=video.id).first()
-            position = item_meta.get(vid, {}).get("snippet", {}).get("position")
-            if not link:
-                db.session.add(PlaylistVideo(playlist_id=playlist.id, video_id=video.id, position=position))
-            else:
-                link.position = position
-        # Gỡ các quan hệ playlist -> video đã bị xóa khỏi playlist hoặc được
-        # xác minh là thuộc kênh không kết nối. Không xóa video hoặc lịch sử QR.
-        for link in PlaylistVideo.query.filter_by(playlist_id=playlist.id).all():
-            if link.video_id not in current_video_ids:
-                db.session.delete(link)
-    db.session.commit()
-
-
-def sync_video_ids(user, channel, video_ids, credential=None):
-    """Kiểm tra đúng kênh ĐĂNG TẢI qua snippet.channelId của videos.list.
-
-    Khác với video.channel_id trong DB, kết quả của YouTube API mới là căn cứ
-    quyền sở hữu; video nằm trong playlist của GV chưa chắc do GV tải lên.
+    Với playlist của giảng viên, có thể thêm video tuyển chọn công khai/không
+    công khai (unlisted) nếu YouTube xác nhận cho nhúng. Video private, không
+    nhúng được, đã xóa hoặc không truy cập được không được liên kết mới.
+    Mỗi video YouTube có đúng một hàng toàn cục, các playlist GV khác sử dụng
+    qua PlaylistVideo chứ không chuyển quyền chủ quản hàng video.
     """
     if credential is None and channel.connected_account_id:
         credential = db.session.get(ConnectedGoogleAccount, channel.connected_account_id)
+    video_ids = list(dict.fromkeys(video_ids))
     if not video_ids:
-        return
-    data = _get(
-        user,
-        "videos",
-        {
-            "part": "snippet,status,contentDetails",
-            "id": ",".join(video_ids),
-            "maxResults": 50,
-        },
-        credential,
-    )
+        return 0
+    if len(video_ids) > 50:
+        raise ValueError("Chỉ kiểm tra tối đa 50 video mỗi lần gọi YouTube API.")
+    data = _get(user, "videos", {
+        "part": "snippet,status,contentDetails", "id": ",".join(video_ids), "maxResults": 50,
+    }, credential)
     returned = set()
+    usable = 0
     for item in data.get("items", []):
         vid = item["id"]
         returned.add(vid)
         snippet = item.get("snippet", {})
         status = item.get("status", {})
         content = item.get("contentDetails", {})
-        actual_youtube_channel_id = snippet.get("channelId")
-
+        uploader_id = snippet.get("channelId")
+        privacy = status.get("privacyStatus")
+        can_embed = status.get("embeddable") is True
+        accessible = privacy in ("public", "unlisted") and can_embed
+        owning_channel = (YouTubeChannel.query.filter_by(user_id=user.id, channel_id=uploader_id).first()
+                          if uploader_id else None)
         video = Video.query.filter_by(youtube_video_id=vid).first()
-        if video and video.channel.user_id != user.id:
-            # Tuyệt đối không sửa video đã được kết nối với GV khác.
-            continue
-
-        owning_channel = (YouTubeChannel.query.filter_by(
-            user_id=user.id, channel_id=actual_youtube_channel_id).first()
-            if actual_youtube_channel_id else None)
-        if not video and not owning_channel:
-            # Video của kênh khác trong playlist: không thêm vào Kho video.
+        # Không nhập video lạ từ một ID tùy ý; chỉ video nằm trong playlist GV
+        # hoặc video của kênh GV đã kết nối mới được tạo bản ghi.
+        if not video and not owning_channel and not (allow_curated and accessible):
             continue
         if not video:
-            video = Video(channel_id=owning_channel.id, youtube_video_id=vid)
+            video = Video(channel_id=(owning_channel or channel).id, youtube_video_id=vid)
             db.session.add(video)
-        if owning_channel:
-            # Sửa liên kết sai từ các phiên bản cũ, khi một video của kênh B bị
-            # đưa nhầm vào kênh A vì xuất hiện trong playlist A.
+        elif owning_channel and video.channel.user_id == user.id:
+            # Giữ video đúng nguồn khi cùng giảng viên sở hữu nhiều kênh.
             video.channel_id = owning_channel.id
             video.channel = owning_channel
-        video.uploader_channel_id = actual_youtube_channel_id
+        # Metadata lấy từ YouTube; KHÔNG nhận chủ sở hữu dựa trên playlist.
+        video.uploader_channel_id = uploader_id
         video.title = snippet.get("title", vid)
         video.description = snippet.get("description")
         video.published_at = _parse_dt(snippet.get("publishedAt"))
-        video.privacy_status = status.get("privacyStatus")
+        video.privacy_status = privacy
         video.upload_status = status.get("uploadStatus")
         video.embeddable = status.get("embeddable")
-        video.is_available = True
+        video.is_available = accessible or (owning_channel is not None and privacy == "private")
         video.duration_iso = content.get("duration")
         video.thumbnail_url = _thumb(snippet)
         video.last_synced_at = utcnow()
-
+        if accessible:
+            usable += 1
     missing = set(video_ids) - returned
     for vid in missing:
         video = Video.query.filter_by(youtube_video_id=vid).first()
@@ -428,7 +358,214 @@ def sync_video_ids(user, channel, video_ids, credential=None):
             video.is_available = False
             video.last_synced_at = utcnow()
     db.session.commit()
+    return usable
 
+
+def sync_playlist_page(user, channel, playlist_youtube_id, credential=None,
+                       page_token=None, seen_ids=None, uploads_playlist=False):
+    """Một trang tối đa 50 mục, tránh đồng bộ toàn bộ playlist trong một HTTP."""
+    seen_ids = set(seen_ids or [])
+    params = {"part": "snippet,contentDetails", "playlistId": playlist_youtube_id,
+              "maxResults": 50}
+    if page_token:
+        params["pageToken"] = page_token
+    data = _get(user, "playlistItems", params, credential)
+    video_ids, positions = [], {}
+    for item in data.get("items", []):
+        vid = (item.get("contentDetails", {}).get("videoId") or
+               item.get("snippet", {}).get("resourceId", {}).get("videoId"))
+        if vid and vid not in positions:
+            video_ids.append(vid)
+            positions[vid] = item.get("snippet", {}).get("position")
+    sync_video_ids(user, channel, video_ids, credential, allow_curated=not uploads_playlist)
+    playlist = Playlist.query.filter_by(youtube_playlist_id=playlist_youtube_id).first()
+    if not playlist and uploads_playlist:
+        playlist = Playlist(channel_id=channel.id, youtube_playlist_id=playlist_youtube_id,
+                            title="Uploads", description="Danh sách video tải lên của kênh",
+                            privacy_status="public", is_available=True)
+        db.session.add(playlist)
+        db.session.flush()
+    if not playlist or playlist.channel_id != channel.id:
+        raise YouTubeSyncError("permission", "Danh sách phát không thuộc kênh giảng viên đã kết nối.")
+    playlist.is_available = True
+    playlist.last_synced_at = utcnow()
+    for vid in video_ids:
+        video = Video.query.filter_by(youtube_video_id=vid).first()
+        if not video or not video.is_available or video.embeddable is False or video.privacy_status == "private":
+            continue
+        # Playlist/uploads phải thuộc đúng kênh kết nối; video tuyển chọn có
+        # thể do người khác đăng, nhưng phải được API xác nhận phát được.
+        if uploads_playlist and video.uploader_channel_id != channel.channel_id:
+            continue
+        seen_ids.add(video.id)
+        link = PlaylistVideo.query.filter_by(playlist_id=playlist.id, video_id=video.id).first()
+        if link:
+            link.position = positions.get(vid)
+        else:
+            db.session.add(PlaylistVideo(playlist_id=playlist.id, video_id=video.id,
+                                         position=positions.get(vid)))
+    next_page = data.get("nextPageToken")
+    if not next_page:
+        # Chỉ gỡ mục cũ sau khi đi HẾT tất cả các trang thành công.
+        for link in PlaylistVideo.query.filter_by(playlist_id=playlist.id).all():
+            if link.video_id not in seen_ids:
+                db.session.delete(link)
+    db.session.commit()
+    return next_page, sorted(seen_ids)
+
+
+def sync_playlist_items(user, channel, playlist_youtube_id, uploads_playlist=False, credential=None):
+    """Đồng bộ đầy đủ khi gọi trực tiếp; luồng UI dùng từng trang riêng."""
+    page, seen = None, []
+    while True:
+        page, seen = sync_playlist_page(user, channel, playlist_youtube_id, credential,
+                                       page_token=page, seen_ids=seen,
+                                       uploads_playlist=uploads_playlist)
+        if not page:
+            break
+
+
+def _sync_channel_catalog(user, credential=None):
+    """Nhận diện kênh và danh sách playlist; không tải video ở bước đăng nhập."""
+    data = _get(user, "channels", {"part": "snippet,contentDetails", "mine": "true",
+                                   "maxResults": 50}, credential)
+    items = data.get("items", [])
+    if not items:
+        raise YouTubeSyncError("no_channel", "Tài khoản Google này chưa có kênh YouTube.")
+    tasks = []
+    for item in items:
+        cid = item["id"]
+        existing = YouTubeChannel.query.filter_by(channel_id=cid).first()
+        if existing and existing.user_id != user.id:
+            raise YouTubeSyncError("conflict", "Kênh này đã được kết nối với hồ sơ giảng viên khác.")
+        channel = existing or YouTubeChannel(user_id=user.id, channel_id=cid)
+        if not existing:
+            db.session.add(channel)
+        snippet = item.get("snippet", {})
+        uploads = item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
+        channel.connected_account_id = credential.id if credential is not None else None
+        channel.title = snippet.get("title", cid)
+        channel.uploads_playlist_id = uploads
+        channel.thumbnail_url = _thumb(snippet)
+        channel.last_synced_at = utcnow()
+        db.session.flush()
+        playlists = sync_playlists(user, channel, credential)
+        for pl in playlists:
+            tasks.append({"channel_pk": channel.id, "playlist_pk": pl.id,
+                          "credential_pk": credential.id if credential is not None else None,
+                          "page_token": None, "seen": []})
+        if uploads:
+            tasks.append({"channel_pk": channel.id, "uploads": uploads,
+                          "credential_pk": credential.id if credential is not None else None,
+                          "page_token": None, "seen": []})
+    db.session.commit()
+    return tasks
+
+
+def _new_sync_payload(user):
+    extras = ConnectedGoogleAccount.query.filter_by(user_id=user.id).all()
+    return {"accounts": [None] + [x.id for x in extras], "tasks": [],
+            "completed_tasks": 0, "failed": [], "videos_found": 0,
+            "seen_video_ids": [],
+            "started_at": utcnow().isoformat()}
+
+
+def start_incremental_sync(user, force=False):
+    """Chỉ ghi hàng đợi; không gọi YouTube API nên trả kết quả ngay."""
+    job = YouTubeSyncJob.query.filter_by(user_id=user.id).first()
+    if job and job.status == "running" and not force:
+        return job
+    if not job:
+        job = YouTubeSyncJob(user_id=user.id)
+        db.session.add(job)
+    job.status = "running"
+    job.finished_at = None
+    job.payload_json = json.dumps(_new_sync_payload(user))
+    db.session.commit()
+    return job
+
+
+def incremental_sync_state(user):
+    job = YouTubeSyncJob.query.filter_by(user_id=user.id).first()
+    if not job:
+        return {"status": "idle", "message": "Chưa thực hiện đồng bộ YouTube."}
+    payload = json.loads(job.payload_json or "{}")
+    remaining = len(payload.get("accounts", [])) + len(payload.get("tasks", []))
+    return {"status": job.status, "done": int(payload.get("completed_tasks", 0)),
+            "remaining": remaining, "videos_found": int(payload.get("videos_found", 0)),
+            "failures": len(payload.get("failed", [])),
+            "message": ("Đang cập nhật học liệu theo từng phần. Bạn vẫn có thể sử dụng hệ thống."
+                        if job.status == "running" else
+                        payload.get("final_message", "Đã kết thúc lượt đồng bộ."))}
+
+
+def step_incremental_sync(user):
+    """Mỗi request tối đa một tài khoản hoặc một trang playlist (~50 video)."""
+    job = YouTubeSyncJob.query.filter_by(user_id=user.id).first()
+    if not job or job.status != "running":
+        return incremental_sync_state(user)
+    payload = json.loads(job.payload_json or "{}")
+    if payload.get("accounts"):
+        account_id = payload["accounts"].pop(0)
+        credential = (db.session.get(ConnectedGoogleAccount, account_id)
+                      if account_id is not None else None)
+        if account_id is not None and (not credential or credential.user_id != user.id):
+            payload["failed"].append("Một tài khoản đã được ngắt kết nối.")
+        else:
+            try:
+                payload["tasks"].extend(_sync_channel_catalog(user, credential))
+            except Exception as exc:
+                db.session.rollback()
+                label = credential.email if credential else user.email
+                payload["failed"].append(f"{label}: {_friendly_sync_error(exc)}")
+    elif payload.get("tasks"):
+        task = payload["tasks"].pop(0)
+        channel = db.session.get(YouTubeChannel, task["channel_pk"])
+        credential = (db.session.get(ConnectedGoogleAccount, task["credential_pk"])
+                      if task.get("credential_pk") else None)
+        if not channel or channel.user_id != user.id or (credential and credential.user_id != user.id):
+            payload["failed"].append("Một kênh đã ngừng được phép đồng bộ.")
+        else:
+            playlist = db.session.get(Playlist, task.get("playlist_pk")) if task.get("playlist_pk") else None
+            playlist_youtube_id = task.get("uploads") or (playlist.youtube_playlist_id if playlist else None)
+            if not playlist_youtube_id or (playlist and playlist.channel_id != channel.id):
+                payload["failed"].append("Danh sách phát không hợp lệ hoặc đã bị xóa.")
+            else:
+                try:
+                    page, seen = sync_playlist_page(user, channel, playlist_youtube_id,
+                        credential=credential, page_token=task.get("page_token"),
+                        seen_ids=task.get("seen"), uploads_playlist=bool(task.get("uploads")))
+                    if page:
+                        task["page_token"], task["seen"] = page, seen
+                        payload["tasks"].insert(0, task)
+                    else:
+                        payload["completed_tasks"] += 1
+                        all_seen = set(payload.get("seen_video_ids", []))
+                        all_seen.update(seen)
+                        payload["seen_video_ids"] = sorted(all_seen)
+                        payload["videos_found"] = len(all_seen)
+                        # Đồng bộ các học phần đã gán playlist khi một playlist hoàn tất.
+                        _reconcile_course_playlist_assignments(user)
+                except Exception as exc:
+                    db.session.rollback()
+                    payload["failed"].append(str(_friendly_sync_error(exc)))
+    if not payload["accounts"] and not payload["tasks"]:
+        job.status = "done"
+        job.finished_at = utcnow()
+        if payload["videos_found"]:
+            payload["final_message"] = (f"Đã đồng bộ {payload['videos_found']} video học liệu hợp lệ; "
+                                        f"{len(payload['failed'])} phần chưa đồng bộ được.")
+        elif payload["failed"]:
+            payload["final_message"] = ("Chưa xác minh được video học liệu vì có bước kết nối "
+                                        "YouTube gặp lỗi. Hãy kiểm tra quyền truy cập và chọn Đồng bộ lại.")
+        else:
+            payload["final_message"] = ("Đã kiểm tra kênh và playlist nhưng chưa tìm thấy video học liệu "
+                                        "có thể phát. Hãy tạo playlist thông thường chứa video "
+                                        "công khai, cho phép nhúng và đồng bộ lại.")
+    job.payload_json = json.dumps(payload, ensure_ascii=False)
+    job.updated_at = utcnow()
+    db.session.commit()
+    return incremental_sync_state(user)
 
 def sync_all_connected_channels(user):
     """Đồng bộ kênh chính và các tài khoản Google bổ sung; trả về các lỗi riêng lẻ."""
