@@ -12,8 +12,9 @@
     const guard = setTimeout(() => controller.abort(), 28000);
     try {
       const response = await fetch(path, {method: 'POST', body, credentials: 'same-origin', signal: controller.signal});
-      if (!response.ok) throw new Error('Không thể tiếp tục ở bước này.');
-      return await response.json();
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || 'Không thể tiếp tục ở bước này.');
+      return result;
     } finally { clearTimeout(guard); }
   };
   const getState = async () => {
@@ -52,8 +53,9 @@
       show(`Đang cập nhật video theo từng phần (${processed} phần hoàn tất, ${remaining} phần còn lại). ` +
            'Bạn có thể dùng hệ thống bình thường.');
     } else if (state.status === 'done') {
+      const reasons = (state.failure_reasons || []).slice(0, 2);
       show((state.message || 'Đã kết thúc đồng bộ.') +
-           (state.failures ? ' Có phần chưa đồng bộ được; hãy kiểm tra lại.' : ''),
+           (reasons.length ? ' Nguyên nhân: ' + reasons.join('; ') : ''),
            state.failures ? 'warning' : 'success');
       resume.classList.add('d-none');
       document.dispatchEvent(new Event('youtube-sync-finished'));
@@ -83,7 +85,11 @@
       }
       if (state.status === 'running') resume.classList.remove('d-none');
     } catch (error) {
-      show('Đồng bộ tạm dừng do kết nối phản hồi chậm. Dữ liệu đã xử lý được giữ nguyên; chọn Tiếp tục để thử lại.', 'warning');
+      const reason = error.name === 'AbortError'
+        ? 'Kết nối quá thời gian cho phép.'
+        : (error.message || 'Không liên hệ được máy chủ.');
+      show('Đồng bộ tạm dừng. Nguyên nhân có thể: ' + reason +
+           ' Dữ liệu đã xử lý vẫn được giữ nguyên; chọn Tiếp tục để thử lại.', 'warning');
       resume.classList.remove('d-none');
     } finally { running = false; release(); }
   }

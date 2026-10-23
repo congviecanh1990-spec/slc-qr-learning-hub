@@ -1,3 +1,11 @@
+## Cập nhật v4.3.23 – Nhật ký lỗi có email và nguyên nhân
+
+- Bổ sung email tại thời điểm lỗi và nguyên nhân thân thiện trong Nhật ký lỗi hệ thống (chỉ dành cho quản trị viên).
+- Ghi lỗi đồng bộ từng bước theo đúng tài khoản Google/YouTube; tác vụ tự động được phân biệt với người đăng nhập.
+- Email OAuth không được suy diễn khi Google chưa trả hồ sơ đã xác thực.
+- Màn hình Kênh YouTube thông báo nguyên nhân của các phần đồng bộ không thành công.
+- Tự nâng cấp schema hai cột `error_logs.actor_email`, `error_logs.reason` khi `AUTO_CREATE_DB=1`; giữ nguyên dữ liệu cũ.
+
 # Cập nhật v4.3.22 – 22/10/2026
 
 - **Đăng nhập nhanh**: sau xác thực Google, vào Web App ngay; đồng bộ từng yêu cầu API ngắn và hiển thị tiến độ trên các trang, không ép chờ đồng bộ toàn bộ playlist/video. Có thể tiếp tục sau khi chuyển trang khi trình duyệt còn hoạt động.

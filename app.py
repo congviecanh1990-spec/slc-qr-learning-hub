@@ -36,6 +36,7 @@ from models import (
     ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, YouTubeSyncJob, utcnow
 )
 from security import encrypt_json, decrypt_json
+from services.error_reporting import login_failure_reason, safe_error_diagnostic
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
 from services.websub import subscribe_channel, verify_callback, parse_notification
@@ -724,6 +725,10 @@ def ensure_schema_upgrades():
                 conn.execute(text("ALTER TABLE error_logs ADD COLUMN course_module VARCHAR(255)"))
             if "actor_user_id" not in error_columns:
                 conn.execute(text("ALTER TABLE error_logs ADD COLUMN actor_user_id INTEGER"))
+            if "actor_email" not in error_columns:
+                conn.execute(text("ALTER TABLE error_logs ADD COLUMN actor_email VARCHAR(255)"))
+            if "reason" not in error_columns:
+                conn.execute(text("ALTER TABLE error_logs ADD COLUMN reason VARCHAR(500)"))
             if "actor_student_code" not in error_columns:
                 conn.execute(text("ALTER TABLE error_logs ADD COLUMN actor_student_code VARCHAR(64)"))
             if "actor_class_code" not in error_columns:
@@ -1278,8 +1283,10 @@ def register_routes(app):
                 module="viewer" if request.path.startswith("/q/") or request.path.startswith("/identify") else "system",
                 action="Truy cập học liệu" if is_student else "Thao tác hệ thống",
                 course_module="Hệ thống", message="Lỗi xử lý yêu cầu",
-                details=str(getattr(error, "original_exception", None) or error)[:2000],
+                details=safe_error_diagnostic(getattr(error, "original_exception", None) or error),
+                reason="Hệ thống không xử lý được yêu cầu. Quản trị viên cần kiểm tra nhật ký và cấu hình máy chủ.",
                 actor_user_id=(user.id if user else None),
+                actor_email=(user.email if user else None),
                 actor_student_code=(str(code)[:64] if code else None),
                 actor_class_code=(str(class_code)[:64] if class_code else None),
             ))
@@ -1414,6 +1421,9 @@ def register_routes(app):
 
     @app.get("/auth/callback")
     def auth_callback():
+        # Chỉ gán email sau khi đã nhận userinfo từ Google qua token xác thực.
+        # Trước bước này, không thể xác định một cách đáng tin cậy ai đăng nhập lỗi.
+        verified_google_email = None
         try:
             token = oauth.google.authorize_access_token()
             access_token = token.get("access_token")
@@ -1429,6 +1439,7 @@ def register_routes(app):
             email = (info.get("email") or "").lower().strip()
             if not email:
                 raise RuntimeError("Không đọc được email từ Google")
+            verified_google_email = email[:255]
             user = User.query.filter_by(email=email).first()
             if not user:
                 role = "admin" if email in current_app.config["ADMIN_EMAILS"] else "lecturer"
@@ -1488,10 +1499,20 @@ def register_routes(app):
             error_text = str(exc)
             state_failed = "mismatching_state" in error_text.lower() or (
                 "csrf warning" in error_text.lower() and "state" in error_text.lower())
-            db.session.add(ErrorLog(module="oauth", action="Đăng nhập hệ thống", course_module="Hệ thống", message="Đăng nhập Google thất bại", details=str(exc)))
+            reason = login_failure_reason(exc)
+            # Khi lỗi xảy ra trước userinfo, không gán tên hoặc email suy đoán.
+            existing = User.query.filter_by(email=verified_google_email).first() if verified_google_email else None
+            db.session.add(ErrorLog(
+                module="oauth", action="Đăng nhập hệ thống", course_module="Hệ thống",
+                actor_user_id=(existing.id if existing else None),
+                actor_email=verified_google_email,
+                message="Đăng nhập Google thất bại", reason=reason,
+                details=safe_error_diagnostic(exc),
+            ))
             record_functional_test(
-                "AUTH_LOGIN", "Đăng nhập Google", False, owner_id=None,
-                note=f"OAuth thất bại: {exc}"
+                "AUTH_LOGIN", "Đăng nhập Google", False,
+                owner_id=(existing.id if existing else None),
+                note=f"Nguyên nhân: {reason}"
             )
             db.session.commit()
             if state_failed:
@@ -1503,7 +1524,7 @@ def register_routes(app):
                 session.pop("oauth_retry_attempt", None)
                 flash("Phiên đăng nhập Google không khớp. Vui lòng đóng các tab đăng nhập cũ, bật cookie và thử lại bằng một tab duy nhất.", "danger")
             else:
-                flash("Đăng nhập Google không thành công. Vui lòng thử lại; nếu tiếp diễn, báo quản trị viên kiểm tra Nhật ký lỗi.", "danger")
+                flash(f"Đăng nhập Google chưa thành công. Nguyên nhân có thể: {reason}", "danger")
             return redirect(url_for("index"))
 
     @app.route("/profile/setup", methods=["GET", "POST"])
@@ -1600,18 +1621,25 @@ def register_routes(app):
             if was_running and result.get("status") == "done":
                 # Điều kiện nghiệm thu: có video thực tế, không còn phần lỗi.
                 passed = result["videos_found"] > 0 and result["failures"] == 0
+                reasons = "; ".join(result.get("failure_reasons", [])[:3])
                 record_functional_test("YT_SYNC", "Đồng bộ video YouTube", passed,
                     owner_id=user.id, note=(f"Video đã xác minh: {result['videos_found']}; "
-                                            f"phần lỗi: {result['failures']}."))
+                                            f"phần lỗi: {result['failures']}. "
+                                            + (f"Nguyên nhân: {reasons}" if reasons else
+                                               "Không có video phù hợp để đồng bộ." if not passed else "")))
                 db.session.commit()
             return jsonify(result)
         except Exception as exc:
             db.session.rollback()
+            friendly = _friendly_sync_error(exc)
             db.session.add(ErrorLog(module="youtube", action="Đồng bộ từng bước",
-                course_module="Hệ thống", actor_user_id=user.id,
-                message="Một bước đồng bộ chưa hoàn tất", details=str(exc)[:3000]))
+                course_module="Hệ thống", actor_user_id=user.id, actor_email=user.email,
+                message="Một bước đồng bộ chưa hoàn tất", reason=str(friendly),
+                details=safe_error_diagnostic(exc)))
             db.session.commit()
-            return jsonify({"status": "error", "message": "Chưa thực hiện được bước này. Dữ liệu trước đó vẫn được giữ; có thể tiếp tục trong mục Kênh YouTube."}), 503
+            return jsonify({"status": "error", "message":
+                f"Chưa thực hiện được bước này. Nguyên nhân có thể: {friendly}. "
+                "Dữ liệu đã lưu vẫn được giữ; có thể tiếp tục trong mục Kênh YouTube."}), 503
 
     @app.post("/profile/display-name")
     @login_required
@@ -1713,7 +1741,14 @@ def register_routes(app):
             flash(f"Đã kết nối tài khoản YouTube bổ sung {email}. Bấm Đồng bộ lại để tải học liệu.", "success")
         except Exception as exc:
             db.session.rollback()
-            flash(f"Không thể kết nối thêm kênh YouTube: {exc}", "danger")
+            reason = login_failure_reason(exc)
+            db.session.add(ErrorLog(
+                module="oauth", action="Kết nối tài khoản YouTube bổ sung", course_module="Hệ thống",
+                actor_user_id=user.id, actor_email=user.email,
+                message="Kết nối kênh YouTube bổ sung thất bại", reason=reason,
+                details=safe_error_diagnostic(exc)))
+            db.session.commit()
+            flash(f"Không thể kết nối thêm kênh YouTube. Nguyên nhân có thể: {reason}", "danger")
         return redirect(url_for("youtube_page"))
 
     @app.post("/youtube/disconnect/<int:connection_id>")
@@ -1742,7 +1777,15 @@ def register_routes(app):
             subscribe_channel(channel)
             flash("Đã kích hoạt cập nhật tự động cho kênh YouTube. Hệ thống đang chờ xác nhận kết nối.", "success")
         except Exception as exc:
-            flash("Không thể kích hoạt cập nhật tự động từ YouTube. Vui lòng kiểm tra nhật ký lỗi.", "danger")
+            db.session.rollback()
+            reason = str(_friendly_sync_error(exc))
+            db.session.add(ErrorLog(
+                module="youtube", action="Kích hoạt cập nhật YouTube", course_module="Hệ thống",
+                actor_user_id=user.id, actor_email=user.email,
+                message="Kích hoạt cập nhật tự động thất bại", reason=reason,
+                details=safe_error_diagnostic(exc)))
+            db.session.commit()
+            flash(f"Chưa thể kích hoạt cập nhật tự động. Nguyên nhân có thể: {reason}", "danger")
         return redirect(url_for("youtube_page"))
 
     @app.route("/websub/callback/<channel_youtube_id>/<secret>", methods=["GET", "POST"])
@@ -1765,7 +1808,13 @@ def register_routes(app):
                 evt.processed = True
                 db.session.commit()
             except Exception as exc:
-                db.session.add(ErrorLog(module="websub", action="Đồng bộ video", course_module="Hệ thống", message="Nhận thông báo cập nhật nhưng đồng bộ video lỗi", details=str(exc)))
+                db.session.rollback()
+                db.session.add(ErrorLog(
+                    module="websub", action="Tác vụ tự động – cập nhật video", course_module="Hệ thống",
+                    actor_user_id=channel.user_id,
+                    actor_email=(channel.user.email if channel.user else None),
+                    message="Nhận thông báo cập nhật nhưng đồng bộ video lỗi",
+                    reason=str(_friendly_sync_error(exc)), details=safe_error_diagnostic(exc)))
                 db.session.commit()
         return "", 204
 
@@ -4471,20 +4520,27 @@ def register_routes(app):
         class_by_code = {c.code: c for c in SchoolClass.query.filter(SchoolClass.code.in_(class_codes)).all()} if class_codes else {}
         error_rows = []
         for e in logs:
-            actor = "Không xác định (bản ghi cũ)"
-            if e.actor_user_id:
+            actor = "Chưa xác định được email"
+            if (e.module or "").lower() in {"websub", "reconcile"}:
+                actor = (f"Hệ thống tự động xử lý – {e.actor_email}" if e.actor_email
+                         else "Hệ thống tự động xử lý")
+            elif e.actor_user_id:
                 teacher = e.actor or db.session.get(User, e.actor_user_id)
-                actor = f"{teacher.name} ({teacher.email})" if teacher else "Giảng viên (tài khoản đã xóa)"
+                actor = (f"{teacher.name} ({e.actor_email or teacher.email})" if teacher
+                         else f"Tài khoản đã xóa ({e.actor_email})" if e.actor_email
+                         else "Tài khoản đã xóa")
+            elif e.actor_email:
+                actor = e.actor_email
             elif e.actor_student_code:
                 st = student_by_code.get(e.actor_student_code)
                 cl = class_by_code.get(e.actor_class_code)
                 digits = re.sub(r"\D", "", e.actor_student_code)
                 short = (digits or e.actor_student_code)[-3:]
                 actor = f"{st.full_name if st else 'Sinh viên'} ({short} – {cl.name if cl else (e.actor_class_code or 'Chưa rõ lớp')})"
-            elif (e.module or "").lower() in {"websub", "reconcile"}:
-                actor = "Tác vụ đồng bộ tự động"
             elif (e.module or "").lower() == "oauth":
-                actor = "Người đăng nhập chưa xác định"
+                actor = "Chưa xác định được email đăng nhập"
+            elif (e.module or "").lower() in {"system", "youtube_api"}:
+                actor = "Hệ thống xử lý (chưa xác định tài khoản)"
             error_rows.append({
                 "log": e, "actor_name": actor,
                 "action": e.action or action_fallback.get((e.module or "").lower(), "Xử lý hệ thống"),
@@ -4508,7 +4564,12 @@ def register_routes(app):
                 total += count
                 results.append({"user": user.email, "videos": count, "ok": True})
             except Exception as exc:
-                db.session.add(ErrorLog(module="reconcile", action="Đồng bộ video", course_module="Hệ thống", message=f"Đối soát lỗi: {user.email}", details=str(exc)))
+                friendly = _friendly_sync_error(exc)
+                db.session.add(ErrorLog(
+                    module="reconcile", action="Đối soát video tự động", course_module="Hệ thống",
+                    actor_user_id=user.id, actor_email=user.email,
+                    message="Đối soát video chưa thành công", reason=str(friendly),
+                    details=safe_error_diagnostic(exc)))
                 db.session.commit()
                 results.append({"user": user.email, "ok": False, "error": str(exc)})
         return jsonify({"ok": True, "total_videos": total, "results": results})

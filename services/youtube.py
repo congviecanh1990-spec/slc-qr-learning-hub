@@ -70,12 +70,17 @@ def _friendly_sync_error(exc):
     if isinstance(exc, requests.exceptions.RequestException):
         return YouTubeSyncError("temporary", "Không kết nối được tới YouTube. Hãy kiểm tra đường truyền và thử lại.")
     # Các lỗi nội bộ bất ngờ không được hiển thị trực tiếp dưới dạng traceback/URL.
+    raw = str(exc).lower()
     if isinstance(exc, RuntimeError) and str(exc) in (
         "Không tìm thấy kênh YouTube thuộc tài khoản này.",
         "Kênh YouTube này đã được kết nối với hồ sơ giảng viên khác.",
     ):
         return YouTubeSyncError("no_channel" if "Không tìm thấy" in str(exc) else "conflict", str(exc))
-    return YouTubeSyncError("error", "Chưa thể hoàn tất đồng bộ YouTube. Hãy thử lại hoặc liên hệ quản trị viên.")
+    if "invalid_grant" in raw or "refresh_token" in raw or "token đã hết hạn" in raw:
+        return YouTubeSyncError("auth_expired", "Quyền đăng nhập YouTube đã hết hạn hoặc bị thu hồi; hãy kết nối lại tài khoản Google.")
+    if "chưa có token" in raw:
+        return YouTubeSyncError("auth_expired", "Tài khoản chưa hoàn tất kết nối Google/YouTube; hãy đăng nhập lại.")
+    return YouTubeSyncError("error", "Chưa thể hoàn tất đồng bộ YouTube do lỗi xử lý nội bộ; hãy thử lại hoặc liên hệ quản trị viên.")
 
 
 def build_sync_summary(channels, issues, video_count_override=None):
@@ -104,9 +109,22 @@ def build_sync_summary(channels, issues, video_count_override=None):
             "message": f"Đã đồng bộ {channel_count} kênh YouTube và {video_count} video học liệu."}
 
 
-def _log_error(module, message, details=None):
-    db.session.add(ErrorLog(module=module, message=message[:500], details=(details or "")[:10000]))
-    db.session.commit()
+def _safe_sync_diagnostic(exc):
+    code = getattr(exc, "code", None)
+    return ("Loại lỗi: " + type(exc).__name__[:80] +
+            ("; mã: " + str(code)[:40] if code else ""))
+
+
+def _record_sync_failure(user, account_email, action, exc):
+    """Lưu mỗi lỗi đồng bộ, bảo toàn email kết nối và nguyên nhân thân thiện."""
+    friendly = _friendly_sync_error(exc)
+    db.session.add(ErrorLog(
+        module="youtube", action=action, course_module="Hệ thống",
+        actor_user_id=user.id, actor_email=(account_email or user.email)[:255],
+        message="Đồng bộ học liệu chưa thành công", reason=str(friendly)[:500],
+        details=_safe_sync_diagnostic(exc),
+    ))
+    return friendly
 
 
 def _token_for_user(user, credential=None):
@@ -155,7 +173,8 @@ def _get(user, path, params, credential=None):
         headers = {"Authorization": f"Bearer {access}"}
         resp = requests.get(f"{YOUTUBE_API}/{path}", params=params, headers=headers, timeout=9)
     if not resp.ok:
-        _log_error("youtube_api", f"GET {path} lỗi {resp.status_code}", resp.text)
+        # Không lưu nội dung phản hồi thô: có thể chứa liên kết hoặc dữ liệu truy cập.
+        # Ngoại lệ được ghi có email/phân loại tại bước đồng bộ gọi hàm này.
         raise _friendly_http_error(resp)
     return resp.json()
 
@@ -494,6 +513,8 @@ def incremental_sync_state(user):
     return {"status": job.status, "done": int(payload.get("completed_tasks", 0)),
             "remaining": remaining, "videos_found": int(payload.get("videos_found", 0)),
             "failures": len(payload.get("failed", [])),
+            # Lý do chỉ tới chủ tài khoản đã đăng nhập; luôn là thông điệp đã phân loại.
+            "failure_reasons": payload.get("failed", [])[-5:],
             "message": ("Đang cập nhật học liệu theo từng phần. Bạn vẫn có thể sử dụng hệ thống."
                         if job.status == "running" else
                         payload.get("final_message", "Đã kết thúc lượt đồng bộ."))}
@@ -510,26 +531,34 @@ def step_incremental_sync(user):
         credential = (db.session.get(ConnectedGoogleAccount, account_id)
                       if account_id is not None else None)
         if account_id is not None and (not credential or credential.user_id != user.id):
-            payload["failed"].append("Một tài khoản đã được ngắt kết nối.")
+            reason = _record_sync_failure(user, user.email, "Nhận diện tài khoản YouTube",
+                                          YouTubeSyncError("connection", "Tài khoản YouTube bổ sung đã bị ngắt kết nối."))
+            payload["failed"].append(str(reason))
         else:
             try:
                 payload["tasks"].extend(_sync_channel_catalog(user, credential))
             except Exception as exc:
                 db.session.rollback()
                 label = credential.email if credential else user.email
-                payload["failed"].append(f"{label}: {_friendly_sync_error(exc)}")
+                friendly = _record_sync_failure(user, label, "Nhận diện kênh YouTube", exc)
+                payload["failed"].append(f"{label}: {friendly}")
     elif payload.get("tasks"):
         task = payload["tasks"].pop(0)
         channel = db.session.get(YouTubeChannel, task["channel_pk"])
         credential = (db.session.get(ConnectedGoogleAccount, task["credential_pk"])
                       if task.get("credential_pk") else None)
+        account_label = credential.email if credential else user.email
         if not channel or channel.user_id != user.id or (credential and credential.user_id != user.id):
-            payload["failed"].append("Một kênh đã ngừng được phép đồng bộ.")
+            reason = _record_sync_failure(user, account_label, "Đồng bộ video",
+                                          YouTubeSyncError("permission", "Không còn quyền đồng bộ kênh này."))
+            payload["failed"].append(f"{account_label}: {reason}")
         else:
             playlist = db.session.get(Playlist, task.get("playlist_pk")) if task.get("playlist_pk") else None
             playlist_youtube_id = task.get("uploads") or (playlist.youtube_playlist_id if playlist else None)
             if not playlist_youtube_id or (playlist and playlist.channel_id != channel.id):
-                payload["failed"].append("Danh sách phát không hợp lệ hoặc đã bị xóa.")
+                reason = _record_sync_failure(user, account_label, "Đồng bộ danh sách phát",
+                                              YouTubeSyncError("not_found", "Danh sách phát không hợp lệ hoặc đã bị xóa."))
+                payload["failed"].append(f"{account_label}: {reason}")
             else:
                 try:
                     page, seen = sync_playlist_page(user, channel, playlist_youtube_id,
@@ -548,7 +577,8 @@ def step_incremental_sync(user):
                         _reconcile_course_playlist_assignments(user)
                 except Exception as exc:
                     db.session.rollback()
-                    payload["failed"].append(str(_friendly_sync_error(exc)))
+                    friendly = _record_sync_failure(user, account_label, "Đồng bộ video trong playlist", exc)
+                    payload["failed"].append(f"{account_label}: {friendly}")
     if not payload["accounts"] and not payload["tasks"]:
         job.status = "done"
         job.finished_at = utcnow()

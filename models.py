@@ -438,6 +438,11 @@ class ErrorLog(db.Model):
     action = db.Column(db.String(128), nullable=True)
     course_module = db.Column(db.String(255), nullable=True)
     actor_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Bản chụp email tại thời điểm lỗi; hỗ trợ cả tài khoản Google kết nối thêm
+    # và tác vụ chạy sau khi hồ sơ người dùng bị đổi/xóa. Không lưu email đoán từ OAuth.
+    actor_email = db.Column(db.String(255), nullable=True)
+    # Nguyên nhân dễ hiểu, đã lọc thông tin nhạy cảm; chi tiết kỹ thuật chỉ cho quản trị viên.
+    reason = db.Column(db.String(500), nullable=True)
     actor_student_code = db.Column(db.String(64), nullable=True)
     actor_class_code = db.Column(db.String(64), nullable=True)
     actor = db.relationship("User", foreign_keys=[actor_user_id])

@@ -9,7 +9,13 @@
 {% if sync_state.status == 'done' %}
 <div class="alert {{ 'alert-success' if sync_state.videos_found > 0 and sync_state.failures == 0 else 'alert-warning' }}">
   <strong>Kết quả đồng bộ gần nhất:</strong> {{ sync_state.message }}
-  {% if sync_state.failures > 0 %}<span class="small"> Có {{ sync_state.failures }} phần gặp lỗi, bạn có thể chọn Đồng bộ lại.</span>{% endif %}
+  {% if sync_state.failures > 0 %}
+  <div class="small mt-2">Có {{ sync_state.failures }} phần gặp lỗi. Nguyên nhân ghi nhận:</div>
+  <ul class="small mb-1">
+    {% for cause in sync_state.failure_reasons %}<li>{{ cause }}</li>{% endfor %}
+  </ul>
+  <div class="small">Bạn có thể chọn Đồng bộ lại. Quản trị viên xem lịch sử chi tiết tại Nhật ký lỗi hệ thống.</div>
+  {% endif %}
 </div>
 {% elif sync_state.status == 'running' %}
 <div class="alert alert-info">Đang đồng bộ {{ sync_state.done }} phần; còn {{ sync_state.remaining }} phần đang chờ. Bạn vẫn có thể làm việc bình thường.</div>

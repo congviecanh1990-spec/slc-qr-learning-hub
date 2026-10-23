@@ -1,3 +1,5 @@
+**Phiên bản thử nghiệm mới nhất: v4.3.23.** Giữ `AUTO_CREATE_DB=1` để bổ sung hai cột nhật ký lỗi `actor_email`, `reason` trên cơ sở dữ liệu hiện hành; tuyệt đối không xóa PostgreSQL cũ.
+
 # Bổ sung triển khai v4.3.22
 
 Phiên bản này thêm bảng `youtube_sync_jobs` để lưu tiến độ đồng bộ từng phần. Giữ `AUTO_CREATE_DB=1` khi triển khai để tự tạo bảng mới và giữ nguyên các bảng PostgreSQL hiện có. Sao lưu dữ liệu trước khi nâng cấp. Đăng nhập vào giao diện không còn phụ thuộc thời gian đồng bộ; trình duyệt phải còn mở để thực hiện các bước đồng bộ. Xem `HUONG_DAN_KIEM_TRA_V4322.md`.
