@@ -111,31 +111,53 @@
       <div class="col-md-auto d-flex gap-2 flex-wrap align-items-end"><button class="btn btn-primary btn-sm">Lọc kết quả</button>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sys_args) }}#khai-thac-sinh-vien">Xóa lọc</a></div>
     </form>
-    <div class="row g-3 mb-3" aria-label="Tổng hợp lượt quét QR của sinh viên">
+    <h3 class="h6 fw-bold mt-2 mb-3">A. Thống kê lượt quét mã QR</h3>
+    <div class="row g-3 mb-3" aria-label="Tổng hợp lượt quét QR thực tế của sinh viên">
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tổng lượt quét</div><div class="display-6 fw-bold">{{ student_metrics.total }}</div></div></div>
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Quét thành công</div><div class="display-6 fw-bold text-success">{{ student_metrics.successful }}</div></div></div>
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Quét không thành công</div><div class="display-6 fw-bold text-danger">{{ student_metrics.unsuccessful }}</div></div></div>
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tỷ lệ quét thành công</div><div class="display-6 fw-bold">{{ (student_metrics.rate|string + '%') if student_metrics.rate is not none else '—' }}</div></div></div>
     </div>
+    <p class="small text-muted mb-2">Lượt quét QR được đếm theo nhật ký truy cập thực tế; một lần quét QR playlist chỉ tính một lượt, dù mở nhiều video.</p>
+    <div class="small text-muted mb-2" id="qr-chi-tiet"><strong>Bảng chi tiết lượt quét QR theo học liệu/playlist</strong> · Có <strong>{{ qr_total }}</strong> dòng · Trang {{ qr_page }}/{{ qr_pages }} · 10 dòng/trang</div>
+    <div class="table-responsive mb-2"><table class="table table-striped table-sm align-middle mb-0" aria-label="Lượt quét QR thực tế">
+      <thead><tr><th>STT</th><th>Tên SV (Mã)</th><th>Lớp</th><th>MH/MĐ</th><th>Học liệu / mã QR đã quét</th><th>Số lượt quét</th><th>Quét thành công</th><th>Quét không thành công</th></tr></thead>
+      <tbody>{% for row in qr_rows %}<tr>
+        <td class="text-nowrap">{{ (qr_page - 1) * 10 + loop.index }}</td><td>{{ row.student }}</td><td>{{ row.class_name }}</td><td>{{ row.course_name }}</td><td>{{ row.qr_title }}</td>
+        <td class="text-center">{{ row.total }}</td><td class="text-center">{{ row.successful }}</td><td class="text-center">{{ row.unsuccessful }}</td>
+      </tr>{% else %}<tr><td colspan="8" class="text-center text-muted py-3">Không có lượt quét QR trong phạm vi này.</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {{ pagination(qr_page, qr_pages, qr_page_numbers, sv_nav, 'qr_page', 'qr-chi-tiet') }}
+
+    <hr class="my-4">
+    <h3 class="h6 fw-bold mb-3">B. Thống kê hoạt động khai thác video</h3>
+    <div class="row g-3 mb-3" aria-label="Tổng hợp tình trạng khai thác video">
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tổng video</div><div class="display-6 fw-bold">{{ video_metrics.total }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Video đã xem</div><div class="display-6 fw-bold text-primary">{{ video_metrics.viewed }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Video hoàn thành</div><div class="display-6 fw-bold text-success">{{ video_metrics.completed }}</div></div></div>
+      <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tỷ lệ hoàn thành</div><div class="display-6 fw-bold">{{ (video_metrics.rate|string + '%') if video_metrics.rate is not none else '—' }}</div></div></div>
+    </div>
+    <p class="small text-muted mb-3">Mỗi sinh viên–video chỉ tính một lần trong các chỉ số trên. “Tổng video” tính các cặp sinh viên–video có nhật ký xem hoặc thuộc mã QR đã quét thành công; không nhân số video thành lượt quét QR. Tỷ lệ hoàn thành = Video hoàn thành / Tổng video.</p>
     {% if pending_notice %}<div class="alert alert-info">{{ pending_notice }}</div>{% endif %}
     {% if participant_stats %}<div class="d-flex flex-wrap gap-3 small mb-3">
       <span><b>Sĩ số đang học:</b> {{ participant_stats.roster }}</span>
       <span><b>Đã quét thành công:</b> {{ participant_stats.scanned }}</span>
       <span><b>Chưa quét:</b> {{ participant_stats.not_scanned }}</span>
       <span><b>Hoàn thành học liệu:</b> {{ participant_stats.completed }}</span></div>{% endif %}
-    <div class="small text-muted mb-2"><strong>Bảng thông tin chi tiết</strong> · Có <strong>{{ sv_total }}</strong> dòng theo bộ lọc · Trang {{ sv_page }}/{{ sv_pages }} · 10 dòng/trang</div>
-    <div class="table-responsive"><table class="table table-striped table-sm align-middle mb-0">
-      <thead><tr><th scope="col">STT</th><th scope="col">Tên SV (Mã)</th><th scope="col">Lớp</th><th scope="col">MH/MĐ</th><th scope="col">Tên học liệu số</th><th scope="col">Số lượt quét thành công</th><th scope="col">Số lượt quét không thành công</th><th scope="col">Thời lượng xem</th><th scope="col">Trạng thái</th></tr></thead>
+    {% if status == 'failed' %}<div class="alert alert-light border small">Bộ lọc “Mở QR thất bại” áp dụng tại bảng A. Không thể suy ra video nào đã được mở từ một lượt QR thất bại.</div>{% endif %}
+    <div class="small text-muted mb-2"><strong>{{ 'Danh sách đối chiếu sĩ số' if status in ['not_scanned', 'roster_not_completed'] else 'Bảng chi tiết hoạt động xem video' }}</strong> · Có <strong>{{ sv_total }}</strong> dòng theo bộ lọc · Trang {{ sv_page }}/{{ sv_pages }} · 10 dòng/trang</div>
+    <div class="table-responsive"><table class="table table-striped table-sm align-middle mb-0" aria-label="Khai thác video theo sinh viên">
+      <thead><tr><th scope="col">STT</th><th scope="col">Tên SV (Mã)</th><th scope="col">Lớp</th><th scope="col">MH/MĐ</th><th scope="col">Tên học liệu số</th><th scope="col">Số lần mở video</th><th scope="col">Thời lượng xem</th><th scope="col">Trạng thái</th></tr></thead>
       <tbody>{% for row in sv_rows %}
         <tr><td class="text-nowrap">{{ (sv_page - 1) * 10 + loop.index }}</td>
           <td>{{ row.student }}</td><td>{{ row.class_name }}</td><td>{{ row.course_name }}</td><td>{{ row.media_name }}</td>
-          <td class="text-center">{{ row.successful_count }}</td><td class="text-center">{{ row.unsuccessful_count }}</td>
+          <td class="text-center">{{ row.open_count }}</td>
           <td class="text-nowrap">{{ row.watch_time }}</td>
           <td><span class="badge {{ 'text-bg-success' if row.watch_status == 'Hoàn thành' else 'text-bg-secondary' }}">{{ row.watch_status }}</span></td></tr>
-      {% else %}<tr><td colspan="9" class="text-center text-muted py-4">Chưa có kết quả phù hợp.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="8" class="text-center text-muted py-4">Chưa có kết quả phù hợp.</td></tr>{% endfor %}
       </tbody></table></div>
     {{ pagination(sv_page, sv_pages, sv_page_numbers, sv_nav, 'sv_page', 'khai-thac-sinh-vien') }}
-    <p class="small text-muted mt-3 mb-0">Thời lượng xem là thời lượng lớn nhất của <strong>một phiên xem</strong> (không cộng các phiên trùng đoạn); trạng thái là kết quả tốt nhất của SV đối với video. Hai cột lượt quét sử dụng nhật ký đã lưu, bao gồm các lần quét trước khi cập nhật. Khi một lượt quét playlist mở nhiều video, lượt đó được thể hiện tại từng video đã truy cập; tổng lượt quét toàn hệ thống vẫn tính theo từng lần quét QR, không cộng số lượt từ các dòng video. Dữ liệu nhật ký gốc vẫn được giữ nguyên để đối chứng.</p>
+    <p class="small text-muted mt-3 mb-0">Số lần mở video chỉ đếm các phiên đã phát trên 0,5 giây; không suy ra từ số lượt quét. Số lần mở và thời lượng xem cao nhất của sinh viên–video được tổng hợp qua mọi QR đã sử dụng (không cộng các đoạn xem trùng). Trạng thái là mức tốt nhất sinh viên từng đạt đối với video; đã hoàn thành thì xem lại ngắn không làm giảm trạng thái. Dữ liệu nhật ký gốc được giữ để đối chiếu.</p>
   </div>
 </section>
 {% endblock %}

@@ -55,8 +55,8 @@ root = Path(__file__).resolve().parents[1]
 source = (root / 'app.py').read_text(encoding='utf8')
 html = (root / 'templates/analytics.html').read_text(encoding='utf8')
 assert 'Bảng tổng hợp <strong>mỗi sinh viên' not in html
-assert '<th scope="col">Số lượt quét thành công</th>' in html
-assert '<th scope="col">Số lượt quét không thành công</th>' in html
+assert 'Bảng chi tiết lượt quét QR theo học liệu/playlist' in html
+assert 'B. Thống kê hoạt động khai thác video' in html
 assert '<th scope="col">STT</th>' in html
 
 names = {'student_video_summary_query', 'best_watch_completed_expr', 'best_watch_started_expr'}

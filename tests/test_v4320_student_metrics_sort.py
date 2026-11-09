@@ -80,7 +80,7 @@ assert 'Quét thành công</div>' in html
 assert 'Quét không thành công</div>' in html
 assert 'Tỷ lệ quét thành công</div>' in html
 assert 'student_metrics=student_metrics' in source
-assert 'student_video_ordered_query(sv_query, db.engine.dialect.name)' in source
+assert 'student_video_ordered_query(\n                sv_query, db.engine.dialect.name, class_index=7)' in source
 assert 'Bảng tổng hợp <strong>mỗi sinh viên' not in html
 
 names = {'student_scan_metrics', 'student_video_summary_query', 'student_name_sort_expr',

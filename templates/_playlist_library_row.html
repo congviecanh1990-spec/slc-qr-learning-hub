@@ -1,6 +1,6 @@
 {# Cùng một dòng dùng cho trang Kho học liệu và kết quả AJAX sau khi lưu gán môn.
    Không render lại cả danh sách: bộ lọc/phân trang có thể đã làm playlist biến mất. #}
-{% set active_course_ids = p.course_links | selectattr('active') | map(attribute='course_id') | list %}
+{% set active_course_ids = p.course_links | selectattr('active') | selectattr('course.active') | selectattr('course.owner_id', 'equalto', me.id) | map(attribute='course_id') | list %}
 {% set usable = namespace(count=0) %}
 {% for link in p.video_links if link.video.is_available and link.video.embeddable is not sameas false and link.video.privacy_status != 'private' %}
   {% set usable.count = usable.count + 1 %}
@@ -35,13 +35,7 @@
                 </div>
                 <button class="btn btn-primary btn-sm">Lưu</button>
               </div>
-              <div class="form-text mt-1 course-picker-summary">
-                {% if active_course_ids|length == 0 %}
-                  Chưa gán môn học/ mô đun.
-                {% else %}
-                  Đang áp dụng cho {{ active_course_ids|length }} môn học/ mô đun. Mở danh sách để thêm hoặc bỏ môn học/ mô đun rồi bấm Lưu.
-                {% endif %}
-              </div>
+              <div class="form-text mt-1 course-picker-summary" {{ 'hidden' if active_course_ids else '' }}>{% if not active_course_ids %}Chưa gán môn học/ mô đun.{% endif %}</div>
               {% else %}
                 <div class="text-muted small">Chưa có môn học/ mô đun. Hãy tạo môn học/ mô đun trước.</div>
               {% endif %}
@@ -52,7 +46,7 @@
             {% if p.privacy_status %}<div class="small text-muted mt-1">{{ p.privacy_status }}</div>{% endif %}
           </td>
           <td>
-            {% set active_links = p.course_links | selectattr('active') | list %}
+            {% set active_links = p.course_links | selectattr('active') | selectattr('course.active') | selectattr('course.owner_id', 'equalto', me.id) | list %}
             {% if active_course_ids %}
               <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap playlist-qr-actions align-items-center library-qr-form" data-library-qr-form="1">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

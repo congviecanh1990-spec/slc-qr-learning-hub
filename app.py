@@ -334,6 +334,187 @@ def student_scan_metrics(user, course_id=None, class_code="", qr_id=None, studen
             "rate": round(100 * success / total, 1) if total else None}
 
 
+
+
+def student_qr_breakdown_query(user, course_id=None, class_code="", qr_id=None,
+                               student_code=None, invalid_scope=False):
+    """Một hàng theo SV/lớp/môn/mã QR; lượt quét lấy từ ScanLog.id gốc.
+
+    Tuyệt đối không JOIN ScanLog với playlist_videos (sẽ nhân số lượt).
+    Trả về bảng có thể phân trang và đối chiếu tổng với student_scan_metrics.
+    """
+    query = (db.session.query(
+        ScanLog.participant_code.label("code"), ScanLog.class_code.label("class_code"),
+        ScanLog.course_id.label("course_id"), ScanLog.qr_id.label("qr_id"),
+        func.count(ScanLog.id).label("total"),
+        func.sum(case((ScanLog.success.is_(True), 1), else_=0)).label("successful"),
+        func.sum(case((ScanLog.success.is_(False), 1), else_=0)).label("unsuccessful"),
+    ).select_from(ScanLog).join(QrCode, QrCode.id == ScanLog.qr_id)
+     .filter(ScanLog.role == "SV"))
+    if user.role != "admin":
+        query = query.filter(managed_qr_scope(user.id))
+    if course_id is not None:
+        query = query.filter(ScanLog.course_id == course_id)
+    if class_code:
+        query = query.filter(ScanLog.class_code == class_code)
+    if qr_id is not None:
+        query = query.filter(ScanLog.qr_id == qr_id)
+    if student_code:
+        query = query.filter(ScanLog.participant_code == student_code)
+    if invalid_scope:
+        query = query.filter(literal(False))
+    return query.group_by(ScanLog.participant_code, ScanLog.class_code,
+                          ScanLog.course_id, ScanLog.qr_id)
+
+
+def student_qr_ordered_query(query, dialect_name):
+    """Sắp xếp QR: lớp -> môn -> tên gọi SV -> tên QR, trước phân trang."""
+    grouped = query.subquery("qr_scan_breakdown")
+    ordered = (db.session.query(
+        grouped.c.code, grouped.c.class_code, grouped.c.course_id, grouped.c.qr_id,
+        grouped.c.total, grouped.c.successful, grouped.c.unsuccessful,
+        Course, QrCode)
+        .outerjoin(Course, Course.id == grouped.c.course_id)
+        .outerjoin(QrCode, QrCode.id == grouped.c.qr_id)
+        .outerjoin(SchoolClass, SchoolClass.code == grouped.c.class_code)
+        .outerjoin(ClassGroup, and_(ClassGroup.code == grouped.c.class_code,
+                                     ClassGroup.course_id == grouped.c.course_id))
+        .outerjoin(Student, Student.student_code == grouped.c.code))
+    return ordered.order_by(
+        func.lower(func.coalesce(SchoolClass.name, ClassGroup.name, grouped.c.class_code, "")),
+        func.lower(func.coalesce(Course.name, "")),
+        student_name_sort_expr(dialect_name),
+        func.lower(func.coalesce(Student.full_name, "")),
+        grouped.c.code, func.lower(func.coalesce(QrCode.title, "")), grouped.c.qr_id,
+    )
+
+
+def student_video_activity_query(user, threshold: float, course_id=None, class_code="",
+                                 qr_id=None, student_code=None, invalid_scope=False):
+    """Một hàng theo SV–video, KHÔNG quy lượt quét QR thành lượt xem.
+
+    Phạm vi video là những video đã có WatchSession, QR video đã quét thành
+    công, hoặc các video khả dụng nằm trong QR playlist từng được SV quét
+    thành công. Mở video chỉ đếm phiên thực sự phát (>0,5 giây); tạo phiên
+    chưa phát không tính là đã xem. Không suy ra lượt xem từ một ScanLog.
+    """
+    watch_facts = (select(
+        WatchSession.participant_code.label("code"),
+        WatchSession.video_id.label("media_key"),
+        WatchSession.class_code.label("class_code"),
+        WatchSession.course_id.label("course_id"),
+        WatchSession.qr_id.label("qr_id"),
+        WatchSession.started_at.label("stamp"),
+        case((WatchSession.estimated_watch_seconds > 0.5, 1), else_=0).label("open_count"),
+        func.coalesce(WatchSession.estimated_watch_seconds, 0).label("watch_seconds"),
+        case((valid_watch_completion_expr(threshold), 1), else_=0).label("completed"),
+    ).select_from(WatchSession).join(QrCode, QrCode.id == WatchSession.qr_id)
+     .where(WatchSession.role == "SV", WatchSession.video_id.isnot(None)))
+
+    # QR cho một video: ghi nhận học liệu dù SV chưa phát.
+    direct = (select(
+        ScanLog.participant_code.label("code"), ScanLog.video_id.label("media_key"),
+        ScanLog.class_code.label("class_code"), ScanLog.course_id.label("course_id"),
+        ScanLog.qr_id.label("qr_id"), ScanLog.scanned_at.label("stamp"),
+        literal(0).label("open_count"), literal(0.0).label("watch_seconds"),
+        literal(0).label("completed"),
+    ).select_from(ScanLog).join(QrCode, QrCode.id == ScanLog.qr_id)
+     .where(ScanLog.role == "SV", ScanLog.success.is_(True),
+            ScanLog.video_id.isnot(None)))
+    # QR playlist: nội dung đủ điều kiện truy cập (video hiện còn trong playlist).
+    # Nhiều video từ MỘT QR xuất hiện trong bảng VIDEO nhưng không cộng thành lượt QR.
+    playlists = (select(
+        ScanLog.participant_code.label("code"), PlaylistVideo.video_id.label("media_key"),
+        ScanLog.class_code.label("class_code"), ScanLog.course_id.label("course_id"),
+        ScanLog.qr_id.label("qr_id"), ScanLog.scanned_at.label("stamp"),
+        literal(0).label("open_count"), literal(0.0).label("watch_seconds"),
+        literal(0).label("completed"),
+    ).select_from(ScanLog).join(QrCode, QrCode.id == ScanLog.qr_id)
+     .join(PlaylistVideo, PlaylistVideo.playlist_id == QrCode.playlist_id)
+     .join(Video, Video.id == PlaylistVideo.video_id)
+     .where(ScanLog.role == "SV", ScanLog.success.is_(True),
+            ScanLog.video_id.is_(None), QrCode.playlist_id.isnot(None),
+            Video.is_available.is_(True), Video.embeddable.isnot(False),
+            or_(Video.privacy_status.is_(None), Video.privacy_status != "private")))
+    if user.role != "admin":
+        ownership = managed_qr_scope(user.id)
+        watch_facts = watch_facts.where(ownership)
+        direct = direct.where(ownership)
+        playlists = playlists.where(ownership)
+    for name, value in (("course", course_id), ("class", class_code),
+                        ("qr", qr_id), ("student", student_code)):
+        if value is None or value == "":
+            continue
+        col = {"course": "course_id", "class": "class_code",
+               "qr": "qr_id", "student": "participant_code"}[name]
+        watch_facts = watch_facts.where(getattr(WatchSession, col) == value)
+        direct = direct.where(getattr(ScanLog, col) == value)
+        playlists = playlists.where(getattr(ScanLog, col) == value)
+    if invalid_scope:
+        watch_facts = watch_facts.where(literal(False))
+        direct = direct.where(literal(False))
+        playlists = playlists.where(literal(False))
+    facts = union_all(watch_facts, direct, playlists).subquery("video_activity_facts")
+    grouped = (select(
+        facts.c.code, facts.c.media_key,
+        func.max(facts.c.stamp).label("latest_at"),
+        func.sum(facts.c.open_count).label("open_count"),
+        func.max(func.coalesce(facts.c.watch_seconds, 0)).label("best_watch_seconds"),
+        func.max(case((facts.c.watch_seconds > 0.5, 1), else_=0)).label("started"),
+        func.max(facts.c.completed).label("completed"),
+    ).group_by(facts.c.code, facts.c.media_key).subquery("student_video_activity"))
+    newest = (select(
+        facts.c.code, facts.c.media_key, facts.c.class_code,
+        facts.c.course_id, facts.c.qr_id,
+        func.row_number().over(
+            partition_by=(facts.c.code, facts.c.media_key),
+            order_by=(facts.c.stamp.desc(), facts.c.qr_id.desc()),
+        ).label("rn"),
+    ).subquery("student_video_latest"))
+    # Số phiên phát, thời lượng và trạng thái là thành tích của SV đối với
+    # CHÍNH video trên toàn hệ thống, kể cả khi cùng video mở từ QR khác.
+    # Bộ lọc QR xác định các video trong phạm vi; không làm giảm thành tích cũ.
+    previous_open = aliased(WatchSession)
+    global_open_count = (select(func.count(previous_open.id)).where(
+        previous_open.role == "SV", previous_open.participant_code == grouped.c.code,
+        previous_open.video_id == grouped.c.media_key,
+        previous_open.estimated_watch_seconds > 0.5,
+    ).correlate_except(previous_open).scalar_subquery())
+    previous_best = aliased(WatchSession)
+    global_best_seconds = (select(func.max(previous_best.estimated_watch_seconds)).where(
+        previous_best.role == "SV", previous_best.participant_code == grouped.c.code,
+        previous_best.video_id == grouped.c.media_key,
+    ).correlate_except(previous_best).scalar_subquery())
+    return (db.session.query(
+        grouped.c.code, grouped.c.media_key, grouped.c.latest_at,
+        global_open_count.label("open_count"),
+        func.coalesce(global_best_seconds, grouped.c.best_watch_seconds).label("best_watch_seconds"),
+        case((best_watch_started_expr(grouped.c.code, grouped.c.media_key), 1),
+             else_=grouped.c.started).label("started"),
+        case((best_watch_completed_expr(grouped.c.code, grouped.c.media_key, threshold), 1),
+             else_=grouped.c.completed).label("completed"),
+        newest.c.class_code, Course, QrCode, Video,
+    ).join(newest, and_(newest.c.code == grouped.c.code,
+                        newest.c.media_key == grouped.c.media_key, newest.c.rn == 1))
+     .outerjoin(Course, Course.id == newest.c.course_id)
+     .outerjoin(QrCode, QrCode.id == newest.c.qr_id)
+     .outerjoin(Video, Video.id == grouped.c.media_key))
+
+
+def student_video_activity_metrics(query):
+    """Trên TOÀN bộ phạm vi đã lọc (trước lọc tình trạng/phân trang)."""
+    desc = query.column_descriptions
+    totals = (query.with_entities(
+        desc[0]["expr"].label("code"), desc[1]["expr"].label("video_id"),
+        desc[5]["expr"].label("started"), desc[6]["expr"].label("completed"),
+    )).subquery("video_metrics_scope")
+    count, viewed, completed = db.session.query(
+        func.count(), func.sum(totals.c.started), func.sum(totals.c.completed)
+    ).select_from(totals).one()
+    count, viewed, completed = int(count or 0), int(viewed or 0), int(completed or 0)
+    return {"total": count, "viewed": viewed, "completed": completed,
+            "rate": round(100.0 * completed / count, 1) if count else None}
+
 def vietnamese_student_sort_key(full_name):
     """Sắp xếp SV theo tên gọi (từ cuối), rồi phần họ và tên đệm."""
     parts = (full_name or "").strip().split()
@@ -351,10 +532,10 @@ def student_name_sort_expr(dialect_name):
         return func.lower(func.regexp_replace(normalized, r"^.*[[:space:]]", ""))
     return func.lower(normalized)
 
-def student_video_ordered_query(query, dialect_name):
+def student_video_ordered_query(query, dialect_name, class_index=6):
     """Xếp một lượt trên SQL trước phân trang: lớp, môn, tên gọi SV."""
     cols = query.column_descriptions
-    student_code, media_id, class_code = (cols[0]["expr"], cols[1]["expr"], cols[6]["expr"])
+    student_code, media_id, class_code = (cols[0]["expr"], cols[1]["expr"], cols[class_index]["expr"])
     query = (query
         .outerjoin(SchoolClass, SchoolClass.code == class_code)
         .outerjoin(ClassGroup, and_(ClassGroup.code == class_code,
@@ -1884,23 +2065,32 @@ def register_routes(app):
         # --- Bộ lọc playlist ---
         playlist_search = request.args.get("p_q", "").strip()
         playlist_assignment = request.args.get("p_assignment", "").strip()
-        assigned_playlist_ids = (
-            db.session.query(CoursePlaylist.playlist_id)
-            .filter(CoursePlaylist.course_id.in_(owned_course_ids), CoursePlaylist.active.is_(True))
+        # "Đã gán" phải phản ánh trạng thái sau lần Lưu vừa rồi, không dựa trên
+        # kết quả/đánh số trang ở lần tải cũ. EXISTS liên kết trực tiếp với playlist
+        # hiện hành và chỉ tính các môn đang hoạt động của chính giảng viên.
+        playlist_has_assignment = (
+            select(CoursePlaylist.id)
+            .join(Course, Course.id == CoursePlaylist.course_id)
+            .where(CoursePlaylist.playlist_id == Playlist.id,
+                   CoursePlaylist.active.is_(True),
+                   Course.active.is_(True),
+                   Course.owner_id == user.id)
+            .correlate(Playlist)
+            .exists()
         )
         # Vẫn liệt kê các playlist đã mất trên YouTube nếu còn được gán môn,
         # để giáo viên nhìn thấy tình trạng và ngừng QR nhưng không xóa lịch sử.
         pq = (Playlist.query.join(YouTubeChannel).filter(
             YouTubeChannel.user_id == user.id,
-            or_(Playlist.is_available.is_(True), Playlist.id.in_(assigned_playlist_ids)),
+            or_(Playlist.is_available.is_(True), playlist_has_assignment),
             or_(YouTubeChannel.uploads_playlist_id.is_(None),
                 Playlist.youtube_playlist_id != YouTubeChannel.uploads_playlist_id)))
         if playlist_search:
             pq = pq.filter(Playlist.title.ilike(f"%{playlist_search}%"))
         if playlist_assignment == "unassigned":
-            pq = pq.filter(~Playlist.id.in_(assigned_playlist_ids))
+            pq = pq.filter(~playlist_has_assignment)
         elif playlist_assignment == "assigned":
-            pq = pq.filter(Playlist.id.in_(assigned_playlist_ids))
+            pq = pq.filter(playlist_has_assignment)
         # Playlist đã bị xóa/ẩn trên YouTube vẫn hiện để GV xử lý QR cũ,
         # nhưng không cho tạo QR mới từ nguồn không khả dụng.
         playlist_total = pq.count()
@@ -1909,7 +2099,7 @@ def register_routes(app):
         playlists = pq.order_by(Playlist.is_available.desc(), Playlist.title).offset((playlist_page-1)*5).limit(5).all()
 
         courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
-        return render_template(
+        response = current_app.make_response(render_template(
             "videos.html",
             videos=videos,
             status=status,
@@ -1929,7 +2119,11 @@ def register_routes(app):
                 Video.embeddable.isnot(False)).order_by(Video.title).all(),
             replacement_playlists=available_playlists,
             courses=courses,
-        )
+        ))
+        # Không dùng HTML cũ trong cache sau khi đổi phân loại playlist/QR.
+        # Đặc biệt cần áp dụng lại bộ lọc "Chưa gán" khi bấm Lọc playlist.
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        return response
 
     @app.post("/videos/assign-course")
     @login_required
@@ -2024,10 +2218,6 @@ def register_routes(app):
         db.session.commit()
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return playlist_library_row_json(playlist_id, user)
-        flash(
-            f"Đã lưu môn học/ mô đun cho playlist “{playlist.title}”. Video trong playlist được tự động đồng bộ vào các môn học/ mô đun đã chọn.",
-            "success",
-        )
         return redirect(videos_library_return(
             f"playlist-{playlist.id}", request.form.get("return_query", "")
         ))
@@ -2053,9 +2243,6 @@ def register_routes(app):
         db.session.commit()
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return playlist_library_row_json(playlist.id, user)
-        flash("Đã tạo mã QR cho playlist." if was_created else
-              "Playlist đã có mã QR ở môn học/mô đun này; không tạo mã trùng.",
-              "success" if was_created else "info")
         return redirect(videos_library_return(f"playlist-{playlist.id}", request.form.get("return_query", "")))
 
     @app.post("/videos/<int:video_id>/qr")
@@ -3487,6 +3674,51 @@ def register_routes(app):
                            or (bool(qr_id) and not selected_qr)),
         )
 
+        # A. Chi tiết từng mã QR: mỗi ScanLog.id chỉ đóng góp 1 vào tổng.
+        invalid_scope = (invalid_student or (bool(course_id) and not selected_course)
+                         or (bool(qr_id) and not selected_qr))
+        qr_breakdown = student_qr_breakdown_query(
+            user, course_id=course_id if selected_course else None,
+            class_code=class_code, qr_id=qr_id if selected_qr else None,
+            student_code=selected_student_code, invalid_scope=invalid_scope,
+        )
+        # Chỉ bảng chi tiết QR được giới hạn theo kết quả thất bại khi chọn
+        # "Mở QR thất bại"; bốn ô tổng luôn phản ánh tất cả lượt QR trong phạm vi.
+        if status == "failed":
+            qr_breakdown = qr_breakdown.having(
+                func.sum(case((ScanLog.success.is_(False), 1), else_=0)) > 0)
+        qr_total = qr_breakdown.order_by(None).count()
+        qr_page = max(1, request.args.get("qr_page", 1, type=int))
+        qr_pages = max(1, (qr_total + 9) // 10)
+        qr_page = min(qr_page, qr_pages)
+        qr_selection = (student_qr_ordered_query(qr_breakdown, db.engine.dialect.name)
+                        .offset((qr_page - 1)*10).limit(10).all())
+        qr_student_codes = {r[0] for r in qr_selection}
+        qr_students = {st.student_code: st.full_name for st in Student.query.filter(
+            Student.student_code.in_(qr_student_codes)).all()} if qr_student_codes else {}
+        qr_rows = []
+        for code, cls, assigned_course_id, qr_key, total, success, failure, course, qr in qr_selection:
+            qr_rows.append({
+                "student": f"{qr_students.get(code, 'Chưa có hồ sơ SV')} ({student_code_tail(code)})",
+                "class_name": class_name_map.get(cls, cls or "—"),
+                "course_name": course.name if course else "—",
+                "qr_title": qr.title if qr else f"Mã QR #{qr_key}",
+                "total": int(total or 0), "successful": int(success or 0),
+                "unsuccessful": int(failure or 0),
+            })
+        qr_page_numbers = list(range(max(1, qr_page - 2), min(qr_pages, qr_page + 2) + 1))
+
+        # B. Video: chỉ WatchSession có ghi nhận phát thực mới tăng số lần mở.
+        # ScanLog không được phân bổ thành các số lượt ở bảng video.
+        sv_query = student_video_activity_query(
+            user, current_app.config["COMPLETION_THRESHOLD"],
+            course_id=course_id if selected_course else None,
+            class_code=class_code, qr_id=qr_id if selected_qr else None,
+            student_code=selected_student_code, invalid_scope=invalid_scope,
+        )
+        # Bốn ô video thuộc phạm vi môn/lớp/QR/SV, không phụ thuộc trạng thái
+        # đang xem, phân trang hay số dòng QR.
+        video_metrics = student_video_activity_metrics(sv_query)
         sv_rows = []
         sv_total = 0
         sv_pages = 1
@@ -3505,84 +3737,43 @@ def register_routes(app):
                     "student": f"{r['student'].full_name} ({student_code_tail(code)})",
                     "class_name": r["class_name"], "course_name": r["course_name"],
                     "media_name": ", ".join(r.get("missing_videos") or []) or r["qr_title"],
-                    "successful_count": 0 if status == "not_scanned" else "—",
-                    "unsuccessful_count": "—",  # Đối chiếu sĩ số, không phải nhật ký QR cụ thể.
-                    # Hàng đối chiếu sĩ số không phải một phiên xem cụ thể:
-                    # không giả lập thời lượng xem 00:00 gây hiểu nhầm.
-                    "watch_time": "—", "watch_status": r["status"],
+                    "open_count": "—", "watch_time": "—", "watch_status": r["status"],
                 })
         else:
-            # SQL tổng hợp một hàng/cặp SV–video ngay tại CSDL; không tải toàn
-            # bộ nhật ký lịch sử lên RAM, không nhân lượt quét của QR playlist.
-            sv_query = student_video_summary_query(
-                user, course_id=course_id if selected_course else None,
-                class_code=class_code, qr_id=qr_id if selected_qr else None,
-                student_code=selected_student_code,
-                invalid_scope=(invalid_student or (bool(course_id) and not selected_course)
-                               or (bool(qr_id) and not selected_qr)),
-            )
-            # Các bộ lọc quyết định ở mức SV–VIDEO đã gộp, không lọc từng
-            # phiên trước khi đếm (sẽ làm mất các lần quét khác kết quả).
-            # Lọc qua đúng cột Query sau khi đã GROUP BY ở CSDL.
-            media_key = sv_query.column_descriptions[1]["expr"]
-            student_code_expr = sv_query.column_descriptions[0]["expr"]
-            completed_expr = best_watch_completed_expr(
-                student_code_expr, media_key, current_app.config["COMPLETION_THRESHOLD"])
-            started_expr = best_watch_started_expr(student_code_expr, media_key)
-            ok_count = sv_query.column_descriptions[3]["expr"]
-            bad_count = sv_query.column_descriptions[4]["expr"]
+            video_columns = sv_query.column_descriptions
+            started_expr = video_columns[5]["expr"]
+            completed_expr = video_columns[6]["expr"]
             if status == "not_completed":
-                sv_query = sv_query.filter(media_key > 0, started_expr, ~completed_expr)
+                sv_query = sv_query.filter(started_expr > 0, completed_expr == 0)
             elif status == "completed":
-                sv_query = sv_query.filter(media_key > 0, completed_expr)
+                sv_query = sv_query.filter(completed_expr > 0)
             elif status == "unwatched":
-                sv_query = sv_query.filter(ok_count > 0, ~started_expr)
+                sv_query = sv_query.filter(started_expr == 0)
             elif status == "failed":
-                sv_query = sv_query.filter(bad_count > 0)
+                # Không gán một lượt quét lỗi của playlist cho từng video:
+                # lỗi quét được hiển thị duy nhất trong bảng A.
+                sv_query = sv_query.filter(literal(False))
             sv_total = sv_query.order_by(None).count()
             sv_pages = max(1, (sv_total + 9) // 10)
             sv_page = min(sv_page, sv_pages)
-            # Lớp -> môn -> tên SV, sắp xếp trên SQL TRƯỚC khi phân trang.
-            selection = (student_video_ordered_query(sv_query, db.engine.dialect.name)
-                         .offset((sv_page - 1)*10).limit(10).all())
+            selection = (student_video_ordered_query(
+                sv_query, db.engine.dialect.name, class_index=7)
+                .offset((sv_page - 1)*10).limit(10).all())
             codes = {r[0] for r in selection}
-            status_keys = [(r[0], r[1]) for r in selection if r[1] > 0]
-            best_status_by_video = best_video_statuses(
-                status_keys, current_app.config["COMPLETION_THRESHOLD"])
             students = {x.student_code: x.full_name for x in Student.query.filter(
                 Student.student_code.in_(codes)).all()} if codes else {}
-            for code, media_id, stamp, ok, bad, watched_seconds, class_ref, course, qr, video in selection:
-                ok, bad = int(ok or 0), int(bad or 0)
-                # Video thật: tên video; chưa mở video playlist: nhãn playlist
-                # có phân biệt rõ để không nhầm một lần quét thành nhiều video.
-                if media_id > 0:
-                    played_video = video.title if video else (
-                        f"{qr.title} (video không còn hồ sơ)" if qr else "Video không còn hồ sơ")
-                elif qr and qr.is_playlist:
-                    # Với QR playlist từng đổi đích, giữ tên ở thời điểm
-                    # quét mới nhất thay vì gán nhầm playlist hiện tại.
-                    next_change = (EditHistory.query.filter_by(
-                        entity_kind="qr_playlist", entity_id=qr.id, field="playlist_target")
-                        .filter(EditHistory.changed_at > stamp)
-                        .order_by(EditHistory.changed_at.asc(), EditHistory.id.asc()).first())
-                    old_title = ((next_change.old_value or "").split(" | ", 1)[-1]
-                                 if next_change else qr.title)
-                    played_video = f"{old_title or qr.title} (chưa phát video)"
-                else:
-                    played_video = (f"{qr.title} (chưa xác định video)"
-                                    if qr else "Học liệu chưa xác định")
-                secs = max(0, round(safe_watch_number(watched_seconds)))
+            for code, media_id, stamp, opened, seconds, started, completed, class_ref, course, qr, video in selection:
+                secs = max(0, round(safe_watch_number(seconds)))
                 watch_time = (f"{secs//3600:02d}:{(secs//60)%60:02d}:{secs%60:02d}"
                               if secs >= 3600 else f"{secs//60:02d}:{secs%60:02d}")
-                best_status = best_status_by_video.get((code, media_id))
                 sv_rows.append({
                     "student": f"{students.get(code, 'Chưa có hồ sơ SV')} ({student_code_tail(code)})",
                     "class_name": class_name_map.get(class_ref, class_ref or "—"),
                     "course_name": course.name if course else "—",
-                    "media_name": played_video,
-                    "successful_count": ok, "unsuccessful_count": bad,
-                    "watch_time": watch_time,
-                    "watch_status": best_status or ("Không mở được" if bad and not ok else "Chưa xem"),
+                    "media_name": video.title if video else "Video không còn hồ sơ",
+                    "open_count": int(opened or 0), "watch_time": watch_time,
+                    "watch_status": "Hoàn thành" if completed else (
+                        "Chưa hoàn thành" if started else "Chưa xem"),
                 })
         sv_page_numbers = list(range(max(1, sv_page-2), min(sv_pages, sv_page+2)+1))
         # Hai bộ lọc có tham số độc lập để chuyển trang hoặc lọc mục nào
@@ -3596,6 +3787,8 @@ def register_routes(app):
             course_options=course_options, class_options=class_options,
             qr_options=qr_options, status=status, pending_notice=pending_notice,
             participant_stats=participant_stats, student_metrics=student_metrics,
+            video_metrics=video_metrics, qr_rows=qr_rows, qr_total=qr_total,
+            qr_page=qr_page, qr_pages=qr_pages, qr_page_numbers=qr_page_numbers,
             sv_rows=sv_rows, sv_total=sv_total,
             sv_page=sv_page, sv_pages=sv_pages, sv_page_numbers=sv_page_numbers,
             sv_nav=sv_nav, sys_nav=sys_nav, sys_args=sys_args, sv_args=sv_args,

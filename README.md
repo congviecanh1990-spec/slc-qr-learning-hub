@@ -1,3 +1,23 @@
+## Cập nhật v4.3.26 – Tách thống kê QR thực tế và khai thác video (09/11/2026)
+
+- Mục 2 chia thành **A. Thống kê lượt quét mã QR** (4 chỉ số + bảng chi tiết từng sinh viên–QR) và **B. Thống kê hoạt động khai thác video** (4 chỉ số + bảng chi tiết sinh viên–video).
+- Thẻ thống kê video dùng đúng nhãn **“Tổng video”**; bổ sung “Video đã xem”, “Video hoàn thành”, “Tỷ lệ hoàn thành”. Đếm theo cặp sinh viên–video, không theo số lượt quét playlist.
+- Bảng video bỏ hai cột “Số lượt quét thành công/không thành công”; thay bằng “Số lần mở video” dựa trên phiên phát có thời lượng thực trên 0,5 giây. Thời lượng, trạng thái tốt nhất và số lần mở video được tổng hợp trên các QR khác nhau của cùng sinh viên–video.
+- Bảng QR chỉ dựa trên `ScanLog.id` gốc, nên tổng lượt quét không bị nhân theo số video của playlist; hai bảng phân trang độc lập.
+- Giữ bộ lọc, phân quyền, nhật ký, dữ liệu hiện có. Không thay đổi PostgreSQL schema. Chỉ kèm `HUONG_DAN_KIEM_TRA_V4326.md`.
+
+---
+
+## Cập nhật v4.3.25 – Lọc playlist sau gán và tinh gọn thông báo (09/11/2026)
+
+- Khi đang lọc **Chưa gán**, thao tác **Lưu** giữ dòng playlist tạm thời để có thể bấm **Tạo mã QR** ngay; nhưng sau khi bấm **Lọc playlist** lần tiếp theo, bảng truy vấn dữ liệu mới và **ẩn** những playlist đã gán. Bộ lọc **Đã gán** hiển thị các playlist tương ứng.
+- Truy vấn lọc dùng `EXISTS` liên kết playlist–môn học thực tế, chỉ tính quan hệ đang hiệu lực trong phạm vi môn đang hoạt động của giảng viên. Dòng hiển thị cũng thống nhất phạm vi gán, tránh trường hợp bộ lọc và nút QR có kết quả khác nhau.
+- Trang Kho học liệu trả `Cache-Control: private, no-store` để tránh dùng lại kết quả cũ. Giữ nguyên giao diện cập nhật tức thì sau Lưu/Tạo QR.
+- Bỏ các dòng thông báo thao tác thành công thừa (“Đã xử lý. Trạng thái mã QR đã được cập nhật”, “Đã lưu...”), giảm chú thích trạng thái gán dưới dropdown. Vẫn thông báo khi thao tác thất bại.
+- Không thay đổi cấu trúc PostgreSQL, mã QR, lịch sử thống kê hoặc chức năng cũ. Hướng dẫn hiện hành: `HUONG_DAN_KIEM_TRA_V4325.md`.
+
+---
+
 ## Cập nhật v4.3.24 – Gán môn học cho playlist hiển thị ngay mã QR (09/11/2026)
 
 - Khắc phục lỗi tại **Kho video học liệu → Danh sách playlist**: sau khi bấm **Lưu** gán môn học/mô đun, cập nhật ngay **môn đã chọn**, **nút Tạo mã QR**, **Tải mã QR** và các nút quản lý QR nếu đã có mã; không cần lọc lại/tải lại trang. Sau khi bấm **Tạo mã QR** cũng cập nhật ngay cùng dòng.

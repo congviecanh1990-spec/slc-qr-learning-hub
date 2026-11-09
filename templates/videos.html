@@ -44,7 +44,7 @@
     <span class="text-muted small">Có {{ playlist_total|default(playlists|length) }} playlist · Trang {{ playlist_page|default(1) }}/{{ playlist_pages|default(1) }} · 5 dòng/trang</span>
   </div>
 
-  <form class="card card-body shadow-sm mb-3" method="get" action="{{ url_for('videos_page') }}#playlists">
+  <form id="playlistLibraryFilterForm" class="card card-body shadow-sm mb-3" method="get" action="{{ url_for('videos_page') }}#playlists">
     {% for key in ['q','status','assignment','playlist_id','v_page'] %}{% if (library_args|default({})).get(key) %}<input type="hidden" name="{{ key }}" value="{{ (library_args|default({}))[key] }}">{% endif %}{% endfor %}
     <div class="row g-2 align-items-end">
       <div class="col-lg-6">
@@ -255,8 +255,8 @@
       const newRow = fragment.content.querySelector('tr.library-target-row');
       if (!newRow || !row || newRow.id !== row.id) throw new Error('Không xác minh được playlist vừa lưu.');
       row.replaceWith(newRow);
-      // Giữ nguyên dòng đã lưu trên màn hình, ngay cả khi bộ lọc hiện hành là "Chưa gán"
-      // hoặc playlist đã đổi vị trí phân trang sau thao tác.
+      // Chỉ giữ dòng tạm thời để tạo QR ngay. Khi bấm Lọc playlist,
+      // máy chủ sẽ xét lại bộ lọc trên dữ liệu đã lưu và loại playlist đã gán.
       const newForm = newRow.querySelector('.playlist-course-form');
       if (newForm) {
         newForm.querySelectorAll('.playlist-course-check').forEach(check =>
@@ -264,11 +264,6 @@
         updateCoursePicker(newForm);
       }
       newRow.querySelectorAll('.playlist-qr-course-select').forEach(updatePlaylistQrActions);
-      const feedback = document.createElement('div');
-      feedback.className = 'library-save-feedback text-success fw-semibold mt-1';
-      feedback.setAttribute('role', 'status');
-      feedback.textContent = 'Đã lưu. Môn học/mô đun và mã QR đã được cập nhật.';
-      newRow.querySelector('.course-picker-summary')?.appendChild(feedback);
       window.scrollTo(oldScrollX, oldScrollY);
     } catch (error) {
       // Không gửi lại POST tự động, tránh ghi lặp khi mạng gián đoạn.
@@ -360,12 +355,6 @@
         const picker=newRow.querySelector('.playlist-course-form');
         if(picker)picker.querySelectorAll('.playlist-course-check').forEach(c=>c.addEventListener('change',()=>updateCoursePicker(picker)));
         setupQrActions(newRow);
-        const notice=document.createElement('div');notice.className='small fw-semibold text-success mt-1';notice.role='status';
-        notice.textContent='Đã xử lý. Trạng thái mã QR đã được cập nhật.';
-        newRow.querySelector('td:last-child')?.append(notice);
-      }else if(row){
-        const notice=document.createElement('div');notice.className='small text-success';notice.textContent='Đã thực hiện thao tác. Có thể cần điều chỉnh bộ lọc để xem dữ liệu mới.';
-        row.querySelector('td:last-child')?.append(notice);
       }
       window.scrollTo(originalX,originalY);
     }catch(error){
@@ -400,7 +389,10 @@ function updateCoursePicker(form){
   const label=form.querySelector('.course-picker-label');
   const summary=form.querySelector('.course-picker-summary');
   if(label){ label.textContent=selected.length ? `Đã chọn ${selected.length} môn học/ mô đun` : 'Chọn môn học/ mô đun'; }
-  if(summary){ summary.textContent=selected.length ? `Đang áp dụng cho ${selected.length} môn học/ mô đun. Mở danh sách để thêm hoặc bỏ môn học/ mô đun rồi bấm Lưu.` : 'Chưa gán môn học/ mô đun.'; }
+  if(summary){
+    summary.textContent = selected.length ? '' : 'Chưa gán môn học/ mô đun.';
+    summary.hidden = selected.length > 0;
+  }
 }
 
 document.querySelectorAll('.playlist-course-form').forEach(form=>{

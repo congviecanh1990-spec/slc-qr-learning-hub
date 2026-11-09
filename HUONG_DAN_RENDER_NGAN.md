@@ -1,4 +1,4 @@
-**Phiên bản thử nghiệm mới nhất: v4.3.23.** Giữ `AUTO_CREATE_DB=1` để bổ sung hai cột nhật ký lỗi `actor_email`, `reason` trên cơ sở dữ liệu hiện hành; tuyệt đối không xóa PostgreSQL cũ.
+**Phiên bản thử nghiệm hiện hành: v4.3.26.** Giữ nguyên PostgreSQL và các biến môi trường. Duy trì `AUTO_CREATE_DB=1` nếu hệ thống vẫn cần tự nâng cấp các cột/bảng từ các phiên bản trước; không xóa cơ sở dữ liệu cũ.
 
 # Bổ sung triển khai v4.3.22
 

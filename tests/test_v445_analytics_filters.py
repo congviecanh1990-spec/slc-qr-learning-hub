@@ -20,8 +20,8 @@ assert "('roster_not_completed','SV chưa hoàn thành học liệu (đối chi�
 # Bản v4.3.18 lọc sau khi gộp theo SV-video; ca SQLite cũ vẫn thử
 # riêng cách xác định thiếu thời lượng xem.
 assert 'best_watch_completed_expr(' in source
-assert 'best_watch_started_expr(student_code_expr, media_key)' in source
-assert 'sv_query = sv_query.filter(media_key > 0, started_expr, ~completed_expr)' in source
+assert 'student_video_activity_query(' in source
+assert 'sv_query = sv_query.filter(started_expr > 0, completed_expr == 0)' in source
 assert 'status in {"not_scanned", "roster_not_completed"}' in source
 assert 'student_video_summary_query(' in source
 assert 'student_code=selected_student_code' in source

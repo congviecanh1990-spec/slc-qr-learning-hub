@@ -22,7 +22,7 @@ assert 'best_video_statuses(' in source
 assert 'def watch_status_label(watch, threshold' in source
 assert 'valid_watch_completion_expr(current_app.config["COMPLETION_THRESHOLD"])' in source
 assert 'Chưa đủ dữ liệu xác nhận' not in source
-assert 'sv_query = sv_query.filter(ok_count > 0, ~started_expr)' in source
+assert 'sv_query = sv_query.filter(started_expr == 0)' in source
 assert 'row.watch_status' in template
 
 class Base(DeclarativeBase): pass
