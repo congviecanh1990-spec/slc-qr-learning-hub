@@ -63,16 +63,18 @@
                   {% endfor %}
                 </select>
                 <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
-                <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#">Tải mã QR</a>
               </form>
-              <form method="post" action="#" class="playlist-qr-delete-form mt-1 library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Ngừng sử dụng mã QR playlist này? Mã đã in sẽ không hoạt động nhưng lịch sử được giữ lại.');" hidden>
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="return_to" value="videos">
-                <input type="hidden" name="return_query" value="{{ library_return_query }}">
-                <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
-                <button class="btn btn-outline-danger btn-sm" type="submit">Xóa mã QR</button>
-              </form>
-              <button type="button" class="btn btn-outline-warning btn-sm playlist-qr-retarget-toggle mt-1" hidden aria-expanded="false">Đổi playlist đích</button>
+              <div class="playlist-qr-compact-actions d-flex align-items-center flex-wrap gap-1 mt-1" hidden>
+                <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#" aria-label="Tải mã QR playlist">Tải QR</a>
+                <button type="button" class="btn btn-outline-warning btn-sm playlist-qr-retarget-toggle" hidden aria-expanded="false">Đổi đích</button>
+                <form method="post" action="#" class="playlist-qr-delete-form library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Ngừng sử dụng mã QR playlist này? Mã đã in sẽ không hoạt động nhưng lịch sử được giữ lại.');" hidden>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="return_to" value="videos">
+                  <input type="hidden" name="return_query" value="{{ library_return_query }}">
+                  <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
+                  <button class="btn btn-outline-danger btn-sm" type="submit">Xóa QR</button>
+                </form>
+              </div>
               <form method="post" action="#" class="playlist-qr-retarget library-qr-form mt-1" data-library-qr-form="1" hidden onsubmit="return confirm('Xác nhận đổi playlist đích? Mã QR cũ tiếp tục được sử dụng và lịch sử được giữ nguyên.');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="return_to" value="videos">

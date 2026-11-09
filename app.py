@@ -40,6 +40,7 @@ from services.error_reporting import login_failure_reason, safe_error_diagnostic
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
 from services.websub import subscribe_channel, verify_callback, parse_notification
+from services.one_time_maintenance import cleanup_initial_three_error_logs_once
 
 csrf = CSRFProtect()
 oauth = OAuth()
@@ -820,6 +821,11 @@ def create_app():
             db.create_all()
             ensure_schema_upgrades()
             migrate_legacy_classes()
+            # v4.3.28: thao tác dọn 3 lỗi cũ duy nhất, có dấu mốc bền vững.
+            # Chỉ xóa nếu bảng error_logs có đúng 3 dòng tại lần triển khai đầu.
+            # Các lần khởi động sau hoàn toàn không xóa lỗi; không liên quan QR,
+            # watch_sessions hoặc functional_test_runs.
+            cleanup_initial_three_error_logs_once(db.engine)
 
     return app
 
@@ -2811,6 +2817,10 @@ def register_routes(app):
             return redirect(url_for("qr_page"))
 
         selected_course_id = request.args.get("course_id", type=int)
+        # Bộ lọc cũ course_id=0 (Chưa gán) đã bỏ khỏi giao diện.
+        # Redirect các đường dẫn lưu trước đây sang Tất cả để bộ lọc phản ánh đúng danh sách.
+        if selected_course_id == 0:
+            return redirect(url_for("qr_page"))
         courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
         selected_course = None
         if selected_course_id is not None and selected_course_id < 0:
@@ -2823,8 +2833,6 @@ def register_routes(app):
                    .order_by(QrCode.created_at.desc()).all())
         if selected_course_id is None:
             qrs = all_qrs
-        elif selected_course_id == 0:
-            qrs = [q for q in all_qrs if q.course_id is None]
         else:
             qrs = [q for q in all_qrs if q.course_id == selected_course_id]
         # Đồng bộ tên QR theo đúng tiêu đề nguồn hiện tại: video hoặc playlist.

@@ -1,3 +1,21 @@
+## Cập nhật v4.3.28 – Xóa đúng ba bản ghi lỗi cũ, một lần duy nhất (10/11/2026)
+
+- Khi khởi động lần đầu với `AUTO_CREATE_DB=1`, nếu bảng `error_logs` có **đúng 3 bản ghi** thì xóa đúng ba bản ghi đó; nếu không đúng 3 thì bỏ qua vĩnh viễn, không tự chọn ba lỗi bất kỳ.
+- Lưu dấu mốc bền vững ở bảng `app_one_time_maintenance`, nằm ngoài sao lưu/khôi phục của ứng dụng để **không chạy lại** trên lỗi mới khi Render khởi động lại hoặc khi khôi phục dữ liệu qua giao diện.
+- Giữ nguyên QR, lịch sử quét, xem, dữ liệu nghiệm thu và chức năng ghi lỗi trong tương lai. Nên sao lưu PostgreSQL trước khi triển khai; không có sao lưu nội dung lỗi tự động.
+- Chỉ kèm `HUONG_DAN_KIEM_TRA_V4328.md` trong gói mã nguồn.
+
+---
+
+## Cập nhật v4.3.27 – Tinh gọn giao diện QR và thống kê (09/11/2026)
+
+- **Mục 2 – Thống kê khai thác:** bỏ ba đoạn giải thích dài dưới số liệu QR, dưới số liệu video và cuối bảng video; giữ nguyên cách tính, số liệu, bộ lọc và phân trang.
+- **Quản lý mã QR động:** bộ lọc bỏ lựa chọn “Chưa gán môn học/mô đun”; tất cả QR cũ vẫn được bảo toàn và hiển thị dưới “Tất cả”, URL lọc 0 cũ chuyển về “Tất cả”.
+- **Kho video học liệu:** với QR playlist/video đã tạo, hiển thị ba nút **Tải QR – Đổi đích – Xóa QR** trên một dòng; giữ xác nhận trước khi xóa hoặc đổi đích, hỗ trợ màn hình hẹp.
+- Chỉ gồm hướng dẫn kiểm tra `HUONG_DAN_KIEM_TRA_V4327.md` và tài liệu Render. Không thay đổi PostgreSQL schema hay nhật ký.
+
+---
+
 ## Cập nhật v4.3.26 – Tách thống kê QR thực tế và khai thác video (09/11/2026)
 
 - Mục 2 chia thành **A. Thống kê lượt quét mã QR** (4 chỉ số + bảng chi tiết từng sinh viên–QR) và **B. Thống kê hoạt động khai thác video** (4 chỉ số + bảng chi tiết sinh viên–video).

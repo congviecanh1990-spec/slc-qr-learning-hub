@@ -11,7 +11,6 @@
       <label class="form-label fw-semibold" for="qr-course-id">Lọc mã QR theo môn học/mô đun</label>
       <select class="form-select" id="qr-course-id" name="course_id">
         <option value="">Tất cả môn học/mô đun</option>
-        <option value="0" {{ 'selected' if selected_course_id == 0 else '' }}>Chưa gán môn học/mô đun</option>
         {% for c in courses %}
           <option value="{{ c.id }}" {{ 'selected' if selected_course_id == c.id else '' }}>{{ c.name }}</option>
         {% endfor %}

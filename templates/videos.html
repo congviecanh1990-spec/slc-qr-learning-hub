@@ -192,17 +192,17 @@
                 {% endfor %}
               </select>
               <button class="btn btn-primary btn-sm video-qr-create" {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
-              <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download" hidden>Tải mã QR</a>
             </form>
-            <div class="d-flex flex-wrap gap-1 align-items-center mt-1 video-qr-extra" data-qr-row="video-{{ v.id }}">
+            <div class="d-flex flex-wrap gap-1 align-items-center mt-1 video-qr-extra" data-qr-row="video-{{ v.id }}" hidden>
+              <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download" hidden aria-label="Tải mã QR video">Tải QR</a>
+              <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" hidden aria-expanded="false">Đổi đích</button>
               <form method="post" action="#" class="video-qr-delete library-qr-form" data-library-qr-form="1" hidden onsubmit="return confirm('Xóa mã QR này? Mã đã in sẽ ngừng hoạt động nhưng lịch sử vẫn được giữ lại.');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="return_to" value="videos">
                 <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
                 <input type="hidden" name="library_row" value="video-{{ v.id }}">
-                <button type="submit" class="btn btn-outline-danger btn-sm">Xóa mã QR</button>
+                <button type="submit" class="btn btn-outline-danger btn-sm">Xóa QR</button>
               </form>
-              <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" hidden aria-expanded="false">Đổi video đích</button>
               <form method="post" action="#" class="video-qr-retarget library-qr-form mt-1 w-100" data-library-qr-form="1" hidden>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="return_to" value="videos">
@@ -287,10 +287,12 @@
     const row=select.closest('tr.library-target-row'), area=select.closest('.playlist-qr-actions');
     if(!area || !row) return;
     const option=select.selectedOptions[0], hasQr=!!(option && option.dataset.qrPng), valid=!!select.value;
-    const create=area.querySelector('.playlist-qr-create'), download=area.querySelector('.playlist-qr-download');
+    const create=area.querySelector('.playlist-qr-create'), download=row.querySelector('.playlist-qr-download');
+    const compact=row.querySelector('.playlist-qr-compact-actions');
     const remove=row.querySelector('.playlist-qr-delete-form');
     const retarget=row.querySelector('.playlist-qr-retarget'), toggle=row.querySelector('.playlist-qr-retarget-toggle');
     create.hidden=hasQr; create.disabled=!valid || row.dataset.playlistUsable!=='1';
+    if(compact) compact.hidden=!hasQr;
     download.hidden=!hasQr;
     if(hasQr) download.href=option.dataset.qrPng; else download.removeAttribute('href');
     if(remove){remove.hidden=!hasQr;if(hasQr)remove.action=option.dataset.qrDelete;}
@@ -301,11 +303,12 @@
     const row=select.closest('tr.library-target-row'), area=select.closest('.video-qr-actions');
     if(!area || !row)return;
     const option=select.selectedOptions[0], hasQr=!!(option && option.dataset.qrPng);
-    const create=area.querySelector('.video-qr-create'), download=area.querySelector('.video-qr-download');
-    const extra=row.querySelector('.video-qr-extra');
+    const create=area.querySelector('.video-qr-create');
+    const extra=row.querySelector('.video-qr-extra'), download=extra.querySelector('.video-qr-download');
     const remove=extra.querySelector('.video-qr-delete'), retarget=extra.querySelector('.video-qr-retarget');
     const toggle=extra.querySelector('.video-qr-retarget-toggle');
     create.hidden=hasQr;create.disabled=!select.value || area.dataset.videoUsable!=='1';
+    extra.hidden=!hasQr;
     download.hidden=!hasQr;
     if(hasQr){download.href=option.dataset.qrPng;remove.action=option.dataset.qrDelete;retarget.action=option.dataset.qrRetarget;}
     else{download.removeAttribute('href');retarget.hidden=true;toggle.setAttribute('aria-expanded','false');}

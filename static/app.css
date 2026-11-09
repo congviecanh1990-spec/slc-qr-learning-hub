@@ -107,3 +107,12 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
 /* Phân trang cũng dùng nét thường; giữ màu và nền đã thống nhất. */
 .pagination .page-link{color:#111111!important;font-weight:400}
 .pagination .page-item.active .page-link{background-color:#f1d8db;border-color:#8f171d;color:#111111!important}
+
+/* v4.3.27: thao tác QR gọn trên một hàng, chỉ xuất hiện với mã QR hiện hữu. */
+.playlist-qr-compact-actions[hidden],.video-qr-extra[hidden],
+.playlist-qr-compact-actions [hidden],.video-qr-extra [hidden]{display:none!important}
+.playlist-qr-compact-actions .btn,.video-qr-extra > .btn,
+.playlist-qr-compact-actions form .btn,.video-qr-extra > form:not(.video-qr-retarget) .btn{
+  white-space:nowrap;font-size:.8rem;padding:.2rem .42rem
+}
+.playlist-qr-compact-actions form,.video-qr-extra > form:not(.video-qr-retarget){margin:0}
