@@ -70,102 +70,7 @@
       </tr></thead>
       <tbody>
       {% for p in playlists %}
-        {% set active_course_ids = p.course_links | selectattr('active') | map(attribute='course_id') | list %}
-        <tr id="playlist-{{ p.id }}" class="library-target-row">
-          <td>
-            <div class="fw-semibold">{{ p.title }}</div>{% if not p.is_available %}<span class="badge text-bg-warning">Playlist không còn trên YouTube</span><div class="small text-muted">QR cũ được giữ để tra cứu lịch sử; có thể ngừng sử dụng QR.</div>{% endif %}
-          </td>
-          <td>{{ p.channel.title }}</td>
-          <td>{{ p.video_links|length }}</td>
-          <td>
-            <form method="post" action="{{ url_for('set_playlist_course_assignments', playlist_id=p.id) }}" class="playlist-course-form" data-playlist-id="{{ p.id }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-              {% if courses %}
-              <div class="d-flex flex-wrap align-items-center gap-2">
-                <div class="dropdown course-picker" data-bs-auto-close="outside">
-                  <button class="btn btn-outline-secondary dropdown-toggle course-picker-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                    <span class="course-picker-label">
-                      {% if active_course_ids|length == 0 %}Chọn môn học/ mô đun{% else %}Đã chọn {{ active_course_ids|length }} môn học/ mô đun{% endif %}
-                    </span>
-                  </button>
-                  <div class="dropdown-menu p-2 shadow course-picker-menu">
-                    <div class="small fw-bold px-2 pt-1 pb-2">Chọn một hoặc nhiều môn học/ mô đun</div>
-                    {% for c in courses %}
-                      <label class="dropdown-item d-flex align-items-start gap-2 py-2 mb-0" for="pl{{ p.id }}-c{{ c.id }}">
-                        <input class="form-check-input mt-1 playlist-course-check" type="checkbox" name="course_ids" value="{{ c.id }}" id="pl{{ p.id }}-c{{ c.id }}" {{ 'checked' if c.id in active_course_ids else '' }}>
-                        <span>{{ c.name }}</span>
-                      </label>
-                    {% endfor %}
-                  </div>
-                </div>
-                <button class="btn btn-primary btn-sm">Lưu</button>
-              </div>
-              <div class="form-text mt-1 course-picker-summary">
-                {% if active_course_ids|length == 0 %}
-                  Chưa gán môn học/ mô đun.
-                {% else %}
-                  Đang áp dụng cho {{ active_course_ids|length }} môn học/ mô đun. Mở danh sách để thêm hoặc bỏ môn học/ mô đun rồi bấm Lưu.
-                {% endif %}
-              </div>
-              {% else %}
-                <div class="text-muted small">Chưa có môn học/ mô đun. Hãy tạo môn học/ mô đun trước.</div>
-              {% endif %}
-            </form>
-          </td>
-          <td>
-            {% set usable = namespace(count=0) %}
-            {% for link in p.video_links if link.video.is_available and link.video.embeddable is not sameas false and link.video.privacy_status != 'private' %}
-              {% set usable.count = usable.count + 1 %}
-            {% endfor %}
-            <span class="badge {{ 'text-bg-success' if p.is_available and usable.count > 0 else 'text-bg-secondary' if p.is_available else 'text-bg-danger' }}">{{ 'Có học liệu' if p.is_available and usable.count > 0 else 'Danh sách trống' if p.is_available else 'Không còn khả dụng' }}</span>
-            {% if p.privacy_status %}<div class="small text-muted mt-1">{{ p.privacy_status }}</div>{% endif %}
-          </td>
-          <td>
-            {% set active_links = p.course_links | selectattr('active') | list %}
-            {% if active_course_ids %}
-              <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap playlist-qr-actions align-items-center library-qr-form" data-library-qr-form="1">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-                <select class="form-select form-select-sm playlist-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR playlist" required>
-                  {% if active_course_ids|length > 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
-                  {% for l in active_links if l.course.owner_id == me.id and l.course.active %}
-                    <option value="{{ l.course.id }}"
-                      {% if l.qr and l.qr.active %}
-                      data-qr-png="{{ url_for('qr_png', qr_id=l.qr.id) }}"
-                      data-qr-delete="{{ url_for('delete_qr', qr_id=l.qr.id) }}"
-                      data-qr-retarget-playlist="{{ url_for('qr_retarget_playlist', qr_id=l.qr.id) }}"
-                      {% endif %}>{{ l.course.name }}{{ ' – đã có mã QR' if l.qr and l.qr.active else '' }}</option>
-                  {% endfor %}
-                </select>
-                <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
-                <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#">Tải mã QR</a>
-              </form>
-              <form method="post" action="#" class="playlist-qr-delete-form mt-1 library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Ngừng sử dụng mã QR playlist này? Mã đã in sẽ không hoạt động nhưng lịch sử được giữ lại.');" hidden>
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="return_to" value="videos">
-                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-                <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
-                <button class="btn btn-outline-danger btn-sm" type="submit">Xóa mã QR</button>
-              </form>
-              <button type="button" class="btn btn-outline-warning btn-sm playlist-qr-retarget-toggle mt-1" hidden aria-expanded="false">Đổi playlist đích</button>
-              <form method="post" action="#" class="playlist-qr-retarget library-qr-form mt-1" data-library-qr-form="1" hidden onsubmit="return confirm('Xác nhận đổi playlist đích? Mã QR cũ tiếp tục được sử dụng và lịch sử được giữ nguyên.');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="return_to" value="videos">
-                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-                <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
-                <select class="form-select form-select-sm mb-1" name="playlist_id" required aria-label="Chọn playlist thay thế">
-                  <option value="">Chọn playlist đích mới</option>
-                  {% for replacement in replacement_playlists if replacement.id != p.id %}
-                    <option value="{{ replacement.id }}">{{ replacement.title }} ({{ replacement.channel.title }})</option>
-                  {% endfor %}
-                </select>
-                <div class="small text-muted mb-1">QR đã in, mã và lịch sử quét/xem vẫn được giữ nguyên.</div>
-                <button type="submit" class="btn btn-warning btn-sm">Lưu playlist đích</button>
-              </form>
-            {% else %}<div class="text-muted small">Hãy chọn môn học/mô đun và bấm Lưu trước.</div>{% endif %}
-          </td>
-        </tr>
+        {% include '_playlist_library_row.html' %}
       {% else %}
         <tr><td colspan="6" class="text-center text-muted py-4">Không có playlist phù hợp bộ lọc. Hãy đồng bộ kênh YouTube nếu chưa có dữ liệu.</td></tr>
       {% endfor %}
@@ -328,39 +233,30 @@
     const form = event.target.closest('form.playlist-course-form');
     if (!form) return;
     event.preventDefault();
-    const button = form.querySelector('button[type="submit"], button:not([type])');
     if (form.dataset.saving === '1') return;
     form.dataset.saving = '1';
+    const button = form.querySelector('button[type="submit"], button:not([type])');
     if (button) button.disabled = true;
     const row = form.closest('tr.library-target-row');
-    const rowId = row && row.id;
-    const oldScrollY = window.scrollY;
-    const oldScrollX = window.scrollX;
+    const oldScrollY = window.scrollY, oldScrollX = window.scrollX;
     try {
       const response = await fetch(form.action, {
         method: 'POST', body: new FormData(form), credentials: 'same-origin',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }, redirect: 'follow', cache: 'no-store'
+        headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
+        redirect: 'follow', cache: 'no-store'
       });
-      if (!response.ok || !response.url.includes('/videos')) throw new Error('Không thể lưu dữ liệu.');
-      const html = await response.text();
-      const updatedPage = new DOMParser().parseFromString(html, 'text/html');
-      const newRow = updatedPage.getElementById(rowId);
-      if (!newRow) {
-        // Sau khi thay đổi gán môn, playlist có thể rời bộ lọc hiện hành
-        // hoặc chuyển sang trang khác. Yêu cầu đã được lưu thành công.
-        let msg = form.querySelector('.library-save-feedback');
-        if (!msg) { msg=document.createElement('div'); msg.className='library-save-feedback text-success'; form.appendChild(msg); }
-        msg.textContent='Đã lưu. Playlist có thể chuyển khỏi trang/bộ lọc hiện tại; hãy lọc lại để xem trạng thái mới.';
-        if(button)button.disabled=false;
-        return;
+      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/json')) {
+        throw new Error('Máy chủ chưa xác nhận kết quả lưu.');
       }
-      const feedback = document.createElement('div');
-      feedback.className = 'library-save-feedback text-success fw-semibold';
-      feedback.setAttribute('role','status');
-      feedback.textContent = 'Đã lưu môn học/mô đun áp dụng.';
-      const summary = newRow.querySelector('.course-picker-summary');
+      const result = await response.json();
+      if (!result.ok || !result.row_html) throw new Error('Không nhận được thông tin playlist đã cập nhật.');
+      const fragment = document.createElement('template');
+      fragment.innerHTML = result.row_html.trim();
+      const newRow = fragment.content.querySelector('tr.library-target-row');
+      if (!newRow || !row || newRow.id !== row.id) throw new Error('Không xác minh được playlist vừa lưu.');
       row.replaceWith(newRow);
-      // Hàng mới cần gắn lại trình xử lý thay đổi danh sách môn học.
+      // Giữ nguyên dòng đã lưu trên màn hình, ngay cả khi bộ lọc hiện hành là "Chưa gán"
+      // hoặc playlist đã đổi vị trí phân trang sau thao tác.
       const newForm = newRow.querySelector('.playlist-course-form');
       if (newForm) {
         newForm.querySelectorAll('.playlist-course-check').forEach(check =>
@@ -368,11 +264,14 @@
         updateCoursePicker(newForm);
       }
       newRow.querySelectorAll('.playlist-qr-course-select').forEach(updatePlaylistQrActions);
-      if (summary) summary.appendChild(feedback);
+      const feedback = document.createElement('div');
+      feedback.className = 'library-save-feedback text-success fw-semibold mt-1';
+      feedback.setAttribute('role', 'status');
+      feedback.textContent = 'Đã lưu. Môn học/mô đun và mã QR đã được cập nhật.';
+      newRow.querySelector('.course-picker-summary')?.appendChild(feedback);
       window.scrollTo(oldScrollX, oldScrollY);
     } catch (error) {
-      // Không tự gửi lại yêu cầu: tránh việc ghi dữ liệu hai lần nếu mạng chập chờn.
-      if (button) button.disabled = false;
+      // Không gửi lại POST tự động, tránh ghi lặp khi mạng gián đoạn.
       let feedback = form.querySelector('.library-save-feedback');
       if (!feedback) {
         feedback = document.createElement('div');
@@ -380,8 +279,10 @@
         feedback.setAttribute('role', 'alert');
         form.appendChild(feedback);
       }
-      feedback.textContent = 'Chưa xác nhận được kết quả lưu. Vui lòng kiểm tra và thử lại nếu cần.';
+      feedback.textContent = 'Chưa xác nhận được kết quả lưu. Vui lòng kiểm tra trước khi thử lại.';
+      if (button) button.disabled = false;
     } finally {
+      // Nếu dòng đã được thay mới, không cần sửa data trên DOM cũ.
       form.dataset.saving = '0';
     }
   });
@@ -394,7 +295,7 @@
     const create=area.querySelector('.playlist-qr-create'), download=area.querySelector('.playlist-qr-download');
     const remove=row.querySelector('.playlist-qr-delete-form');
     const retarget=row.querySelector('.playlist-qr-retarget'), toggle=row.querySelector('.playlist-qr-retarget-toggle');
-    create.hidden=hasQr; create.disabled=!valid || row.querySelector('.text-bg-warning') !== null;
+    create.hidden=hasQr; create.disabled=!valid || row.dataset.playlistUsable!=='1';
     download.hidden=!hasQr;
     if(hasQr) download.href=option.dataset.qrPng; else download.removeAttribute('href');
     if(remove){remove.hidden=!hasQr;if(hasQr)remove.action=option.dataset.qrDelete;}
@@ -440,9 +341,20 @@
     if(btn)btn.disabled=true;
     try{
       const response=await fetch(form.action,{method:'POST',body:new FormData(form),credentials:'same-origin',redirect:'follow',headers:{'X-Requested-With':'XMLHttpRequest'},cache:'no-store'});
-      if(!response.ok || new URL(response.url).pathname!=='/videos')throw Error('Không thể xác nhận thao tác.');
-      const newPage=new DOMParser().parseFromString(await response.text(),'text/html');
-      const newRow=newPage.getElementById(rowId);
+      if(!response.ok)throw Error('Không thể xác nhận thao tác.');
+      let newRow=null;
+      if((response.headers.get('content-type') || '').includes('application/json')){
+        const result=await response.json();
+        if(!result.ok || !result.row_html)throw Error('Không có thông tin mã QR được cập nhật.');
+        const fragment=document.createElement('template');
+        fragment.innerHTML=result.row_html.trim();
+        newRow=fragment.content.querySelector('tr.library-target-row');
+        if(!newRow || newRow.id!==rowId)throw Error('Không xác minh được playlist vừa thao tác.');
+      }else{
+        if(new URL(response.url).pathname!=='/videos')throw Error('Không thể xác nhận thao tác.');
+        const newPage=new DOMParser().parseFromString(await response.text(),'text/html');
+        newRow=newPage.getElementById(rowId);
+      }
       if(newRow && row){
         row.replaceWith(newRow);
         const picker=newRow.querySelector('.playlist-course-form');

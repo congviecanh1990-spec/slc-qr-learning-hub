@@ -993,6 +993,24 @@ def videos_library_return(anchor: str, raw_query: str = "") -> str:
     return target + "#" + anchor
 
 
+def playlist_library_row_json(playlist_id: int, user: User):
+    """Return the just-saved playlist row regardless of active list filters/pages."""
+    db.session.expire_all()
+    playlist = db.session.get(Playlist, playlist_id) or abort(404)
+    available_courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
+    replacement_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
+    return jsonify({
+        "ok": True,
+        "playlist_id": playlist.id,
+        "row_html": render_template(
+            "_playlist_library_row.html",
+            p=playlist, courses=available_courses,
+            replacement_playlists=replacement_playlists,
+            library_return_query=request.form.get("return_query", "")[:1200],
+        ),
+    })
+
+
 def ensure_course_playlist_link(course: Course, playlist: Playlist, user: User):
     link = CoursePlaylist.query.filter_by(course_id=course.id, playlist_id=playlist.id).first()
     if link:
@@ -1905,6 +1923,7 @@ def register_routes(app):
             video_page=video_page, video_pages=video_pages, video_total=video_total,
             playlist_page=playlist_page, playlist_pages=playlist_pages, playlist_total=playlist_total,
             library_args=request.args.to_dict(flat=True),
+            library_return_query=request.query_string.decode("utf-8"),
             retarget_videos=visible_video_query(user).filter(
                 Video.is_available.is_(True), Video.privacy_status != "private",
                 Video.embeddable.isnot(False)).order_by(Video.title).all(),
@@ -2003,6 +2022,8 @@ def register_routes(app):
                   f"video tự gán {auto_added}; video tự bỏ {auto_removed}."),
         )
         db.session.commit()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return playlist_library_row_json(playlist_id, user)
         flash(
             f"Đã lưu môn học/ mô đun cho playlist “{playlist.title}”. Video trong playlist được tự động đồng bộ vào các môn học/ mô đun đã chọn.",
             "success",
@@ -2030,6 +2051,8 @@ def register_routes(app):
             note=f"Kho học liệu: {playlist.title}; môn học/mô đun: {course.name}; tạo mới: {was_created}."
         )
         db.session.commit()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return playlist_library_row_json(playlist.id, user)
         flash("Đã tạo mã QR cho playlist." if was_created else
               "Playlist đã có mã QR ở môn học/mô đun này; không tạo mã trùng.",
               "success" if was_created else "info")

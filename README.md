@@ -1,3 +1,14 @@
+## Cập nhật v4.3.24 – Gán môn học cho playlist hiển thị ngay mã QR (09/11/2026)
+
+- Khắc phục lỗi tại **Kho video học liệu → Danh sách playlist**: sau khi bấm **Lưu** gán môn học/mô đun, cập nhật ngay **môn đã chọn**, **nút Tạo mã QR**, **Tải mã QR** và các nút quản lý QR nếu đã có mã; không cần lọc lại/tải lại trang. Sau khi bấm **Tạo mã QR** cũng cập nhật ngay cùng dòng.
+- Nguyên nhân cũ: JavaScript đọc lại cả danh sách `/videos` theo bộ lọc và phân trang; khi playlist rời bộ lọc `Chưa gán` hoặc đổi sang trang khác thì không tìm thấy dòng vừa cập nhật, dẫn đến phần QR giữ nguyên trạng thái cũ.
+- Cách mới: `POST /playlists/<id>/set-courses` trả JSON chứa HTML của chính dòng playlist vừa lưu khi là yêu cầu AJAX. Giao diện thay dòng tương ứng; đường POST thông thường vẫn redirect như cũ khi tắt JavaScript.
+- Giữ lại vị trí cuộn; sau khi thay mới dòng, liên kết lại dropdown chọn môn và sự kiện QR. Playlist trống hoặc không thể dùng không được kích hoạt nút Tạo QR.
+- Không thay đổi cấu trúc PostgreSQL, QR hiện có, số lượt quét hoặc trạng thái xem của sinh viên.
+- Hướng dẫn phiên bản hiện hành: `HUONG_DAN_KIEM_TRA_V4324.md`. 
+
+---
+
 ## Cập nhật v4.3.23 – Nhật ký lỗi có email và nguyên nhân
 
 - Bổ sung email tại thời điểm lỗi và nguyên nhân thân thiện trong Nhật ký lỗi hệ thống (chỉ dành cho quản trị viên).

@@ -102,9 +102,9 @@ for user in (u1,u2):
     assert [v.youtube_video_id for v in vids]==['VID-GOOD'],[v.youtube_video_id for v in vids]
 
 # Playlist thật sự trống không được gắn nhãn có học liệu.
-tpl=(ROOT/'templates/videos.html').read_text()
+tpl=(ROOT/'templates/videos.html').read_text() + (ROOT/'templates/_playlist_library_row.html').read_text()
 assert "'Danh sách trống'" in tpl
-assert 'usable.count == 0' in tpl
+assert 'usable.count > 0' in tpl
 assert 'Video tuyển chọn' in tpl
 # Đảm bảo trình duyệt không bị ép đồng bộ chờ sau đăng nhập.
 a=(ROOT/'app.py').read_text()

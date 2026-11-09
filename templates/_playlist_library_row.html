@@ -1,0 +1,98 @@
+{# Cùng một dòng dùng cho trang Kho học liệu và kết quả AJAX sau khi lưu gán môn.
+   Không render lại cả danh sách: bộ lọc/phân trang có thể đã làm playlist biến mất. #}
+{% set active_course_ids = p.course_links | selectattr('active') | map(attribute='course_id') | list %}
+{% set usable = namespace(count=0) %}
+{% for link in p.video_links if link.video.is_available and link.video.embeddable is not sameas false and link.video.privacy_status != 'private' %}
+  {% set usable.count = usable.count + 1 %}
+{% endfor %}
+        <tr id="playlist-{{ p.id }}" class="library-target-row" data-playlist-usable="{{ '1' if p.is_available and usable.count > 0 else '0' }}">
+          <td>
+            <div class="fw-semibold">{{ p.title }}</div>{% if not p.is_available %}<span class="badge text-bg-warning">Playlist không còn trên YouTube</span><div class="small text-muted">QR cũ được giữ để tra cứu lịch sử; có thể ngừng sử dụng QR.</div>{% endif %}
+          </td>
+          <td>{{ p.channel.title }}</td>
+          <td>{{ p.video_links|length }}</td>
+          <td>
+            <form method="post" action="{{ url_for('set_playlist_course_assignments', playlist_id=p.id) }}" class="playlist-course-form" data-playlist-id="{{ p.id }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="return_query" value="{{ library_return_query }}">
+              {% if courses %}
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="dropdown course-picker" data-bs-auto-close="outside">
+                  <button class="btn btn-outline-secondary dropdown-toggle course-picker-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="course-picker-label">
+                      {% if active_course_ids|length == 0 %}Chọn môn học/ mô đun{% else %}Đã chọn {{ active_course_ids|length }} môn học/ mô đun{% endif %}
+                    </span>
+                  </button>
+                  <div class="dropdown-menu p-2 shadow course-picker-menu">
+                    <div class="small fw-bold px-2 pt-1 pb-2">Chọn một hoặc nhiều môn học/ mô đun</div>
+                    {% for c in courses %}
+                      <label class="dropdown-item d-flex align-items-start gap-2 py-2 mb-0" for="pl{{ p.id }}-c{{ c.id }}">
+                        <input class="form-check-input mt-1 playlist-course-check" type="checkbox" name="course_ids" value="{{ c.id }}" id="pl{{ p.id }}-c{{ c.id }}" {{ 'checked' if c.id in active_course_ids else '' }}>
+                        <span>{{ c.name }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm">Lưu</button>
+              </div>
+              <div class="form-text mt-1 course-picker-summary">
+                {% if active_course_ids|length == 0 %}
+                  Chưa gán môn học/ mô đun.
+                {% else %}
+                  Đang áp dụng cho {{ active_course_ids|length }} môn học/ mô đun. Mở danh sách để thêm hoặc bỏ môn học/ mô đun rồi bấm Lưu.
+                {% endif %}
+              </div>
+              {% else %}
+                <div class="text-muted small">Chưa có môn học/ mô đun. Hãy tạo môn học/ mô đun trước.</div>
+              {% endif %}
+            </form>
+          </td>
+          <td>
+            <span class="badge {{ 'text-bg-success' if p.is_available and usable.count > 0 else 'text-bg-secondary' if p.is_available else 'text-bg-danger' }}">{{ 'Có học liệu' if p.is_available and usable.count > 0 else 'Danh sách trống' if p.is_available else 'Không còn khả dụng' }}</span>
+            {% if p.privacy_status %}<div class="small text-muted mt-1">{{ p.privacy_status }}</div>{% endif %}
+          </td>
+          <td>
+            {% set active_links = p.course_links | selectattr('active') | list %}
+            {% if active_course_ids %}
+              <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap playlist-qr-actions align-items-center library-qr-form" data-library-qr-form="1">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_query" value="{{ library_return_query }}">
+                <select class="form-select form-select-sm playlist-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR playlist" required>
+                  {% if active_course_ids|length > 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
+                  {% for l in active_links if l.course.owner_id == me.id and l.course.active %}
+                    <option value="{{ l.course.id }}"
+                      {% if l.qr and l.qr.active %}
+                      data-qr-png="{{ url_for('qr_png', qr_id=l.qr.id) }}"
+                      data-qr-delete="{{ url_for('delete_qr', qr_id=l.qr.id) }}"
+                      data-qr-retarget-playlist="{{ url_for('qr_retarget_playlist', qr_id=l.qr.id) }}"
+                      {% endif %}>{{ l.course.name }}{{ ' – đã có mã QR' if l.qr and l.qr.active else '' }}</option>
+                  {% endfor %}
+                </select>
+                <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
+                <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#">Tải mã QR</a>
+              </form>
+              <form method="post" action="#" class="playlist-qr-delete-form mt-1 library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Ngừng sử dụng mã QR playlist này? Mã đã in sẽ không hoạt động nhưng lịch sử được giữ lại.');" hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="return_query" value="{{ library_return_query }}">
+                <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
+                <button class="btn btn-outline-danger btn-sm" type="submit">Xóa mã QR</button>
+              </form>
+              <button type="button" class="btn btn-outline-warning btn-sm playlist-qr-retarget-toggle mt-1" hidden aria-expanded="false">Đổi playlist đích</button>
+              <form method="post" action="#" class="playlist-qr-retarget library-qr-form mt-1" data-library-qr-form="1" hidden onsubmit="return confirm('Xác nhận đổi playlist đích? Mã QR cũ tiếp tục được sử dụng và lịch sử được giữ nguyên.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="return_query" value="{{ library_return_query }}">
+                <input type="hidden" name="library_row" value="playlist-{{ p.id }}">
+                <select class="form-select form-select-sm mb-1" name="playlist_id" required aria-label="Chọn playlist thay thế">
+                  <option value="">Chọn playlist đích mới</option>
+                  {% for replacement in replacement_playlists if replacement.id != p.id %}
+                    <option value="{{ replacement.id }}">{{ replacement.title }} ({{ replacement.channel.title }})</option>
+                  {% endfor %}
+                </select>
+                <div class="small text-muted mb-1">QR đã in, mã và lịch sử quét/xem vẫn được giữ nguyên.</div>
+                <button type="submit" class="btn btn-warning btn-sm">Lưu playlist đích</button>
+              </form>
+            {% else %}<div class="text-muted small">Hãy chọn môn học/mô đun và bấm Lưu trước.</div>{% endif %}
+          </td>
+        </tr>

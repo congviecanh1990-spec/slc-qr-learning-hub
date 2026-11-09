@@ -8,7 +8,7 @@ from sqlalchemy.orm import declarative_base, relationship, backref, sessionmaker
 from jinja2 import Environment, FileSystemLoader
 
 ROOT = Path(__file__).resolve().parents[1]
-assert (ROOT/'VERSION.txt').read_text().strip() == '4.3.23'
+assert tuple(map(int,(ROOT/'VERSION.txt').read_text().strip().split('.'))) >= (4,3,23)
 
 # Phân loại lỗi đăng nhập không chứa OAuth URL hoặc token.
 sys.path.insert(0, str(ROOT))
