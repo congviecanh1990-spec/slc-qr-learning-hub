@@ -1,3 +1,14 @@
+## Cập nhật v4.3.29 – Gán môn và tạo mã QR playlist hàng loạt (11/11/2026)
+
+- **Kho video học liệu → Danh sách playlist:** giữ nguyên thiết kế và nút lưu/gán/tạo QR của từng playlist; bổ sung khối thao tác hàng loạt bên dưới bộ lọc.
+- **Gán tất cả playlist đã lọc:** chọn một môn học/mô đun và áp dụng cho toàn bộ playlist khớp bộ lọc đã thực hiện, kể cả các trang sau; chỉ gán thêm liên kết, không xóa môn học đã gán trước đó. Bỏ qua playlist không còn khả dụng, video của playlist tự động được liên kết tới môn.
+- **Tạo QR cho tất cả playlist của môn:** quét toàn bộ playlist đã gán cho môn được chọn, độc lập với bộ lọc hiển thị; bỏ qua playlist trống/không đủ điều kiện phát và **tái sử dụng QR cũ**, không tạo trùng.
+- Kiểm tra quyền trên máy chủ theo giảng viên và môn học, xác nhận thao tác hàng loạt, giữ nhật ký kiểm thử/thời gian tạo QR.
+- Kế thừa cơ chế xóa **đúng 3 nhật ký lỗi, chỉ một lần** của v4.3.28; không bổ sung cơ chế xóa lỗi tự động mới. Không thay đổi schema PostgreSQL, QR cũ và lịch sử quét/xem.
+- Gói nguồn chỉ kèm `HUONG_DAN_KIEM_TRA_V4329.md` và `HUONG_DAN_RENDER_NGAN.md`.
+
+---
+
 ## Cập nhật v4.3.28 – Xóa đúng ba bản ghi lỗi cũ, một lần duy nhất (10/11/2026)
 
 - Khi khởi động lần đầu với `AUTO_CREATE_DB=1`, nếu bảng `error_logs` có **đúng 3 bản ghi** thì xóa đúng ba bản ghi đó; nếu không đúng 3 thì bỏ qua vĩnh viễn, không tự chọn ba lỗi bất kỳ.

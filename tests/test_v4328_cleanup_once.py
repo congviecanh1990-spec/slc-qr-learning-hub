@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 from services.one_time_maintenance import (ONE_TIME_ERROR_CLEANUP_KEY,
                                            cleanup_initial_three_error_logs_once)
 
-assert (ROOT/'VERSION.txt').read_text().strip() == '4.3.28'
+assert tuple(map(int,(ROOT/'VERSION.txt').read_text().strip().split('.'))) >= (4,3,28)
 
 
 def fresh_engine():

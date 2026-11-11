@@ -1180,6 +1180,36 @@ def videos_library_return(anchor: str, raw_query: str = "") -> str:
     return target + "#" + anchor
 
 
+def filtered_library_playlist_query(user: User, playlist_search: str = "", playlist_assignment: str = ""):
+    """Cùng một phạm vi lọc cho danh sách playlist và nút gán hàng loạt.
+
+    Bao gồm TẤT CẢ trang; playlist cũ không còn trên YouTube chỉ xuất hiện
+    khi còn liên kết môn học, để giáo viên có thể quản lý QR đã phát hành.
+    """
+    playlist_has_assignment = (
+        select(CoursePlaylist.id)
+        .join(Course, Course.id == CoursePlaylist.course_id)
+        .where(CoursePlaylist.playlist_id == Playlist.id,
+               CoursePlaylist.active.is_(True),
+               Course.active.is_(True),
+               Course.owner_id == user.id)
+        .correlate(Playlist)
+        .exists()
+    )
+    pq = (Playlist.query.join(YouTubeChannel).filter(
+        YouTubeChannel.user_id == user.id,
+        or_(Playlist.is_available.is_(True), playlist_has_assignment),
+        or_(YouTubeChannel.uploads_playlist_id.is_(None),
+            Playlist.youtube_playlist_id != YouTubeChannel.uploads_playlist_id)))
+    if playlist_search:
+        pq = pq.filter(Playlist.title.ilike(f"%{playlist_search}%"))
+    if playlist_assignment == "unassigned":
+        pq = pq.filter(~playlist_has_assignment)
+    elif playlist_assignment == "assigned":
+        pq = pq.filter(playlist_has_assignment)
+    return pq
+
+
 def playlist_library_row_json(playlist_id: int, user: User):
     """Return the just-saved playlist row regardless of active list filters/pages."""
     db.session.expire_all()
@@ -2069,36 +2099,11 @@ def register_routes(app):
         videos = q.order_by(Video.published_at.desc().nullslast(), Video.id.desc()).offset((video_page-1)*5).limit(5).all()
 
         # --- Bộ lọc playlist ---
-        playlist_search = request.args.get("p_q", "").strip()
+        playlist_search = request.args.get("p_q", "").strip()[:150]
         playlist_assignment = request.args.get("p_assignment", "").strip()
-        # "Đã gán" phải phản ánh trạng thái sau lần Lưu vừa rồi, không dựa trên
-        # kết quả/đánh số trang ở lần tải cũ. EXISTS liên kết trực tiếp với playlist
-        # hiện hành và chỉ tính các môn đang hoạt động của chính giảng viên.
-        playlist_has_assignment = (
-            select(CoursePlaylist.id)
-            .join(Course, Course.id == CoursePlaylist.course_id)
-            .where(CoursePlaylist.playlist_id == Playlist.id,
-                   CoursePlaylist.active.is_(True),
-                   Course.active.is_(True),
-                   Course.owner_id == user.id)
-            .correlate(Playlist)
-            .exists()
-        )
-        # Vẫn liệt kê các playlist đã mất trên YouTube nếu còn được gán môn,
-        # để giáo viên nhìn thấy tình trạng và ngừng QR nhưng không xóa lịch sử.
-        pq = (Playlist.query.join(YouTubeChannel).filter(
-            YouTubeChannel.user_id == user.id,
-            or_(Playlist.is_available.is_(True), playlist_has_assignment),
-            or_(YouTubeChannel.uploads_playlist_id.is_(None),
-                Playlist.youtube_playlist_id != YouTubeChannel.uploads_playlist_id)))
-        if playlist_search:
-            pq = pq.filter(Playlist.title.ilike(f"%{playlist_search}%"))
-        if playlist_assignment == "unassigned":
-            pq = pq.filter(~playlist_has_assignment)
-        elif playlist_assignment == "assigned":
-            pq = pq.filter(playlist_has_assignment)
-        # Playlist đã bị xóa/ẩn trên YouTube vẫn hiện để GV xử lý QR cũ,
-        # nhưng không cho tạo QR mới từ nguồn không khả dụng.
+        # Sử dụng CHUNG phạm vi này với thao tác hàng loạt, không chỉ 5 dòng/trang.
+        pq = filtered_library_playlist_query(user, playlist_search, playlist_assignment)
+        # Playlist cũ vẫn xuất hiện khi đã gán môn để xử lý QR và lịch sử.
         playlist_total = pq.count()
         playlist_pages = max(1, (playlist_total + 4) // 5)
         playlist_page = min(max(1, request.args.get("p_page", 1, type=int)), playlist_pages)
@@ -2200,6 +2205,115 @@ def register_routes(app):
             "success",
         )
         return redirect(url_for("videos_page") + "#playlists")
+
+    @app.post("/playlists/bulk-assign-filtered")
+    @login_required
+    def bulk_assign_filtered_library_playlists():
+        """Gán THÊM một môn vào tất cả playlist khớp bộ lọc đã áp dụng.
+
+        ID playlist được tính lại trên máy chủ với quyền GV hiện tại, không nhận
+        danh sách ID từ trình duyệt; không hủy các môn đã gán cho playlist.
+        """
+        user = current_user()
+        course = db.session.get(Course, request.form.get("course_id", type=int))
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        playlist_search = request.form.get("p_q", "").strip()[:150]
+        playlist_assignment = request.form.get("p_assignment", "").strip()
+        if playlist_assignment not in {"", "assigned", "unassigned"}:
+            abort(400)
+        redirect_to = videos_library_return("playlists", request.form.get("return_query", ""))
+        candidates = filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()
+        created = already = skipped = 0
+        started = time.perf_counter()
+        for playlist in candidates:
+            # Không tạo liên kết mới tới playlist đã gỡ/hỏng trên YouTube.
+            if not playlist.is_available:
+                skipped += 1
+                continue
+            _, was_created = ensure_course_playlist_link(course, playlist, user)
+            if was_created:
+                created += 1
+            else:
+                already += 1
+        if created:
+            auto_added, auto_removed = reconcile_course_videos_from_playlists(course, user)
+        else:
+            auto_added = auto_removed = 0
+        record_functional_test(
+            "ASSIGN_PLAYLIST_FILTERED_BULK", "Gán tất cả playlist theo bộ lọc", bool(created or already),
+            owner_id=user.id,
+            note=(f"Môn: {course.name}; bộ lọc: {playlist_search!r}/{playlist_assignment or 'tất cả'}; "
+                  f"khớp {len(candidates)}; gán mới/khôi phục {created}; đã gán {already}; "
+                  f"không khả dụng {skipped}; tự thêm video {auto_added}; tự bỏ video {auto_removed}."),
+        )
+        db.session.commit()
+        # Tác vụ hàng loạt chỉ báo ngắn khi không có playlist hợp lệ.
+        if not created and not already:
+            flash("Không có playlist khả dụng phù hợp bộ lọc để gán môn học/mô đun.", "warning")
+        return redirect(redirect_to)
+
+    @app.post("/playlists/bulk-create-course-qrs")
+    @login_required
+    def bulk_create_playlist_qrs_from_library():
+        """Tạo QR cho tất cả playlist đã gán môn, không phụ thuộc bộ lọc hiện hành.
+
+        Mã QR cũ được tái sử dụng; QR riêng từng playlist vẫn hoạt động như trước.
+        """
+        user = current_user()
+        course = db.session.get(Course, request.form.get("course_id", type=int))
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        redirect_to = videos_library_return("playlists", request.form.get("return_query", ""))
+        links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
+        playlist_ids = [link.playlist_id for link in links]
+        playable_ids = set()
+        if playlist_ids:
+            playable_ids = {row[0] for row in (
+                db.session.query(PlaylistVideo.playlist_id)
+                .join(Video, Video.id == PlaylistVideo.video_id)
+                .filter(PlaylistVideo.playlist_id.in_(playlist_ids),
+                        Video.is_available.is_(True),
+                        or_(Video.privacy_status.is_(None), Video.privacy_status != "private"),
+                        Video.embeddable.isnot(False))
+                .distinct().all()
+            )}
+        created = existing = skipped = 0
+        started = time.perf_counter()
+        total_processing = 0.0
+        for link in links:
+            playlist = link.playlist
+            if not playlist or not playlist.is_available or playlist.id not in playable_ids:
+                skipped += 1
+                continue
+            # Chỉ giảng viên có kết nối với kênh gốc mới được tạo QR mới.
+            # QR cũ từ trước khi bàn giao được giữ nguyên, không tạo trùng.
+            try:
+                qr, was_created = create_qr_for_course_playlist(course, playlist, user, link)
+            except ValueError:
+                skipped += 1
+                continue
+            if was_created:
+                created += 1
+                total_processing += qr.processing_seconds or 0.0
+            else:
+                existing += 1
+        elapsed = time.perf_counter() - started
+        passed = bool(created or existing)
+        record_functional_test(
+            "QR_PLAYLIST_FILTERED_BULK", "Tạo QR cho mọi playlist đã gán môn", passed,
+            owner_id=user.id,
+            note=f"Môn: {course.name}; tổng playlist đã gán {len(links)}; QR mới {created}; đã có {existing}; bỏ qua {skipped}.",
+        )
+        record_webapp_experiment(
+            user.id, "TAO_QR_HANG_LOAT", elapsed, operations_count=1, success=passed,
+            note=f"Môn {course.name}: QR playlist mới {created}; đã có {existing}; bỏ qua {skipped}",
+            processing_seconds=(total_processing / created if created else None),
+        )
+        db.session.commit()
+        if not passed:
+            flash("Chưa có playlist đủ điều kiện tạo QR trong môn học/mô đun này.", "warning")
+        return redirect(redirect_to)
 
     @app.post("/playlists/<int:playlist_id>/set-courses")
     @login_required

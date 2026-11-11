@@ -18,7 +18,7 @@ row_html = (root / 'templates/_playlist_library_row.html').read_text()
 # Verify the exact SQLAlchemy expression used by the live /videos route,
 # rather than testing only a separately written approximation.
 parsed = ast.parse(app_source)
-route = next(n for n in ast.walk(parsed) if isinstance(n, ast.FunctionDef) and n.name == 'videos_page')
+route = next(n for n in ast.walk(parsed) if isinstance(n, ast.FunctionDef) and n.name == 'filtered_library_playlist_query')
 assigned = next(n for n in ast.walk(route) if isinstance(n, ast.Assign)
                 and any(isinstance(t, ast.Name) and t.id == 'playlist_has_assignment' for t in n.targets))
 expr_code = compile(ast.fix_missing_locations(ast.Expression(body=assigned.value)), '<route-filter>', 'eval')
@@ -82,7 +82,7 @@ c1.active=True;s.commit()
 route_src=ast.get_source_segment(app_source,route)
 assert 'pq = pq.filter(~playlist_has_assignment)' in route_src
 assert 'pq = pq.filter(playlist_has_assignment)' in route_src
-assert '"private, no-store, max-age=0"' in route_src
+assert '"private, no-store, max-age=0"' in app_source
 # Browser GET form must submit the actual selected dropdown and not re-submit stale paging.
 soup=BeautifulSoup(html,'html.parser')
 form=soup.select_one('form#playlistLibraryFilterForm')

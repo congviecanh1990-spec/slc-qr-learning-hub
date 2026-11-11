@@ -63,6 +63,36 @@
     </div>
   </form>
 
+  {# Thao tác hàng loạt độc lập với 5 dòng phân trang bên dưới. #}
+  <form id="playlistBulkActions" method="post" action="{{ url_for('bulk_assign_filtered_library_playlists') }}"
+        class="card card-body shadow-sm mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_query" value="{{ library_return_query }}">
+    <input type="hidden" name="p_q" value="{{ playlist_search }}">
+    <input type="hidden" name="p_assignment" value="{{ playlist_assignment }}">
+    <div class="d-flex flex-wrap align-items-end gap-2">
+      <div class="flex-grow-1" style="min-width:210px;max-width:420px">
+        <label class="form-label small" for="playlistBulkCourse">Môn học/ mô đun áp dụng hàng loạt</label>
+        <select id="playlistBulkCourse" class="form-select" name="course_id" required>
+          <option value="">— Chọn môn học/ mô đun —</option>
+          {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary" name="bulk_action" value="assign"
+              {{ 'disabled' if not courses or playlist_total == 0 else '' }}
+              data-confirm-bulk="Gán các playlist còn khả dụng thuộc toàn bộ kết quả lọc ({{ playlist_total }} playlist, gồm mọi trang) cho môn học đã chọn? Các môn đã gán trước đó vẫn được giữ.">
+        Gán tất cả playlist đã lọc
+      </button>
+      <button type="submit" class="btn btn-outline-primary" name="bulk_action" value="qr"
+              formaction="{{ url_for('bulk_create_playlist_qrs_from_library') }}"
+              {{ 'disabled' if not courses else '' }}
+              data-confirm-bulk="Tạo mã QR cho tất cả playlist đã gán vào môn học được chọn, kể cả playlist không nằm trong kết quả lọc hiện tại? Mã QR đã tạo sẽ được giữ nguyên.">
+        Tạo QR cho tất cả playlist của môn
+      </button>
+    </div>
+    <div class="text-muted small mt-2">Gán áp dụng cho mọi trang kết quả lọc; tạo QR áp dụng cho mọi playlist đã gán vào môn được chọn. Playlist không có video phát được sẽ không được tạo QR.</div>
+  </form>
+
   <div class="table-responsive playlist-table-wrap">
     <table class="table table-hover align-middle bg-white">
       <thead><tr>
@@ -375,6 +405,14 @@
 })();
 </script>
 
+<script>
+document.getElementById('playlistBulkActions')?.addEventListener('submit', function(event) {
+  const button=event.submitter;
+  if(!button || !button.dataset.confirmBulk) return;
+  const selected=this.querySelector('#playlistBulkCourse')?.selectedOptions[0]?.textContent?.trim() || '';
+  if(!window.confirm(button.dataset.confirmBulk + '\n\nMôn học/mô đun: ' + selected)) event.preventDefault();
+});
+</script>
 <script>
 function bindSelectAll(masterId, itemSelector, countId, suffix){
   const master=document.getElementById(masterId);

@@ -1,11 +1,11 @@
-# Hướng dẫn triển khai Web App v4.3.28 lên Render
+# Hướng dẫn triển khai Web App v4.3.29 lên Render
 
-1. **Sao lưu trước khi nâng cấp:** dùng **Sao lưu & khôi phục** trong Web App hoặc công cụ sao lưu PostgreSQL. Bản sao lưu có nhật ký lỗi hiện tại nên lưu cẩn thận và không đưa lên GitHub.
-2. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.28_RENDER.zip`. Cập nhật **toàn bộ mã nguồn bên trong** lên nhánh `main` của kho GitHub hiện dùng cho Render. Không tải nguyên ZIP như một tệp mã nguồn.
-3. Giữ nguyên `DATABASE_URL`, Google OAuth, `SECRET_KEY`, dữ liệu và mã QR hiện có; đặt `AUTO_CREATE_DB=1`. Render triển khai bản commit mới.
-4. **Lần khởi động đầu:** ứng dụng kiểm tra `error_logs` và chỉ xóa nếu có đúng 3 lỗi. Lưu một dấu mốc vĩnh viễn tại `app_one_time_maintenance` để lần khởi động sau không xóa lỗi nữa. Nếu số lỗi khác 3, tác vụ được đánh dấu đã bỏ qua và không thử lại.
-5. Sau deploy, đăng nhập **Quản trị viên → Nhật ký lỗi**, kiểm tra ba lỗi cũ biến mất (nếu trước đó có đúng 3 bản ghi). Các lỗi mới vẫn được ghi bình thường. Kiểm tra lại chức năng QR, thống kê và lịch sử xem.
+1. **Sao lưu dữ liệu PostgreSQL** và giữ một bản mã nguồn hiện đang chạy trước khi cập nhật.
+2. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.29_RENDER.zip`. Tải **các tệp và thư mục bên trong** lên nhánh `main` của kho GitHub đã liên kết Render; **không tải cả tệp ZIP** như mã nguồn. Xóa các tệp hướng dẫn phiên bản cũ không còn dùng trong kho (nếu có), nhưng không xóa mã nguồn, bảng dữ liệu hoặc môi trường.
+3. Giữ nguyên `DATABASE_URL`, `SECRET_KEY`, Google OAuth và các biến môi trường. **Không xóa PostgreSQL, không tạo lại QR**, không đặt lại hệ thống. Giữ `AUTO_CREATE_DB=1` nếu đang dùng.
+4. Render triển khai commit mới. Sau khi trạng thái dịch vụ là **Live**, tải lại giao diện bằng `Ctrl + F5`.
+5. Vào **Kho video học liệu → Danh sách playlist**, thử hai nút mới dưới bộ lọc như `HUONG_DAN_KIEM_TRA_V4329.md`; kiểm tra bộ lọc nhiều trang, QR cũ, playlist trống và quyền giảng viên.
 
-**Quan trọng:** Không xóa PostgreSQL, không đặt lại cơ sở dữ liệu và không khôi phục bản sao lưu cũ ngay sau khi dọn lỗi; khôi phục backup có thể đưa ba lỗi cũ trở lại, nhưng cơ chế dọn lỗi vẫn không chạy lần thứ hai. Nếu số lượng bản ghi không đúng 3, bản này sẽ không tự ý xóa bất kỳ lỗi nào.
+**Giữ nguyên quy tắc dọn lỗi của v4.3.28:** nếu tác vụ xóa đúng 3 lỗi cũ đã chạy/bỏ qua và để lại dấu mốc trong `app_one_time_maintenance`, v4.3.29 **không chạy lại**. Nếu đây là lần đầu triển khai dòng mã có tính năng v4.3.28, điều kiện xóa một lần ban đầu vẫn áp dụng. Không có xóa lỗi định kỳ hay xóa lỗi sau này.
 
-Đọc `HUONG_DAN_KIEM_TRA_V4328.md` để xem các điều kiện và tình huống kiểm tra chi tiết. Chưa thử nghiệm trên PostgreSQL Production của Render.
+Bản mới không bổ sung bảng/cột PostgreSQL. Các kết quả kiểm thử mã nguồn là ngoại tuyến; cần xác minh luồng thực tế trên Render sau khi triển khai.
