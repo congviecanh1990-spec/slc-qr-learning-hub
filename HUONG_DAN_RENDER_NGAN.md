@@ -1,11 +1,13 @@
-# Hướng dẫn triển khai Web App v4.3.29 lên Render
+# Hướng dẫn triển khai v4.3.30 trên Render
 
-1. **Sao lưu dữ liệu PostgreSQL** và giữ một bản mã nguồn hiện đang chạy trước khi cập nhật.
-2. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.29_RENDER.zip`. Tải **các tệp và thư mục bên trong** lên nhánh `main` của kho GitHub đã liên kết Render; **không tải cả tệp ZIP** như mã nguồn. Xóa các tệp hướng dẫn phiên bản cũ không còn dùng trong kho (nếu có), nhưng không xóa mã nguồn, bảng dữ liệu hoặc môi trường.
-3. Giữ nguyên `DATABASE_URL`, `SECRET_KEY`, Google OAuth và các biến môi trường. **Không xóa PostgreSQL, không tạo lại QR**, không đặt lại hệ thống. Giữ `AUTO_CREATE_DB=1` nếu đang dùng.
-4. Render triển khai commit mới. Sau khi trạng thái dịch vụ là **Live**, tải lại giao diện bằng `Ctrl + F5`.
-5. Vào **Kho video học liệu → Danh sách playlist**, thử hai nút mới dưới bộ lọc như `HUONG_DAN_KIEM_TRA_V4329.md`; kiểm tra bộ lọc nhiều trang, QR cũ, playlist trống và quyền giảng viên.
+1. **Sao lưu PostgreSQL và mã nguồn đang vận hành**, vì bản này thay đổi quy trình xóa giảng viên và dữ liệu liên quan.
+2. Giải nén `TAO_MA_QR_TU_DONG_YOUTUBE_v4.3.30_RENDER.zip`, tải toàn bộ tệp/thư mục bên trong vào nhánh `main` của GitHub đã kết nối Render. Không đẩy nguyên ZIP vào kho mã nguồn.
+3. Giữ `DATABASE_URL`, `SECRET_KEY`, Google OAuth, `AUTO_CREATE_DB=1`. Hệ thống bổ sung hai cột hồ sơ khoa/bộ môn, không yêu cầu tạo mới PostgreSQL.
+4. Chờ dịch vụ ở trạng thái **Live**, nhấn `Ctrl + F5`; kiểm tra theo `HUONG_DAN_KIEM_TRA_V4330.md`.
+5. **Không xóa giảng viên thật trước khi thử trên dữ liệu sao lưu**. Nếu học liệu/kênh vẫn được người khác sử dụng, hệ thống sẽ chặn để tránh mất QR/lịch sử của họ.
 
-**Giữ nguyên quy tắc dọn lỗi của v4.3.28:** nếu tác vụ xóa đúng 3 lỗi cũ đã chạy/bỏ qua và để lại dấu mốc trong `app_one_time_maintenance`, v4.3.29 **không chạy lại**. Nếu đây là lần đầu triển khai dòng mã có tính năng v4.3.28, điều kiện xóa một lần ban đầu vẫn áp dụng. Không có xóa lỗi định kỳ hay xóa lỗi sau này.
+Cơ chế dọn đúng 3 lỗi hệ thống **chỉ một lần** từ bản v4.3.28 vẫn giữ nguyên dấu mốc đã xử lý, không có xóa lỗi định kỳ. Đánh giá đồng bộ kênh không có video nhưng không phát sinh lỗi sẽ là **Đạt**, kể cả bản ghi cũ đủ căn cứ được phân loại lại.
 
-Bản mới không bổ sung bảng/cột PostgreSQL. Các kết quả kiểm thử mã nguồn là ngoại tuyến; cần xác minh luồng thực tế trên Render sau khi triển khai.
+Trình duyệt Chrome/Edge trên HTTPS có thể hỏi nơi lưu PNG/ZIP; trình duyệt khác dùng cơ chế tải mặc định (có thể bật chế độ hỏi nơi lưu trong cài đặt trình duyệt).
+
+Chưa thử trực tiếp với PostgreSQL và YouTube Production trên Render.

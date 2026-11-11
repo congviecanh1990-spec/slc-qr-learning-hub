@@ -25,6 +25,9 @@ class User(db.Model):
     # Phân nhóm chuyên môn phục vụ chỉ tiêu nghiệm thu: CNTT / khác CNTT.
     # Để trống khi quản trị viên chưa xác định.
     professional_group = db.Column(db.String(16), nullable=True)
+    # Thông tin sinh hoạt chuyên môn khai báo ngay lần đăng nhập đầu tiên.
+    faculty_name = db.Column(db.String(255), nullable=True)
+    department_name = db.Column(db.String(255), nullable=True)
     profile_completed = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)

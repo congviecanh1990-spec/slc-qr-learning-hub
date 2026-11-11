@@ -1,3 +1,14 @@
+## Cập nhật v4.3.30 – QR, hồ sơ khoa/bộ môn, nghiệm thu và xóa giảng viên (11/11/2026)
+
+- **Kho video học liệu:** giữ thiết kế; đổi nút “Gán tất cả playlist đã lọc” thành **Gán MH cho tất cả playlist**, bỏ hộp xác nhận/thông báo thành công của hai thao tác gán/tạo QR hàng loạt; thêm **Tải QR đã tạo** theo môn đang chọn, tự bật khi có mã QR và tải ZIP qua chức năng hiện có.
+- **Quản lý mã QR động:** có bốn số liệu gồm tổng QR từng tạo (kể cả QR đã ngừng sử dụng, trừ dữ liệu bị xóa vĩnh viễn), QR hoạt động, QR playlist và QR video hoạt động; trên trình duyệt hỗ trợ cho người dùng chọn nơi lưu tệp khi tải, trên trình duyệt khác tải qua cơ chế mặc định.
+- **Môn học/mô đun:** chọn từ gợi ý hoặc nhập mới tên bộ môn/khoa, đặt nhãn **Khoa QL bộ môn**. Tài khoản đăng nhập lần đầu phải khai báo khoa và bộ môn sinh hoạt chuyên môn, dùng làm giá trị mặc định khi thêm môn.
+- **Đánh giá nghiệm thu đồng bộ:** không có video đủ điều kiện và 0 lỗi => **Đạt**, giữ nguyên ghi chú. Chỉ không đạt khi có lỗi; bản ghi tự động cũ 0 video/0 lỗi được phân loại lại mà không sửa minh chứng.
+- **Xóa giảng viên (quản trị):** yêu cầu nhập đúng email + xác nhận; xóa các môn/QR/nhật ký/đánh giá liên quan, chỉ xóa lớp và SV khi không còn GV khác sử dụng; bảo vệ nguồn học liệu dùng chung bằng cách từ chối xóa nếu còn phụ thuộc, rollback toàn bộ nếu lỗi. **Phải sao lưu dữ liệu trước thao tác.**
+- Tự thêm cột hồ sơ `users.faculty_name`, `users.department_name` với `AUTO_CREATE_DB=1`, không thay đổi dữ liệu môn/QR hiện tại khi nâng cấp; giữ nguyên dấu mốc xử lý xóa ba lỗi một lần của v4.3.28. Gói chỉ kèm `HUONG_DAN_KIEM_TRA_V4330.md` và `HUONG_DAN_RENDER_NGAN.md`.
+
+---
+
 ## Cập nhật v4.3.29 – Gán môn và tạo mã QR playlist hàng loạt (11/11/2026)
 
 - **Kho video học liệu → Danh sách playlist:** giữ nguyên thiết kế và nút lưu/gán/tạo QR của từng playlist; bổ sung khối thao tác hàng loạt bên dưới bộ lọc.

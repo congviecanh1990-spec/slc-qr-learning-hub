@@ -5,6 +5,12 @@
   <div class="text-muted">Tra cứu mã QR đã tạo, tải riêng từng mã hoặc tải mã QR theo môn học/mô đun. Việc tạo mã QR được thực hiện tại <a href="{{ url_for('videos_page') }}">Kho video học liệu</a>.</div>
 </div>
 
+<div class="row g-2 mb-3">
+  <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">Tổng mã QR đã tạo</span><strong class="fs-4">{{ all_time_qrs }}</strong></div></div>
+  <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">QR đang sử dụng</span><strong class="fs-4">{{ total_qrs }}</strong></div></div>
+  <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">QR playlist đang dùng</span><strong class="fs-4">{{ playlist_qr_count }}</strong></div></div>
+  <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">QR video đang dùng</span><strong class="fs-4">{{ video_qr_count }}</strong></div></div>
+</div>
 <form method="get" action="{{ url_for('qr_page') }}" class="card card-body shadow-sm mb-4" id="qr-course-filter">
   <div class="row g-2 align-items-end">
     <div class="col-lg-8">
@@ -19,16 +25,17 @@
     <div class="col-lg-4 d-flex gap-2 flex-wrap">
       <button class="btn btn-primary" type="submit">Lọc mã QR</button>
       {% if selected_course %}
-        <a class="btn btn-outline-secondary {{ 'disabled' if not qrs else '' }}" href="{{ url_for('download_course_qrs', course_id=selected_course.id) }}" title="Tải tệp ZIP của môn học/mô đun đang chọn">Tải mã QR</a>
+        <a class="btn btn-outline-secondary qr-save-picker {{ 'disabled' if not qrs else '' }}" href="{{ url_for('download_course_qrs', course_id=selected_course.id) }}" title="Tải tệp ZIP của môn học/mô đun đang chọn">Tải mã QR</a>
       {% endif %}
     </div>
   </div>
 </form>
+<p class="small text-muted mb-3">Khi tải QR, trình duyệt hỗ trợ sẽ cho chọn nơi lưu. Với trình duyệt khác, hãy bật tùy chọn hỏi vị trí lưu tệp trong cài đặt tải xuống.</p>
 
 <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
-  <h3 class="h4 mb-0">Kho mã QR</h3>
+  <h3 class="h4 mb-0">Kho mã QR <span class="text-muted fs-6 fw-normal">({{ filtered_qr_count }} mã đang hiển thị)</span></h3>
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary btn-sm {{ 'disabled' if not qrs else '' }}" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}" title="{{ 'Tải tất cả mã QR thuộc môn học/mô đun đang lọc' if selected_course_id is not none else 'Tải tất cả mã QR, sắp xếp theo thư mục môn học/mô đun' }}">Tải tất cả mã QR</a>
+    <a class="btn btn-outline-secondary btn-sm qr-save-picker {{ 'disabled' if not qrs else '' }}" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}" title="{{ 'Tải tất cả mã QR thuộc môn học/mô đun đang lọc' if selected_course_id is not none else 'Tải tất cả mã QR, sắp xếp theo thư mục môn học/mô đun' }}">Tải tất cả mã QR</a>
     <form method="post" action="{{ url_for('delete_all_qrs') }}" onsubmit="return confirm('Xóa toàn bộ mã QR đã tạo của tài khoản này? Các mã QR đã in sẽ ngừng hoạt động, nhưng lịch sử quét/xem trước đây vẫn được giữ lại.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-outline-danger btn-sm" {{ 'disabled' if not total_qrs else '' }} title="Xóa tất cả mã QR thuộc phạm vi quản lý, không phụ thuộc bộ lọc hiện tại">Xóa tất cả mã QR</button>
@@ -61,7 +68,7 @@
           <td class="text-nowrap">{{ q.created_at.strftime('%d/%m/%Y') if q.created_at else '—' }}</td>
           <td>
             <div class="d-flex gap-1 flex-wrap align-items-center">
-                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('qr_png', qr_id=q.id) }}" title="Tải ảnh PNG của mã QR này">Tải mã QR</a>
+                <a class="btn btn-outline-secondary btn-sm qr-save-picker" href="{{ url_for('qr_png', qr_id=q.id) }}" data-filename="Ma_QR_{{ q.slug }}.png" title="Tải ảnh PNG của mã QR này">Tải mã QR</a>
                 <a class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener" href="{{ url_for('public_qr', slug=q.slug, preview=1) }}">Mở thử</a>
               <button class="btn btn-outline-warning btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#qr-edit-{{ q.id }}" aria-expanded="false">{{ 'Đổi playlist đích' if q.is_playlist else 'Đổi video đích' }}</button>
               <form method="post" action="{{ url_for('delete_qr', qr_id=q.id) }}" onsubmit="return confirm('Ngừng sử dụng mã QR này? Mã đã in không còn mở học liệu; lịch sử quét và xem được giữ nguyên.');">
@@ -103,3 +110,4 @@
   </div>
 </div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='qr_save_picker.js') }}" defer></script>{% endblock %}

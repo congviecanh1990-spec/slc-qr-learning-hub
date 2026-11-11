@@ -11,6 +11,14 @@
       <select class="form-select" name="professional_group" required><option value="" selected disabled>Chọn nhóm chuyên môn</option>
         <option value="it">Công nghệ thông tin (CNTT)</option><option value="other">Khác CNTT</option>
       </select></div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-6"><label class="form-label fw-bold">Khoa sinh hoạt chuyên môn</label>
+        <input class="form-control" name="faculty_name" list="profile-faculty-options" required maxlength="255" value="{{ request.form.get('faculty_name', me.faculty_name or '') }}" placeholder="Chọn hoặc nhập tên khoa mới">
+        <datalist id="profile-faculty-options">{% for f in faculty_options %}<option value="{{ f }}"></option>{% endfor %}</datalist></div>
+      <div class="col-md-6"><label class="form-label fw-bold">Bộ môn sinh hoạt chuyên môn</label>
+        <input class="form-control" name="department_name" list="profile-department-options" required maxlength="255" value="{{ request.form.get('department_name', me.department_name or '') }}" placeholder="Chọn hoặc nhập tên bộ môn mới">
+        <datalist id="profile-department-options">{% for d in department_options %}<option value="{{ d }}"></option>{% endfor %}</datalist></div>
+    </div>
     <fieldset class="mb-3"><legend class="fs-6 fw-bold">Bạn có là giảng viên chủ nhiệm lớp không?</legend>
       <div class="form-check form-check-inline"><input class="form-check-input" type="radio" id="hr-no" name="is_homeroom" value="no" checked><label class="form-check-label" for="hr-no">Không</label></div>
       <div class="form-check form-check-inline"><input class="form-check-input" type="radio" id="hr-yes" name="is_homeroom" value="yes"><label class="form-check-label" for="hr-yes">Có</label></div>

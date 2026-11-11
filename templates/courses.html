@@ -45,8 +45,8 @@
     <form method="post" class="row g-3 align-items-end" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="col-lg-3"><label class="form-label fw-bold">Tên môn học/ mô đun</label><input class="form-control" name="course_name" required placeholder="Nhập tên môn học"></div>
-      <div class="col-lg-3"><label class="form-label fw-bold">Bộ môn quản lý môn học/ mô đun</label><input class="form-control" name="department_name" list="department-options" required placeholder="Nhập tên bộ môn"><datalist id="department-options">{% for d in department_options %}<option value="{{ d }}"></option>{% endfor %}</datalist></div>
-      <div class="col-lg-2"><label class="form-label fw-bold">Tên khoa</label><input class="form-control" name="faculty_name" list="faculty-options" required placeholder="Tên khoa"><datalist id="faculty-options">{% for f in faculty_options %}<option value="{{ f }}"></option>{% endfor %}</datalist></div>
+      <div class="col-lg-3"><label class="form-label fw-bold">Bộ môn quản lý môn học/ mô đun</label><input class="form-control" name="department_name" list="department-options" required value="{{ me.department_name or '' }}" maxlength="255" placeholder="Chọn hoặc nhập bộ môn"><datalist id="department-options">{% for d in department_options %}<option value="{{ d }}"></option>{% endfor %}</datalist></div>
+      <div class="col-lg-2"><label class="form-label fw-bold">Khoa QL bộ môn</label><input class="form-control" name="faculty_name" list="faculty-options" required value="{{ me.faculty_name or '' }}" maxlength="255" placeholder="Chọn hoặc nhập khoa"><datalist id="faculty-options">{% for f in faculty_options %}<option value="{{ f }}"></option>{% endfor %}</datalist></div>
       <div class="col-lg-3"><label class="form-label fw-bold">Lớp áp dụng</label>
         <div class="dropdown"><button type="button" class="btn btn-outline-secondary dropdown-toggle w-100 text-start" data-bs-toggle="dropdown" data-bs-auto-close="outside">Chọn lớp áp dụng</button>
           <div class="dropdown-menu p-2 shadow" style="max-height:220px;overflow-y:auto;min-width:250px">
@@ -101,7 +101,7 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <label class="small fw-bold">Tên môn học/Mô đun</label><input class="form-control form-control-sm mb-1" name="course_name" value="{{ c.name }}" required maxlength="255">
               <label class="small fw-bold">Bộ môn</label><input class="form-control form-control-sm mb-1" name="department_name" value="{{ c.department_name or '' }}" list="department-options" required maxlength="255">
-              <label class="small fw-bold">Khoa</label><input class="form-control form-control-sm mb-2" name="faculty_name" value="{{ c.faculty_name or c.unit_name or '' }}" list="faculty-options" required maxlength="255">
+              <label class="small fw-bold">Khoa QL bộ môn</label><input class="form-control form-control-sm mb-2" name="faculty_name" value="{{ c.faculty_name or c.unit_name or '' }}" list="faculty-options" required maxlength="255">
               <button class="btn btn-primary btn-sm">Lưu thông tin</button>
             </form></details></td>
         </tr>

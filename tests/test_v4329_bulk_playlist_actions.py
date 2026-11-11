@@ -169,9 +169,9 @@ assert 'id="playlistBulkActions"' in ui
 assert 'value="{{ playlist_search }}"' in ui
 assert 'value="{{ playlist_assignment }}"' in ui
 assert 'formaction="{{ url_for(\'bulk_create_playlist_qrs_from_library\') }}"' in ui
-assert 'Gán tất cả playlist đã lọc' in ui
+assert 'Gán MH cho tất cả playlist' in ui
 assert 'Tạo QR cho tất cả playlist của môn' in ui
-assert 'playlistBulkActions' in ui and 'confirm' in ui
+assert 'playlistBulkActions' in ui and 'data-confirm-bulk' not in ui
 assert 'set_playlist_course_assignments' in (ROOT/'templates/_playlist_library_row.html').read_text()
 assert 'create_playlist_qr_from_library' in (ROOT/'templates/_playlist_library_row.html').read_text()
 print('PASS v4.3.29: all pages; server filters; no cross-user writes; additive assignment; reusing QR; no QR for empty/unusable playlists; preserved single actions.')

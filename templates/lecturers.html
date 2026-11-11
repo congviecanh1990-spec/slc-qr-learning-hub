@@ -59,9 +59,9 @@
           <td>
             <div class="d-flex flex-wrap gap-2">
               {% if u.role == 'lecturer' %}
-                <form method="post" action="{{ url_for('delete_lecturer_account', lecturer_id=u.id) }}" onsubmit="return confirm('Bạn có chắc chắn muốn xóa giảng viên {{ (u.name or u.email)|e }} khỏi Web App?') && confirm('Xác nhận lần cuối: toàn bộ dữ liệu thuộc giảng viên này như kết nối YouTube, môn học/ mô đun, QR, lượt quét/xem và dữ liệu thử nghiệm sẽ bị xóa. Thao tác này không thể hoàn tác nếu chưa có bản sao lưu.');">
+                <form method="post" action="{{ url_for('delete_lecturer_account', lecturer_id=u.id) }}" onsubmit="const email=prompt('Xóa giảng viên và toàn bộ môn, QR, thống kê liên quan; lớp/SV chỉ được giữ khi có giảng viên khác sử dụng. Hãy nhập chính xác email để xác nhận: {{ u.email|e }}'); if(email === null || email.trim().toLowerCase() !== {{ u.email|tojson }}.toLowerCase()){return false;} this.querySelector('[name=confirm_email]').value=email; return confirm('Xác nhận cuối cùng: thao tác không thể hoàn tác nếu chưa sao lưu dữ liệu.');">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button class="btn btn-sm btn-outline-danger">Xóa giảng viên</button>
+                  <input type="hidden" name="confirm_email" value=""><button class="btn btn-sm btn-outline-danger">Xóa giảng viên</button>
                 </form>
               {% else %}
                 <button class="btn btn-sm btn-outline-secondary" disabled>Tài khoản được bảo vệ</button>

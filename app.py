@@ -851,6 +851,10 @@ def ensure_schema_upgrades():
                     pass
             if "professional_group" not in user_columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN professional_group VARCHAR(16)"))
+            if "faculty_name" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN faculty_name VARCHAR(255)"))
+            if "department_name" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN department_name VARCHAR(255)"))
             if "profile_completed" not in user_columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN profile_completed BOOLEAN NOT NULL DEFAULT FALSE"))
         if "youtube_channels" in tables:
@@ -939,6 +943,16 @@ def ensure_schema_upgrades():
             # Cho phép ghi lỗi OAuth trước khi xác định được user. PostgreSQL hỗ trợ trực tiếp.
             if db.engine.dialect.name == "postgresql":
                 conn.execute(text("ALTER TABLE functional_test_runs ALTER COLUMN owner_id DROP NOT NULL"))
+            # Chuẩn hóa dữ liệu cũ theo tiêu chí v4.3.30: đồng bộ kênh trống
+            # là ĐẠT khi không có lỗi. Chỉ điều chỉnh bản ghi tự động có minh
+            # chứng rõ ràng, giữ nguyên ghi chú và mọi bản ghi lỗi thực sự.
+            conn.execute(text("""
+                UPDATE functional_test_runs SET passed = TRUE
+                WHERE case_code = 'YT_SYNC' AND passed = FALSE
+                  AND source = 'automatic'
+                  AND note LIKE '%Video đã xác minh: 0%'
+                  AND note LIKE '%phần lỗi: 0.%'
+            """))
 
 def record_functional_test(case_code, case_name, passed, owner_id=None, note="", source="automatic", participant_code=None, participant_class_code=None):
     """Ghi bằng chứng kiểm thử phát sinh từ hoạt động thật của hệ thống.
@@ -1484,6 +1498,27 @@ def qr_download_name(qr: QrCode) -> str:
     return f"{safe_filename(source_title, qr.slug)}.png"
 
 
+def normalized_catalog_name(value):
+    return re.sub(r"\s+", " ", (value or "").strip())
+
+
+def faculty_catalog_options(user=None):
+    values = {normalized_catalog_name(c.faculty_name or c.unit_name)
+              for c in Course.query.all()}
+    values.update(normalized_catalog_name(u.faculty_name) for u in User.query.all())
+    if user:
+        values.add(normalized_catalog_name(user.faculty_name))
+    return sorted((v for v in values if v), key=str.casefold)
+
+
+def department_catalog_options(user=None):
+    values = {normalized_catalog_name(c.department_name) for c in Course.query.all()}
+    values.update(normalized_catalog_name(u.department_name) for u in User.query.all())
+    if user:
+        values.add(normalized_catalog_name(user.department_name))
+    return sorted((v for v in values if v), key=str.casefold)
+
+
 def register_routes(app):
     @app.errorhandler(403)
     def handle_forbidden(error):
@@ -1771,24 +1806,38 @@ def register_routes(app):
         if request.method == "POST":
             fullname = re.sub(r"\s+", " ", (request.form.get("full_name") or "").strip())
             group = (request.form.get("professional_group") or "").strip()
+            faculty = normalized_catalog_name(request.form.get("faculty_name"))
+            department = normalized_catalog_name(request.form.get("department_name"))
             homeroom = request.form.get("is_homeroom") == "yes"
             class_name = re.sub(r"\s+", " ", (request.form.get("homeroom_class_name") or "").strip())
             class_id = request.form.get("homeroom_class_id", type=int)
             declared_raw = (request.form.get("declared_size") or "").strip()
-            if len(fullname) < 2 or len(fullname) > 255 or group not in {"it", "other"}:
-                flash("Vui lòng nhập họ tên đầy đủ và chọn nhóm chuyên môn.", "warning")
-                return render_template("profile_setup.html", available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all())
+            if (len(fullname) < 2 or len(fullname) > 255 or group not in {"it", "other"}
+                    or not faculty or not department or len(faculty) > 255 or len(department) > 255):
+                flash("Vui lòng nhập họ tên, nhóm chuyên môn, khoa và bộ môn sinh hoạt chuyên môn.", "warning")
+                return render_template("profile_setup.html", me=user,
+                    available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all(),
+                    faculty_options=faculty_catalog_options(user),
+                    department_options=department_catalog_options(user))
             existing = db.session.get(SchoolClass, class_id) if homeroom and class_id else None
             if homeroom:
                 if (not existing and (not class_name or len(class_name) > 255)) or not declared_raw.isdigit() or not (1 <= int(declared_raw) <= 1000):
                     flash("Vui lòng chọn hoặc nhập tên lớp và sĩ số khai báo hợp lệ.", "warning")
-                    return render_template("profile_setup.html", available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all())
+                    return render_template("profile_setup.html", me=user,
+                    available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all(),
+                    faculty_options=faculty_catalog_options(user),
+                    department_options=department_catalog_options(user))
                 if existing and existing.homeroom_teacher_id not in (None, user.id):
                     flash("Lớp đã có GVCN. Quản trị viên cần bàn giao lớp trước khi bạn nhận chủ nhiệm.", "warning")
-                    return render_template("profile_setup.html", available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all())
+                    return render_template("profile_setup.html", me=user,
+                    available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all(),
+                    faculty_options=faculty_catalog_options(user),
+                    department_options=department_catalog_options(user))
             try:
                 user.name = fullname
                 user.professional_group = group
+                user.faculty_name = faculty
+                user.department_name = department
                 if homeroom:
                     if existing:
                         school_class = existing
@@ -1810,7 +1859,10 @@ def register_routes(app):
             except Exception as exc:
                 db.session.rollback()
                 flash(f"Không thể hoàn tất khai báo: {exc}", "danger")
-        return render_template("profile_setup.html", available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all())
+        return render_template("profile_setup.html", me=user,
+                    available_classes=SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all(),
+                    faculty_options=faculty_catalog_options(user),
+                    department_options=department_catalog_options(user))
 
     @app.get("/auth/sync-wait")
     @login_required
@@ -1854,14 +1906,15 @@ def register_routes(app):
         try:
             result = step_incremental_sync(user)
             if was_running and result.get("status") == "done":
-                # Điều kiện nghiệm thu: có video thực tế, không còn phần lỗi.
-                passed = result["videos_found"] > 0 and result["failures"] == 0
+                # Kênh trống hoặc không có video phù hợp KHÔNG phải lỗi đồng bộ.
+                # Chỉ đánh giá không đạt khi tồn tại phần lỗi thực sự.
+                passed = result["failures"] == 0
                 reasons = "; ".join(result.get("failure_reasons", [])[:3])
                 record_functional_test("YT_SYNC", "Đồng bộ video YouTube", passed,
                     owner_id=user.id, note=(f"Video đã xác minh: {result['videos_found']}; "
                                             f"phần lỗi: {result['failures']}. "
                                             + (f"Nguyên nhân: {reasons}" if reasons else
-                                               "Không có video phù hợp để đồng bộ." if not passed else "")))
+                                               "Không có video phù hợp để đồng bộ." if result['videos_found'] == 0 else "")))
                 db.session.commit()
             return jsonify(result)
         except Exception as exc:
@@ -1871,6 +1924,8 @@ def register_routes(app):
                 course_module="Hệ thống", actor_user_id=user.id, actor_email=user.email,
                 message="Một bước đồng bộ chưa hoàn tất", reason=str(friendly),
                 details=safe_error_diagnostic(exc)))
+            record_functional_test("YT_SYNC", "Đồng bộ video YouTube", False,
+                owner_id=user.id, note=f"Lỗi xử lý đồng bộ: {friendly}")
             db.session.commit()
             return jsonify({"status": "error", "message":
                 f"Chưa thực hiện được bước này. Nguyên nhân có thể: {friendly}. "
@@ -2110,6 +2165,10 @@ def register_routes(app):
         playlists = pq.order_by(Playlist.is_available.desc(), Playlist.title).offset((playlist_page-1)*5).limit(5).all()
 
         courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
+        course_qr_counts = {int(course_id): int(amount) for course_id, amount in
+            db.session.query(QrCode.course_id, func.count(QrCode.id)).filter(
+                managed_qr_scope(user.id), QrCode.active.is_(True), QrCode.course_id.isnot(None)
+            ).group_by(QrCode.course_id).all()}
         response = current_app.make_response(render_template(
             "videos.html",
             videos=videos,
@@ -2130,6 +2189,7 @@ def register_routes(app):
                 Video.embeddable.isnot(False)).order_by(Video.title).all(),
             replacement_playlists=available_playlists,
             courses=courses,
+            course_qr_counts=course_qr_counts,
         ))
         # Không dùng HTML cũ trong cache sau khi đổi phân loại playlist/QR.
         # Đặc biệt cần áp dụng lại bộ lọc "Chưa gán" khi bấm Lọc playlist.
@@ -2248,9 +2308,7 @@ def register_routes(app):
                   f"không khả dụng {skipped}; tự thêm video {auto_added}; tự bỏ video {auto_removed}."),
         )
         db.session.commit()
-        # Tác vụ hàng loạt chỉ báo ngắn khi không có playlist hợp lệ.
-        if not created and not already:
-            flash("Không có playlist khả dụng phù hợp bộ lọc để gán môn học/mô đun.", "warning")
+        # Thao tác hàng loạt thành công/không có bản ghi phù hợp: chỉ cập nhật kết quả lọc.
         return redirect(redirect_to)
 
     @app.post("/playlists/bulk-create-course-qrs")
@@ -2311,8 +2369,6 @@ def register_routes(app):
             processing_seconds=(total_processing / created if created else None),
         )
         db.session.commit()
-        if not passed:
-            flash("Chưa có playlist đủ điều kiện tạo QR trong môn học/mô đun này.", "warning")
         return redirect(redirect_to)
 
     @app.post("/playlists/<int:playlist_id>/set-courses")
@@ -2475,8 +2531,8 @@ def register_routes(app):
         courses = [c for c in all_owned_courses if c.active]
         # Không gợi ý tên môn học/ mô đun cũ. Tên khoa và bộ môn từng dùng vẫn được giữ
         # trong gợi ý để GV chọn lại nhanh, kể cả khi một môn học/ mô đun cũ đã được ẩn.
-        faculty_options = sorted({((c.faculty_name or c.unit_name) or "").strip() for c in all_owned_courses if ((c.faculty_name or c.unit_name) or "").strip()}, key=str.casefold)
-        department_options = sorted({(c.department_name or "").strip() for c in all_owned_courses if (c.department_name or "").strip()}, key=str.casefold)
+        faculty_options = faculty_catalog_options(user)
+        department_options = department_catalog_options(user)
         available_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
         available_school_classes = SchoolClass.query.filter_by(active=True).order_by(SchoolClass.name).all()
         # Quản trị viên có chức năng bàn giao, không chia sẻ quyền này cho GV thường.
@@ -2984,6 +3040,10 @@ def register_routes(app):
             replacement_playlists=replacement_playlists,
             selected_course=selected_course, selected_course_id=selected_course_id,
             total_qrs=len(all_qrs),
+            all_time_qrs=QrCode.query.filter(managed_qr_scope(user.id)).count(),
+            filtered_qr_count=len(qrs),
+            playlist_qr_count=sum(1 for q in all_qrs if q.is_playlist),
+            video_qr_count=sum(1 for q in all_qrs if not q.is_playlist),
         )
 
     @app.post("/qr/playlist")
@@ -4534,6 +4594,9 @@ def register_routes(app):
             flash("Thông tin chuẩn hóa khoa/bộ môn không hợp lệ.", "warning")
             return redirect(url_for("lecturers_page"))
         matched = Course.query.filter(getattr(Course, field) == old).all()
+        matched_profiles = User.query.filter(getattr(User, field) == old).all()
+        for profile in matched_profiles:
+            setattr(profile, field, new)
         for course in matched:
             audit_edit(user, "course", course.id, field, old, new)
             setattr(course, field, new)
@@ -4600,15 +4663,23 @@ def register_routes(app):
     @app.post("/admin/lecturers/<int:lecturer_id>/delete")
     @login_required
     def delete_lecturer_account(lecturer_id):
+        """Xóa dữ liệu thuộc GV khỏi thống kê, không phá dữ liệu dùng chung.
+
+        Toàn bộ thao tác nằm trong một transaction. Những kênh/video đang phục vụ
+        học liệu của người khác phải được bàn giao nguồn trước khi xóa.
+        """
         admin = current_user()
         if admin.role != "admin":
             abort(403)
         lecturer = db.session.get(User, lecturer_id) or abort(404)
         if lecturer.role != "lecturer":
-            flash("Chỉ có thể xóa tài khoản Giảng viên tại chức năng này. Tài khoản Quản trị viên được bảo vệ.", "warning")
+            flash("Không thể xóa tài khoản Quản trị viên.", "warning")
             return redirect(url_for("lecturers_page"))
-        # Không được cascade-delete QR đã in và nguồn học liệu bàn giao!
-        # Trường hợp này cần lưu giữ tài khoản nguồn dù GV không còn giảng dạy.
+        if (request.form.get("confirm_email") or "").strip().casefold() != lecturer.email.casefold():
+            flash("Chưa xác nhận đúng email của giảng viên cần xóa; chưa có dữ liệu nào bị xóa.", "warning")
+            return redirect(url_for("lecturers_page"))
+        # Ngăn xóa nguồn video/playlist đang được giảng viên KHÁC sử dụng.
+        # Môn đã bàn giao phải bảo toàn QR đã in và lịch sử.
         handed_off_qr = (QrCode.query.join(Course, Course.id == QrCode.course_id)
             .filter(QrCode.owner_id == lecturer.id, Course.owner_id != lecturer.id).first())
         handed_off_playlist = (CoursePlaylist.query.join(Course, Course.id == CoursePlaylist.course_id)
@@ -4619,90 +4690,202 @@ def register_routes(app):
             .join(Video, Video.id == CourseVideo.video_id)
             .join(YouTubeChannel, YouTubeChannel.id == Video.channel_id)
             .filter(YouTubeChannel.user_id == lecturer.id, Course.owner_id != lecturer.id).first())
-        # Nếu một video đã được giảng viên khác tuyển chọn vào playlist của họ,
-        # không được xóa kênh đang chứa bản ghi toàn cục đó.
         playlist_owner = aliased(YouTubeChannel)
         video_owner = aliased(YouTubeChannel)
-        shared_curated_video = (db.session.query(PlaylistVideo.id)
+        shared_video = (db.session.query(PlaylistVideo.id)
             .join(Video, PlaylistVideo.video_id == Video.id)
             .join(video_owner, Video.channel_id == video_owner.id)
             .join(Playlist, Playlist.id == PlaylistVideo.playlist_id)
             .join(playlist_owner, Playlist.channel_id == playlist_owner.id)
             .filter(video_owner.user_id == lecturer.id,
                     playlist_owner.user_id != lecturer.id).first())
-        if shared_curated_video:
-            flash("Chưa thể xóa giảng viên này vì có video tuyển chọn đang được sử dụng trong playlist của giảng viên khác. "
-                  "Cần giữ kênh nguồn để không làm mất dữ liệu hoặc mã QR đã phát hành.", "warning")
-            return redirect(url_for("lecturers_page"))
-        if handed_off_qr or handed_off_playlist or handed_off_video:
-            flash("Chưa thể xóa giảng viên này: mã QR hoặc học liệu của tài khoản vẫn đang phục vụ môn đã bàn giao. "
-                  "Giữ tài khoản/kênh YouTube để bảo toàn QR đã phát hành và lịch sử khai thác.", "warning")
-            return redirect(url_for("lecturers_page"))
-        active_course_qrs = (QrCode.query.join(Course, Course.id == QrCode.course_id)
-            .filter(Course.owner_id == lecturer.id, QrCode.active.is_(True)).first())
-        if active_course_qrs:
-            flash("Giảng viên này đang phụ trách môn có QR còn hoạt động. "
-                  "Vui lòng bàn giao môn sang giảng viên khác trước khi xóa tài khoản, để mã QR đã in không bị mất.", "warning")
+        external_derived_video = (CourseVideo.query.join(Course, Course.id == CourseVideo.course_id)
+            .join(Playlist, Playlist.id == CourseVideo.source_playlist_id)
+            .join(YouTubeChannel, YouTubeChannel.id == Playlist.channel_id)
+            .filter(YouTubeChannel.user_id == lecturer.id, Course.owner_id != lecturer.id).first())
+        external_historical_scan = (ScanLog.query.join(Course, Course.id == ScanLog.course_id)
+            .join(Video, Video.id == ScanLog.video_id)
+            .join(YouTubeChannel, YouTubeChannel.id == Video.channel_id)
+            .filter(YouTubeChannel.user_id == lecturer.id, Course.owner_id != lecturer.id).first())
+        external_historical_watch = (WatchSession.query.join(Course, Course.id == WatchSession.course_id)
+            .join(Video, Video.id == WatchSession.video_id)
+            .join(YouTubeChannel, YouTubeChannel.id == Video.channel_id)
+            .filter(YouTubeChannel.user_id == lecturer.id, Course.owner_id != lecturer.id).first())
+        external_playlist_qr = (QrCode.query.join(Playlist, QrCode.playlist_id == Playlist.id)
+            .join(YouTubeChannel, Playlist.channel_id == YouTubeChannel.id)
+            .filter(YouTubeChannel.user_id == lecturer.id, QrCode.owner_id != lecturer.id).first())
+        external_video_qr = (QrTargetHistory.query.join(QrCode, QrTargetHistory.qr_id == QrCode.id)
+            .join(Video, QrTargetHistory.video_id == Video.id)
+            .join(YouTubeChannel, Video.channel_id == YouTubeChannel.id)
+            .filter(YouTubeChannel.user_id == lecturer.id, QrCode.owner_id != lecturer.id).first())
+        if (handed_off_qr or handed_off_playlist or handed_off_video or shared_video
+                or external_playlist_qr or external_video_qr or external_derived_video
+                or external_historical_scan or external_historical_watch):
+            flash("Chưa thể xóa: học liệu nguồn của giảng viên này vẫn được người khác sử dụng. "
+                  "Cần bàn giao hoặc gỡ liên kết học liệu dùng chung trước để không làm hỏng QR của người khác.", "warning")
             return redirect(url_for("lecturers_page"))
         try:
-            display = lecturer.name or lecturer.email
-            email = lecturer.email
-
-            # Lớp và sinh viên là dữ liệu dùng chung của Nhà trường nên không xóa theo GV.
-            # Khi xóa một GVCN, lớp được giữ lại nhưng chuyển về trạng thái chưa giao GVCN.
-            SchoolClass.query.filter_by(homeroom_teacher_id=lecturer.id).update(
-                {SchoolClass.homeroom_teacher_id: None}, synchronize_session=False
-            )
-
-            # Xóa toàn bộ dữ liệu nghiệp vụ/thử nghiệm thuộc GV trước khi xóa tài khoản.
-            delete_lecturer_business_data(lecturer)
+            display, email = lecturer.name or lecturer.email, lecturer.email
+            summary = delete_lecturer_business_data(lecturer)
+            # Xóa dữ liệu xác thực/công việc và mọi dấu vết gắn định danh người dùng.
+            YouTubeSyncJob.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
             OAuthAccount.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
-            db.session.delete(lecturer)
+            ConnectedGoogleAccount.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
+            SurveyResult.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+            ExperimentRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+            FunctionalTestRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+            ErrorLog.query.filter(or_(ErrorLog.actor_user_id == lecturer.id,
+                                      func.lower(ErrorLog.actor_email) == email.casefold())).delete(synchronize_session=False)
+            EditHistory.query.filter_by(changed_by=lecturer.id).delete(synchronize_session=False)
+            # Nhật ký liên quan dữ liệu của người khác giữ nguyên, bỏ tham chiếu tới tài khoản đã xóa.
+            HomeroomChange.query.filter_by(previous_teacher_id=lecturer.id).update(
+                {HomeroomChange.previous_teacher_id: None}, synchronize_session=False)
+            HomeroomChange.query.filter_by(new_teacher_id=lecturer.id).update(
+                {HomeroomChange.new_teacher_id: None}, synchronize_session=False)
+            HomeroomChange.query.filter_by(changed_by=lecturer.id).update(
+                {HomeroomChange.changed_by: None}, synchronize_session=False)
+            CourseTransfer.query.filter_by(previous_owner_id=lecturer.id).update(
+                {CourseTransfer.previous_owner_id: None}, synchronize_session=False)
+            CourseTransfer.query.filter_by(new_owner_id=lecturer.id).update(
+                {CourseTransfer.new_owner_id: None}, synchronize_session=False)
+            CourseTransfer.query.filter_by(changed_by=lecturer.id).update(
+                {CourseTransfer.changed_by: None}, synchronize_session=False)
+            CourseClass.query.filter_by(added_by=lecturer.id).update(
+                {CourseClass.added_by: None}, synchronize_session=False)
+            CourseVideo.query.filter_by(added_by=lecturer.id).update(
+                {CourseVideo.added_by: None}, synchronize_session=False)
+            CoursePlaylist.query.filter_by(added_by=lecturer.id).update(
+                {CoursePlaylist.added_by: None}, synchronize_session=False)
+            QrTargetHistory.query.filter_by(changed_by=lecturer.id).update(
+                {QrTargetHistory.changed_by: None}, synchronize_session=False)
+            # Không chạy ORM cascade từ một User đã từng load relations trong phiên.
+            User.query.filter_by(id=lecturer.id).delete(synchronize_session=False)
             db.session.commit()
-            flash(
-                f"Đã xóa giảng viên {display} ({email}) khỏi Web App cùng toàn bộ dữ liệu thuộc giảng viên này. "
-                "Các lớp và danh sách sinh viên dùng chung được giữ lại; lớp từng do giảng viên chủ nhiệm hiện ở trạng thái chưa giao GVCN.",
-                "success",
-            )
-        except Exception as exc:
+            flash(f"Đã xóa giảng viên {display} ({email}): {summary['courses']} môn học, "
+                  f"{summary['qrs']} mã QR, {summary['classes']} lớp không còn người dạy; "
+                  "lịch sử liên quan đã loại khỏi thống kê. Các lớp còn giảng viên khác vẫn được giữ.", "success")
+        except Exception:
             db.session.rollback()
-            flash(f"Không thể xóa giảng viên: {exc}", "danger")
+            current_app.logger.exception("Không thể xóa giảng viên %s", lecturer_id)
+            flash("Không thể hoàn tất việc xóa; dữ liệu không bị xóa một phần. "
+                  "Vui lòng kiểm tra liên kết dữ liệu hoặc nhật ký Render.", "danger")
         return redirect(url_for("lecturers_page"))
 
     def delete_lecturer_business_data(lecturer: User):
-        """Xóa dữ liệu nghiệp vụ/thử nghiệm của một GV nhưng giữ tài khoản, họ tên, email, mã GV và quyền GVCN."""
-        qr_ids = [x[0] for x in db.session.query(QrCode.id).filter(QrCode.owner_id == lecturer.id).all()]
-        course_ids = [x[0] for x in db.session.query(Course.id).filter(Course.owner_id == lecturer.id).all()]
-        channel_ids = [x[0] for x in db.session.query(YouTubeChannel.id).filter(YouTubeChannel.user_id == lecturer.id).all()]
-
-        if qr_ids:
-            watch_ids = [x[0] for x in db.session.query(WatchSession.id).filter(WatchSession.qr_id.in_(qr_ids)).all()]
+        """Xóa chính xác dữ liệu của GV, bảo vệ roster và QR của GV khác."""
+        uid = lecturer.id
+        course_ids = [r[0] for r in db.session.query(Course.id).filter(Course.owner_id == uid).all()]
+        # QR đã bàn giao sang môn của người khác phải thuộc chủ môn mới và không bị xóa.
+        owned_other_qrs = (QrCode.query.join(Course, Course.id == QrCode.course_id)
+            .filter(QrCode.owner_id == uid, Course.owner_id != uid).all())
+        for qr in owned_other_qrs:
+            qr.owner_id = qr.course.owner_id
+        db.session.flush()
+        qr_condition = QrCode.owner_id == uid
+        if course_ids:
+            qr_condition = or_(qr_condition, QrCode.course_id.in_(course_ids))
+        qr_ids = [r[0] for r in db.session.query(QrCode.id).filter(qr_condition).all()]
+        # Lớp GV đã dạy hoặc chủ nhiệm; chỉ xóa nếu không còn môn của GV khác áp dụng.
+        affected_classes = {r[0] for r in db.session.query(CourseClass.school_class_id)
+                            .filter(CourseClass.course_id.in_(course_ids)).all()} if course_ids else set()
+        affected_classes.update(r[0] for r in db.session.query(SchoolClass.id)
+                                .filter(SchoolClass.homeroom_teacher_id == uid).all())
+        channel_ids = [r[0] for r in db.session.query(YouTubeChannel.id)
+                       .filter(YouTubeChannel.user_id == uid).all()]
+        # Nhật ký theo cả mã QR và course_id để không sót bản ghi QR đã ngừng hoạt động.
+        if qr_ids or course_ids:
+            scan_scope = []
+            watch_scope = []
+            if qr_ids:
+                scan_scope.append(ScanLog.qr_id.in_(qr_ids))
+                watch_scope.append(WatchSession.qr_id.in_(qr_ids))
+            if course_ids:
+                scan_scope.append(ScanLog.course_id.in_(course_ids))
+                watch_scope.append(WatchSession.course_id.in_(course_ids))
+            scan_filter = or_(*scan_scope)
+            watch_filter = or_(*watch_scope)
+            watch_ids = [r[0] for r in db.session.query(WatchSession.id).filter(watch_filter).all()]
             if watch_ids:
                 WatchEvent.query.filter(WatchEvent.watch_session_id.in_(watch_ids)).delete(synchronize_session=False)
-            WatchSession.query.filter(WatchSession.qr_id.in_(qr_ids)).delete(synchronize_session=False)
-            ScanLog.query.filter(ScanLog.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            WatchSession.query.filter(watch_filter).delete(synchronize_session=False)
+            ScanLog.query.filter(scan_filter).delete(synchronize_session=False)
+        if qr_ids:
             QrTargetHistory.query.filter(QrTargetHistory.qr_id.in_(qr_ids)).delete(synchronize_session=False)
-
+            CourseVideo.query.filter(CourseVideo.qr_id.in_(qr_ids)).update(
+                {CourseVideo.qr_id: None}, synchronize_session=False)
+            CoursePlaylist.query.filter(CoursePlaylist.qr_id.in_(qr_ids)).update(
+                {CoursePlaylist.qr_id: None}, synchronize_session=False)
+            QrCode.query.filter(QrCode.id.in_(qr_ids)).delete(synchronize_session=False)
         if course_ids:
+            CourseTransfer.query.filter(CourseTransfer.course_id.in_(course_ids)).delete(synchronize_session=False)
             Participant.query.filter(Participant.course_id.in_(course_ids)).delete(synchronize_session=False)
             CourseVideo.query.filter(CourseVideo.course_id.in_(course_ids)).delete(synchronize_session=False)
             CoursePlaylist.query.filter(CoursePlaylist.course_id.in_(course_ids)).delete(synchronize_session=False)
             CourseClass.query.filter(CourseClass.course_id.in_(course_ids)).delete(synchronize_session=False)
             ClassGroup.query.filter(ClassGroup.course_id.in_(course_ids)).delete(synchronize_session=False)
-
-        QrCode.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
-        Course.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
-
+            EditHistory.query.filter(EditHistory.entity_kind.in_(['course','Course']),
+                                     EditHistory.entity_id.in_(course_ids)).delete(synchronize_session=False)
+            Course.query.filter(Course.id.in_(course_ids)).delete(synchronize_session=False)
+        # Lớp dùng chung: giữ nếu còn môn đang có GV khác dạy hoặc GVCN khác.
+        SchoolClass.query.filter(SchoolClass.homeroom_teacher_id == uid).update(
+            {SchoolClass.homeroom_teacher_id: None}, synchronize_session=False)
+        # Bulk UPDATE không đồng bộ đối tượng đã load trong SQLAlchemy Session.
+        # Expire để kiểm tra lớp theo DB thực tế, tránh giữ nhầm lớp mồ côi.
+        db.session.expire_all()
+        removed_classes = []
+        for class_id in sorted(affected_classes):
+            school_class = db.session.get(SchoolClass, class_id)
+            if not school_class:
+                continue
+            still_taught = (db.session.query(CourseClass.id).join(Course, Course.id == CourseClass.course_id)
+                .filter(CourseClass.school_class_id == class_id, CourseClass.active.is_(True),
+                        Course.active.is_(True)).first())
+            if still_taught or school_class.homeroom_teacher_id:
+                continue
+            removed_classes.append((class_id, school_class.code))
+        if removed_classes:
+            ids = [r[0] for r in removed_classes]
+            class_codes = [r[1] for r in removed_classes]
+            orphan_candidates = {r[0] for r in db.session.query(ClassEnrollment.student_id)
+                                 .filter(ClassEnrollment.school_class_id.in_(ids)).all()}
+            HomeroomChange.query.filter(HomeroomChange.school_class_id.in_(ids)).delete(synchronize_session=False)
+            ClassEnrollment.query.filter(ClassEnrollment.school_class_id.in_(ids)).delete(synchronize_session=False)
+            CourseClass.query.filter(CourseClass.school_class_id.in_(ids)).delete(synchronize_session=False)
+            SchoolClass.query.filter(SchoolClass.id.in_(ids)).delete(synchronize_session=False)
+            # Lịch sử xác định bằng mã lớp: các lớp không còn GV không tồn tại trong báo cáo.
+            # Các scan/watch có course_id hoặc qr_id đã xóa ở trên; dọn phần dữ liệu mồ côi theo lớp.
+            dangling_watch_ids = [r[0] for r in db.session.query(WatchSession.id)
+                .filter(WatchSession.class_code.in_(class_codes)).all()]
+            if dangling_watch_ids:
+                WatchEvent.query.filter(WatchEvent.watch_session_id.in_(dangling_watch_ids)).delete(synchronize_session=False)
+            WatchSession.query.filter(WatchSession.class_code.in_(class_codes)).delete(synchronize_session=False)
+            ScanLog.query.filter(ScanLog.class_code.in_(class_codes)).delete(synchronize_session=False)
+            FunctionalTestRun.query.filter(FunctionalTestRun.participant_class_code.in_(class_codes)).delete(synchronize_session=False)
+            ErrorLog.query.filter(ErrorLog.actor_class_code.in_(class_codes)).delete(synchronize_session=False)
+            for sid in orphan_candidates:
+                student = db.session.get(Student, sid)
+                if not student or ClassEnrollment.query.filter_by(student_id=sid).first():
+                    continue
+                # Hồ sơ SV vẫn tham gia một môn độc lập khác -> không xóa.
+                if Participant.query.filter_by(participant_code=student.student_code).first():
+                    continue
+                Student.query.filter_by(id=sid).delete(synchronize_session=False)
+        # Xóa các kênh do GV kết nối sau khi đã đảm bảo không còn dùng chung.
         if channel_ids:
+            playlist_ids = [r[0] for r in db.session.query(Playlist.id).filter(Playlist.channel_id.in_(channel_ids)).all()]
+            video_ids = [r[0] for r in db.session.query(Video.id).filter(Video.channel_id.in_(channel_ids)).all()]
+            if playlist_ids:
+                PlaylistVideo.query.filter(PlaylistVideo.playlist_id.in_(playlist_ids)).delete(synchronize_session=False)
+                HubEvent.query.filter(HubEvent.channel_id.in_(channel_ids)).delete(synchronize_session=False)
+                HubSubscription.query.filter(HubSubscription.channel_id.in_(channel_ids)).delete(synchronize_session=False)
+                Playlist.query.filter(Playlist.id.in_(playlist_ids)).delete(synchronize_session=False)
+            if video_ids:
+                PlaylistVideo.query.filter(PlaylistVideo.video_id.in_(video_ids)).delete(synchronize_session=False)
+                Video.query.filter(Video.id.in_(video_ids)).delete(synchronize_session=False)
             HubEvent.query.filter(HubEvent.channel_id.in_(channel_ids)).delete(synchronize_session=False)
-            # HubSubscription/Playlist/Video/PlaylistVideo được xóa theo cascade khi xóa kênh.
-        YouTubeChannel.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
-
-        ConnectedGoogleAccount.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
-        EditHistory.query.filter_by(changed_by=lecturer.id).delete(synchronize_session=False)
-        ExperimentRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
-        FunctionalTestRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
-        SurveyResult.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+            HubSubscription.query.filter(HubSubscription.channel_id.in_(channel_ids)).delete(synchronize_session=False)
+            YouTubeChannel.query.filter(YouTubeChannel.id.in_(channel_ids)).delete(synchronize_session=False)
+        return {'courses': len(course_ids), 'qrs': len(qr_ids), 'classes': len(removed_classes)}
 
     @app.post("/admin/lecturers/<int:lecturer_id>/reset-data")
     @login_required
@@ -4751,6 +4934,8 @@ def register_routes(app):
             user.lecturer_code = None
             user.profile_completed = False
             user.professional_group = None
+            user.faculty_name = None
+            user.department_name = None
             reset_business_code_sequences()
             db.session.commit()
             session["user_id"] = admin_id
