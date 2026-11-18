@@ -77,13 +77,8 @@
   </div>
 </div>
 
-<div class="card mt-4 shadow-sm"><div class="card-header fw-bold">Chuẩn hóa tên khoa hoặc bộ môn dùng chung</div><div class="card-body">
- <p class="small text-muted">Dùng khi danh mục có lỗi chính tả; chỉ thay đổi cách hiển thị, không đổi mã môn học hoặc dữ liệu QR.</p>
- <form method="post" action="{{ url_for('rename_shared_catalog') }}" class="row g-2 align-items-end">
- <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
- <div class="col-md-2"><label class="form-label fw-bold">Loại thông tin</label><select name="field" class="form-select"><option value="department_name">Bộ môn</option><option value="faculty_name">Khoa</option></select></div>
- <div class="col-md-4"><label class="form-label fw-bold">Tên đang lưu</label><input class="form-control" name="old_value" required></div>
- <div class="col-md-4"><label class="form-label fw-bold">Tên chính xác</label><input class="form-control" name="new_value" required></div>
- <div class="col-md-2"><button class="btn btn-primary w-100">Lưu</button></div></form></div></div>
+<div class="card mt-4 shadow-sm"><div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div><strong>Danh mục Khoa &amp; Bộ môn</strong><div class="small text-muted">Thống kê, sửa tên, hợp nhất các tên nhập trùng.</div></div>
+  <a class="btn btn-outline-primary" href="{{ url_for('organization_catalog_page') }}">Quản lý Khoa &amp; Bộ môn</a>
+</div></div>
 {% endblock %}
-

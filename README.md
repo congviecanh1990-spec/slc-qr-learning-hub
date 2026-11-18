@@ -1,3 +1,18 @@
+## v4.3.32 – Tối ưu lúc Render thức dậy và xử lý lỗi phát YouTube trên điện thoại
+
+- Một lần nâng cấp schema theo dấu mốc PostgreSQL, không chạy lại các thao tác ALTER/UPDATE lịch sử mỗi khi Render Free thức dậy.
+- Giới hạn thời gian kết nối PostgreSQL; thông báo dự phòng nếu YouTube iframe không hoạt động.
+- Không thay đổi QR đã tạo, thống kê, hay cờ đánh dấu dọn 3 lỗi duy nhất trước đây.
+- **Không thể tắt trang Render Application loading bằng code khi Web Service dùng gói Free.** Muốn bảo đảm không có cold-start do ngủ, dùng compute plan Always On.
+
+## Cập nhật v4.3.31 – Giữ lựa chọn môn học và quản lý Khoa/Bộ môn (11/11/2026)
+
+- **Kho video học liệu:** sau khi bấm “Gán MH cho tất cả playlist” hoặc “Tạo QR cho tất cả playlist của môn”, ô chọn môn học/mô đun hàng loạt tiếp tục giữ đúng môn vừa chọn. Có thể tạo và tải QR tiếp mà không phải chọn lại. Môn được khôi phục bằng tham số chuyển hướng **một lần**, được gỡ ngay khỏi URL; tải lại trang trở về mặc định. Khi tải QR thành công qua hộp chọn vị trí lưu sẽ đặt lại ô chọn, với tải mặc định đặt lại ngay khi bắt đầu tải.
+- **Quản trị viên – Khoa & Bộ môn:** trang quản lý riêng thống kê số khoa/bộ môn, số giảng viên và số môn học đang sử dụng từng tên; cho đổi tên hoặc hợp nhất tên trùng từ dữ liệu thật trên `users` và `courses`. Hợp nhất `KTCN` vào `Kỹ thuật công nghệ` sẽ loại tên thừa khỏi danh mục mà **không xóa môn, hồ sơ, QR, lịch sử**. Với tên khoa, đồng bộ cả cột tương thích `unit_name`. Có kiểm tra quyền quản trị, CSRF, xác nhận trước thay đổi và ghi lịch sử chỉnh sửa.
+- Không thay đổi PostgreSQL schema, giữ nguyên cơ chế dọn lỗi **một lần** của v4.3.28. Gói ZIP chỉ kèm hướng dẫn kiểm tra **v4.3.31** và hướng dẫn triển khai hiện hành. Chưa kiểm thử tích hợp trực tiếp trên Render Production.
+
+---
+
 ## Cập nhật v4.3.30 – QR, hồ sơ khoa/bộ môn, nghiệm thu và xóa giảng viên (11/11/2026)
 
 - **Kho video học liệu:** giữ thiết kế; đổi nút “Gán tất cả playlist đã lọc” thành **Gán MH cho tất cả playlist**, bỏ hộp xác nhận/thông báo thành công của hai thao tác gán/tạo QR hàng loạt; thêm **Tải QR đã tạo** theo môn đang chọn, tự bật khi có mã QR và tải ZIP qua chức năng hiện có.

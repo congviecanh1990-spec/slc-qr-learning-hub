@@ -416,8 +416,31 @@ function updateBulkQrDownload(){
   if(url){bulkDownload.href=url;bulkDownload.dataset.filename=option.dataset.qrFilename || 'Ma_QR_hoc_lieu.zip';bulkDownload.classList.remove('disabled');bulkDownload.removeAttribute('aria-disabled');}
   else{bulkDownload.href='#';bulkDownload.classList.add('disabled');bulkDownload.setAttribute('aria-disabled','true');}
 }
+// One-use URL marker after bulk POST. Remove before the next refresh/navigation.
+const bulkRedirectUrl = new URL(window.location.href);
+const pendingBulkCourse = bulkRedirectUrl.searchParams.get('bulk_course_id');
+if (pendingBulkCourse !== null) {
+  if (bulkCourseSelector?.querySelector(`option[value="${Number(pendingBulkCourse)}"]`)) {
+    bulkCourseSelector.value = String(Number(pendingBulkCourse));
+  }
+  bulkRedirectUrl.searchParams.delete('bulk_course_id');
+  window.history.replaceState(window.history.state, '', bulkRedirectUrl.pathname + bulkRedirectUrl.search + bulkRedirectUrl.hash);
+}
 bulkCourseSelector?.addEventListener('change', updateBulkQrDownload);
 updateBulkQrDownload();
+function resetBulkCourseAfterDownload(){
+  if (bulkCourseSelector) bulkCourseSelector.value = '';
+  updateBulkQrDownload();
+}
+// Native downloads have no reliable browser 'completed' event. Reset once
+// initiated; when the Save File Picker is available, reset only on success.
+bulkDownload?.addEventListener('click', event => {
+  if (bulkDownload.classList.contains('disabled')) return;
+  if (!(window.showSaveFilePicker && window.isSecureContext)) {
+    window.setTimeout(resetBulkCourseAfterDownload, 0);
+  }
+});
+bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownload);
 
 </script>
 <script>

@@ -38,6 +38,8 @@ class Config:
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
         "pool_recycle": 280,
+        # Tránh treo vô thời hạn lúc PostgreSQL không phản hồi trên Render.
+        "connect_args": {"connect_timeout": 12} if _db_url().startswith("postgresql+") else {},
     }
 
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")

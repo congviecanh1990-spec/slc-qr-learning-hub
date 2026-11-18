@@ -75,7 +75,8 @@ window.onYouTubeIframeAPIReady = function() {
     width: '100%', height: '100%', videoId: currentVideo().youtubeId,
     host: 'https://www.youtube-nocookie.com',
     playerVars: {playsinline: 1, rel: 0, modestbranding: 1, enablejsapi: 1},
-    events: {onReady: () => { void startWatch(); }, onStateChange}
+    events: {onReady: () => { window.SLCPlayerRecovery?.ready(); void startWatch(); },
+             onStateChange, onError: () => window.SLCPlayerRecovery?.error()}
   });
 };
 async function onStateChange(ev) {
@@ -115,6 +116,7 @@ async function selectVideo(index) {
     await closeCurrentWatch();
     currentIndex = index;
     const v = currentVideo();
+    window.SLCPlayerRecovery?.setVideo(v.youtubeId);
     document.getElementById('currentVideoTitle').textContent = v.title;
     const status = document.getElementById('learningStatus');
     if (status) status.textContent = 'Đang xác định trạng thái video đã ghi nhận…';

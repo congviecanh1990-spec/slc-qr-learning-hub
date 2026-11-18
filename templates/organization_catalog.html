@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Quản lý Khoa và Bộ môn – {{ app_name }}{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-4">
+  <div>
+    <h2 class="mb-1">Quản lý Khoa và Bộ môn</h2>
+    <p class="text-muted mb-0">Danh mục tổng hợp từ hồ sơ giảng viên và các môn học/mô đun trên toàn hệ thống.</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('lecturers_page') }}">Danh sách giảng viên</a>
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-sm-6"><div class="card shadow-sm h-100"><div class="card-body">
+    <div class="text-muted small">Số khoa</div><div class="fs-3 fw-bold">{{ catalog.faculty_name|length }}</div>
+  </div></div></div>
+  <div class="col-sm-6"><div class="card shadow-sm h-100"><div class="card-body">
+    <div class="text-muted small">Số bộ môn</div><div class="fs-3 fw-bold">{{ catalog.department_name|length }}</div>
+  </div></div></div>
+</div>
+<div class="alert alert-light border small" role="note">
+  <strong>Cách sử dụng:</strong> Để sửa tên nhập sai, điền tên đúng và bấm <strong>Lưu tên chuẩn</strong>.
+  Để loại bỏ tên trùng (ví dụ “KTCN”), điền tên khoa/bộ môn muốn giữ (ví dụ “Kỹ thuật công nghệ”).
+  Hệ thống sẽ chuyển mọi hồ sơ giảng viên và môn học đang tham chiếu sang tên chuẩn rồi loại tên cũ khỏi danh sách.
+  Không xóa giảng viên, môn học, mã QR hoặc lịch sử thống kê.
+</div>
+{% macro catalog_table(rows, field, heading, description, target_list) %}
+<section class="card shadow-sm mb-4" id="{{ field }}">
+  <div class="card-header bg-white"><h5 class="mb-0">{{ heading }}</h5><div class="small text-muted mt-1">{{ description }}</div></div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light"><tr>
+        <th class="text-nowrap">STT</th><th style="min-width:190px">Tên đang sử dụng</th>
+        <th class="text-center">Số giảng viên</th><th class="text-center">Số môn học</th>
+        {% if field == 'department_name' %}<th style="min-width:140px">Khoa liên quan</th>{% endif %}
+        <th style="min-width:320px">Sửa tên / hợp nhất tên trùng</th>
+      </tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td><strong>{{ row.value }}</strong></td>
+          <td class="text-center">{{ row.users_count }}</td>
+          <td class="text-center">{{ row.courses_count }}</td>
+          {% if field == 'department_name' %}<td class="small">{{ row.faculties|join(', ') if row.faculties else '—' }}</td>{% endif %}
+          <td>
+            <form method="post" action="{{ url_for('rename_shared_catalog') }}" class="d-flex flex-wrap gap-2 align-items-center catalog-merge-form"
+                  data-old-name="{{ row.value }}" data-group-label="{{ 'khoa' if field == 'faculty_name' else 'bộ môn' }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="field" value="{{ field }}">
+              <input type="hidden" name="old_value" value="{{ row.value }}">
+              <input type="text" name="new_value" class="form-control form-control-sm flex-grow-1" style="min-width:160px;max-width:290px"
+                     required maxlength="255" list="{{ target_list }}" placeholder="Tên chuẩn muốn giữ" aria-label="Tên chuẩn thay thế {{ row.value }}">
+              <button class="btn btn-primary btn-sm text-nowrap" type="submit">Lưu tên chuẩn</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="{{ 6 if field == 'department_name' else 5 }}" class="text-muted text-center py-4">Chưa có thông tin.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endmacro %}
+<datalist id="faculty-targets">{% for row in catalog.faculty_name %}<option value="{{ row.value }}"></option>{% endfor %}</datalist>
+<datalist id="department-targets">{% for row in catalog.department_name %}<option value="{{ row.value }}"></option>{% endfor %}</datalist>
+{{ catalog_table(catalog.faculty_name, 'faculty_name', '1. Danh mục khoa', 'Số giảng viên và môn học đang sử dụng từng tên khoa.', 'faculty-targets') }}
+{{ catalog_table(catalog.department_name, 'department_name', '2. Danh mục bộ môn', 'Số giảng viên, môn học và khoa liên quan đến từng bộ môn.', 'department-targets') }}
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('.catalog-merge-form').forEach(form => {
+  form.addEventListener('submit', event => {
+    const oldName = form.dataset.oldName || '';
+    const newName = form.querySelector('[name=new_value]').value.trim();
+    if (!newName) { event.preventDefault(); return; }
+    const kind = form.dataset.groupLabel || 'danh mục';
+    if (!window.confirm(`Cập nhật ${kind} “${oldName}” thành “${newName}” trên toàn hệ thống? Nếu tên mới đã tồn tại, hai dòng sẽ được hợp nhất; không xóa môn học hoặc giảng viên.`)) {
+      event.preventDefault();
+    }
+  });
+});
+</script>
+{% endblock %}

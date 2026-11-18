@@ -75,7 +75,8 @@ window.onYouTubeIframeAPIReady = function() {
     width: '100%', height: '100%', videoId: cfg.videoId,
     host: 'https://www.youtube-nocookie.com',
     playerVars: {playsinline: 1, rel: 0, modestbranding: 1, enablejsapi: 1},
-    events: {onReady: () => { void startWatch(); }, onStateChange}
+    events: {onReady: () => { window.SLCPlayerRecovery?.ready(); void startWatch(); },
+             onStateChange, onError: () => window.SLCPlayerRecovery?.error()}
   });
 };
 async function onStateChange(ev) {

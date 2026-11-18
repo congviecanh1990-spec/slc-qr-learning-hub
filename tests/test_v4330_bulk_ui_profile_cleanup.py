@@ -11,7 +11,7 @@ from sqlalchemy import event
 from jinja2 import Environment, FileSystemLoader
 
 ROOT=Path(__file__).resolve().parents[1]
-assert (ROOT/'VERSION.txt').read_text().strip()=='4.3.30'
+assert tuple(map(int,(ROOT/'VERSION.txt').read_text().strip().split('.'))) >= (4,3,30)
 sys.path.insert(0,str(ROOT))
 
 class SQLAlchemy:

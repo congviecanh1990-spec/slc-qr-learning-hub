@@ -22,7 +22,8 @@
         throw new Error('Máy chủ chưa trả về tệp QR hợp lệ.');
       }
       const writable = await handle.createWritable();
-      try { await writable.write(await response.blob()); await writable.close(); }
+      try { await writable.write(await response.blob()); await writable.close();
+        link.dispatchEvent(new CustomEvent('qr-download-complete', {bubbles:true})); }
       catch (err) { try { await writable.abort(); } catch(_) {} throw err; }
     } catch (err) {
       if (err?.name === 'AbortError') return;

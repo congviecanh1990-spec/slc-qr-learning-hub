@@ -49,6 +49,7 @@
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'lecturers' else '' }}" href="{{ url_for('lecturers_page') }}">Giảng viên</a></li>
           {% endif %}
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'courses' else '' }}" href="{{ url_for('courses_page') }}">Môn học/ mô đun</a></li>
+          {% if me.role == 'admin' %}<li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'organization' else '' }}" href="{{ url_for('organization_catalog_page') }}">Khoa &amp; Bộ môn</a></li>{% endif %}
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'teaching_classes' else '' }}" href="{{ url_for('teaching_classes_page') }}">Danh sách lớp đang dạy</a></li>
           {% if me.role == 'admin' %}<li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'class_admin' else '' }}" href="{{ url_for('classes_page') }}">Quản lý lớp</a></li>{% endif %}
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'videos' else '' }}" href="{{ url_for('videos_page') }}">Kho video học liệu</a></li>

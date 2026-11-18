@@ -28,7 +28,7 @@
       <div class="row g-3">
         <div class="col-lg-8">
           <div class="ratio ratio-16x9 player-wrap">
-            <div id="player"></div>
+            <div id="player"></div><div id="playerRecovery" class="student-player-recovery" hidden role="alert"><div class="fw-semibold mb-2">Không mở được video?</div><p id="playerRecoveryMessage" class="small mb-2"></p><div class="d-flex gap-2 flex-wrap justify-content-center"><button id="playerRecoveryRetry" type="button" class="btn btn-light btn-sm">Thử tải lại</button><a id="playerRecoveryYoutube" class="btn btn-outline-light btn-sm" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer">Mở trên YouTube</a></div><div class="small mt-2">Nếu mở ngoài Web App, hệ thống không ghi nhận thời lượng xem và trạng thái hoàn thành của lần xem đó.</div></div>
             <div id="endedOverlay" class="ended-overlay">
               <div><div class="display-6">✓</div><h3>Đã hoàn thành video</h3><p>Bạn có thể chọn video tiếp theo trong playlist hoặc xem lại video này.</p><button class="btn btn-light" onclick="replayVideo()">Xem lại video</button></div>
             </div>
@@ -71,6 +71,6 @@ window.SLC_PLAYLIST_VIEWER={
 };
 </script>
 <script src="https://www.youtube.com/iframe_api"></script>
-<script src="{{ url_for('static', filename='playlist_viewer.js') }}"></script>
+<script src="{{ url_for('static', filename='student_player_recovery.js') }}"></script><script src="{{ url_for('static', filename='playlist_viewer.js') }}"></script>
 </body>
 </html>

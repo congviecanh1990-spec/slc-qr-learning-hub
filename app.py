@@ -41,6 +41,7 @@ from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, s
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
 from services.websub import subscribe_channel, verify_callback, parse_notification
 from services.one_time_maintenance import cleanup_initial_three_error_logs_once
+from services.startup import prepare_database_once
 
 csrf = CSRFProtect()
 oauth = OAuth()
@@ -818,14 +819,12 @@ def create_app():
 
     with app.app_context():
         if app.config["AUTO_CREATE_DB"]:
-            db.create_all()
-            ensure_schema_upgrades()
-            migrate_legacy_classes()
-            # v4.3.28: thao tác dọn 3 lỗi cũ duy nhất, có dấu mốc bền vững.
-            # Chỉ xóa nếu bảng error_logs có đúng 3 dòng tại lần triển khai đầu.
-            # Các lần khởi động sau hoàn toàn không xóa lỗi; không liên quan QR,
-            # watch_sessions hoặc functional_test_runs.
-            cleanup_initial_three_error_logs_once(db.engine)
+            # v4.3.32: tránh chạy lại toàn bộ ALTER/UPDATE và duyệt lớp cũ
+            # mỗi khi máy chủ Render Free thức dậy. Marker nằm trên PostgreSQL.
+            # Vẫn giữ nguyên cơ chế dọn lỗi 1 lần của v4.3.28.
+            prepare_database_once(db, ensure_schema_upgrades,
+                                  migrate_legacy_classes,
+                                  cleanup_initial_three_error_logs_once)
 
     return app
 
@@ -1194,6 +1193,18 @@ def videos_library_return(anchor: str, raw_query: str = "") -> str:
     return target + "#" + anchor
 
 
+def videos_library_return_with_bulk_course(raw_query: str, course_id: int) -> str:
+    """Preserve bulk course exactly across POST/redirect, not across manual refresh.
+
+    The browser immediately removes this one-use parameter from history after
+    restoring the dropdown. This is intentionally NOT a persistent session value.
+    """
+    target = videos_library_return("playlists", raw_query)
+    path_query, hashmark, fragment = target.partition("#")
+    separator = "&" if "?" in path_query else "?"
+    return f"{path_query}{separator}bulk_course_id={int(course_id)}{hashmark}{fragment}"
+
+
 def filtered_library_playlist_query(user: User, playlist_search: str = "", playlist_assignment: str = ""):
     """Cùng một phạm vi lọc cho danh sách playlist và nút gán hàng loạt.
 
@@ -1519,6 +1530,91 @@ def department_catalog_options(user=None):
     return sorted((v for v in values if v), key=str.casefold)
 
 
+def catalog_admin_statistics():
+    """Organization names are values in User/Course, not independent rows.
+
+    Aggregate every stored value once per record, including inactive courses,
+    so a merge never leaves a hidden old label that returns later.
+    """
+    catalog = {"faculty_name": {}, "department_name": {}}
+    for profile in User.query.all():
+        for field in catalog:
+            value = normalized_catalog_name(getattr(profile, field))
+            if not value:
+                continue
+            key = value.casefold()
+            row = catalog[field].setdefault(key, {"value": value, "users": set(),
+                                                   "courses": set(), "faculties": set()})
+            row["users"].add(profile.id)
+    for course in Course.query.all():
+        for field in catalog:
+            value = normalized_catalog_name((course.faculty_name or course.unit_name)
+                                           if field == "faculty_name" else course.department_name)
+            if not value:
+                continue
+            key = value.casefold()
+            row = catalog[field].setdefault(key, {"value": value, "users": set(),
+                                                   "courses": set(), "faculties": set()})
+            row["courses"].add(course.id)
+            if field == "department_name":
+                faculty = normalized_catalog_name(course.faculty_name or course.unit_name)
+                if faculty:
+                    row["faculties"].add(faculty)
+    out = {}
+    for field, values in catalog.items():
+        out[field] = sorted(({
+            "value": row["value"], "users_count": len(row["users"]),
+            "courses_count": len(row["courses"]),
+            "faculties": sorted(row["faculties"], key=str.casefold),
+        } for row in values.values()), key=lambda x: x["value"].casefold())
+    return out
+
+
+def apply_catalog_name_change(actor: User, field: str, old: str, new: str):
+    """Rename or merge a shared label, never delete dependent users/courses.
+
+    Work on all records, not just active ones. Synchronize legacy unit_name.
+    Caller commits as one transaction after successful update.
+    """
+    old_key = normalized_catalog_name(old).casefold()
+    target = normalized_catalog_name(new)
+    if field not in {"department_name", "faculty_name"} or not old_key or not target or len(target) > 255:
+        raise ValueError("Tên khoa hoặc bộ môn không hợp lệ.")
+    count_users = count_courses = 0
+    for profile in User.query.all():
+        current = getattr(profile, field) or ""
+        if normalized_catalog_name(current).casefold() == old_key and current != target:
+            audit_edit(actor, "user", profile.id, field, current, target)
+            setattr(profile, field, target)
+            count_users += 1
+    for course in Course.query.all():
+        current = ((course.faculty_name or course.unit_name) if field == "faculty_name"
+                   else course.department_name) or ""
+        if normalized_catalog_name(current).casefold() != old_key:
+            continue
+        if field == "faculty_name":
+            if course.faculty_name != target:
+                audit_edit(actor, "course", course.id, "faculty_name", course.faculty_name, target)
+            if course.unit_name != target:
+                audit_edit(actor, "course", course.id, "unit_name", course.unit_name, target)
+            course.faculty_name = target
+            course.unit_name = target
+        else:
+            if course.department_name != target:
+                audit_edit(actor, "course", course.id, field, course.department_name, target)
+            course.department_name = target
+        count_courses += 1
+    if not count_users and not count_courses:
+        # Same-label update may have identical values: valid no-op if it exists.
+        if not any(normalized_catalog_name(getattr(u, field)).casefold() == old_key
+                   for u in User.query.all()) and not any(
+            normalized_catalog_name((c.faculty_name or c.unit_name) if field == "faculty_name"
+                                    else c.department_name).casefold() == old_key
+            for c in Course.query.all()):
+            raise ValueError("Tên cần chỉnh sửa không còn trong danh mục.")
+    return count_users, count_courses
+
+
 def register_routes(app):
     @app.errorhandler(403)
     def handle_forbidden(error):
@@ -1581,11 +1677,11 @@ def register_routes(app):
             "analytics": "analytics", "export_scans": "analytics", "export_watch": "analytics",
             "classes_page": "class_admin", "my_classes_page": "homeroom", "teaching_classes_page":"teaching_classes", "create_school_class": "class_admin", "assign_homeroom_teacher": "class_admin",
             "upload_class_students": "homeroom", "add_class_student": "homeroom", "change_student_status": "homeroom", "delete_class_student": "homeroom",
-            "lecturers_page": "lecturers", "assign_lecturer_code_admin": "lecturers", "update_lecturer_professional_group": "lecturers", "delete_lecturer_account": "lecturers",
+            "lecturers_page": "lecturers", "organization_catalog_page": "organization", "assign_lecturer_code_admin": "lecturers", "update_lecturer_professional_group": "lecturers", "delete_lecturer_account": "lecturers",
             "research_page": "research",
             "error_logs_page": "errors",
             "data_management": "data_admin",
-            "update_display_name": "", "edit_student_name":"homeroom", "add_school_class_to_course":"courses", "rename_shared_catalog":"lecturers", "reset_lecturer_data": "lecturers", "profile_setup": "", "sync_wait": "",
+            "update_display_name": "", "edit_student_name":"homeroom", "add_school_class_to_course":"courses", "rename_shared_catalog":"organization", "reset_lecturer_data": "lecturers", "profile_setup": "", "sync_wait": "",
             "backup_zip": "data_admin",
             "restore_backup": "data_admin",
         }
@@ -2282,7 +2378,7 @@ def register_routes(app):
         playlist_assignment = request.form.get("p_assignment", "").strip()
         if playlist_assignment not in {"", "assigned", "unassigned"}:
             abort(400)
-        redirect_to = videos_library_return("playlists", request.form.get("return_query", ""))
+        redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
         candidates = filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()
         created = already = skipped = 0
         started = time.perf_counter()
@@ -2322,7 +2418,7 @@ def register_routes(app):
         course = db.session.get(Course, request.form.get("course_id", type=int))
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
-        redirect_to = videos_library_return("playlists", request.form.get("return_query", ""))
+        redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
         links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
         playlist_ids = [link.playlist_id for link in links]
         playable_ids = set()
@@ -4581,30 +4677,39 @@ def register_routes(app):
             survey_links=survey_links,
         )
 
+    @app.get("/admin/organization")
+    @login_required
+    def organization_catalog_page():
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        catalog = catalog_admin_statistics()
+        return render_template("organization_catalog.html", catalog=catalog)
+
     @app.post("/admin/catalog/rename")
     @login_required
     def rename_shared_catalog():
         user = current_user()
         if user.role != "admin":
             abort(403)
-        field = (request.form.get("field") or "").strip()
-        old = (request.form.get("old_value") or "").strip()
-        new = re.sub(r"\s+", " ", (request.form.get("new_value") or "").strip())
-        if field not in {"department_name", "faculty_name"} or not old or not new or len(new) > 255:
-            flash("Thông tin chuẩn hóa khoa/bộ môn không hợp lệ.", "warning")
-            return redirect(url_for("lecturers_page"))
-        matched = Course.query.filter(getattr(Course, field) == old).all()
-        matched_profiles = User.query.filter(getattr(User, field) == old).all()
-        for profile in matched_profiles:
-            setattr(profile, field, new)
-        for course in matched:
-            audit_edit(user, "course", course.id, field, old, new)
-            setattr(course, field, new)
-            if field == "faculty_name":
-                course.unit_name = new
-        db.session.commit()
-        flash(f"Đã chuẩn hóa {len(matched)} môn học/mô đun theo tên mới.", "success")
-        return redirect(url_for("lecturers_page"))
+        field = request.form.get("field", "")
+        old = request.form.get("old_value", "")
+        new = request.form.get("new_value", "")
+        try:
+            # No deletion without replacement: an alias is merged into the
+            # canonical entry by changing all referencing User/Course values.
+            changed_users, changed_courses = apply_catalog_name_change(user, field, old, new)
+            db.session.commit()
+            flash(f"Đã cập nhật {changed_users} hồ sơ giảng viên và {changed_courses} môn học/mô đun. "
+                  "Tên trùng hoặc tên sai không còn là dòng riêng trong danh mục.", "success")
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception("Admin catalog rename failed")
+            flash("Chưa thể cập nhật khoa/bộ môn. Dữ liệu cũ được giữ nguyên.", "danger")
+        return redirect(url_for("organization_catalog_page"))
 
     @app.get("/admin/lecturers")
     @login_required

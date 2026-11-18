@@ -116,3 +116,13 @@ body{background:var(--surface);color:#20242a}.card{border:0}.thumb{width:96px;he
   white-space:nowrap;font-size:.8rem;padding:.2rem .42rem
 }
 .playlist-qr-compact-actions form,.video-qr-extra > form:not(.video-qr-retarget){margin:0}
+
+/* v4.3.32: thông báo sự cố phát video không phụ thuộc Bootstrap/CDN bên ngoài. */
+.student-player-recovery[hidden] { display: none !important; }
+.student-player-recovery {
+  position: absolute; inset: 0; z-index: 30; background: #182333;
+  color: #fff; display: flex; flex-direction: column; justify-content: center;
+  align-items: center; text-align: center; padding: 1.1rem;
+  overflow: auto; font-size: .95rem;
+}
+.student-player-recovery a { text-decoration: none; }

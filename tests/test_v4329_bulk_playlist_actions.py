@@ -72,6 +72,7 @@ s.commit()
 helper_names={
  'filtered_library_playlist_query','ensure_course_playlist_link',
  'reconcile_course_videos_from_playlists','ensure_course_video_link','create_qr_for_course_playlist',
+ 'videos_library_return_with_bulk_course',
  'course_owned_by_user','videos_library_return',
 }
 route_names={'bulk_assign_filtered_library_playlists','bulk_create_playlist_qrs_from_library'}
