@@ -5,49 +5,15 @@
   <div class="fw-bold mb-1">Lưu ý khi tạo môn học/mô đun</div>
   <div><strong>Mỗi môn học/mô đun chỉ cần tạo một lần</strong> cho mỗi giảng viên. Khi dạy <strong>nhiều lớp</strong>, hãy <strong>bổ sung các lớp vào cùng môn học/mô đun</strong>; <strong>không tạo thêm môn học trùng tên</strong>.</div>
 </div>
-{% if me.role == 'admin' %}
-<div id="admin-course-transfer" class="card shadow-sm mb-4 border-primary">
-  <div class="card-header fw-bold">Bàn giao môn học/mô đun cho giảng viên khác (Quản trị viên)</div>
-  <div class="card-body">
-    <p class="small text-muted mb-3">Bàn giao có hiệu lực ngay. Giữ nguyên mã môn học, lớp áp dụng, mã QR đã in và toàn bộ lịch sử khai thác. Kênh YouTube vẫn thuộc tài khoản đã kết nối ban đầu.</p>
-    <form method="post" action="{{ url_for('transfer_course_owner') }}" class="row g-2 align-items-end" onsubmit="return confirm('Xác nhận bàn giao môn học? QR đã phát hành vẫn hoạt động và giảng viên mới sẽ tiếp nhận quyền quản lý môn/QR.');">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-lg-5"><label class="form-label fw-bold">Môn học/mô đun cần bàn giao</label>
-        <select name="course_id" class="form-select" required><option value="">-- Chọn môn học/mô đun --</option>
-          {% for c in transfer_courses %}<option value="{{ c.id }}">{{ c.name }} – {{ c.owner.name or c.owner.email }} ({{ c.code }})</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-lg-4"><label class="form-label fw-bold">Giảng viên tiếp nhận</label>
-        <select name="new_owner_id" class="form-select" required><option value="">-- Chọn giảng viên --</option>
-          {% for gv in transfer_lecturers %}<option value="{{ gv.id }}">{{ gv.name or gv.email }}{% if gv.lecturer_code %} ({{ gv.lecturer_code }}){% endif %}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-lg-3"><div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="confirm_transfer" value="yes" id="confirm-transfer" required><label class="form-check-label small" for="confirm-transfer">Giữ nguyên mã QR và lịch sử</label></div>
-        <button class="btn btn-primary w-100" type="submit">Bàn giao môn học/mô đun</button></div>
-    </form>
-    {% if transfer_history %}
-      <details class="mt-3"><summary class="fw-semibold small">Lịch sử bàn giao gần đây</summary>
-        <div class="table-responsive mt-2"><table class="table table-sm table-striped">
-          <thead><tr><th>Ngày</th><th>Môn học/mô đun</th><th>Giảng viên cũ</th><th>Giảng viên mới</th><th>Người thực hiện</th></tr></thead>
-          <tbody>{% for t in transfer_history %}<tr><td>{{ t.effective_on.strftime('%d/%m/%Y') }}</td>
-            <td>{{ t.course.name if t.course else '—' }}</td><td>{{ (t.previous_owner.name or t.previous_owner.email) if t.previous_owner else '—' }}</td>
-            <td>{{ (t.new_owner.name or t.new_owner.email) if t.new_owner else '—' }}</td>
-            <td>{{ (t.administrator.name or t.administrator.email) if t.administrator else '—' }}</td></tr>{% endfor %}</tbody>
-        </table></div>
-      </details>
-    {% endif %}
-  </div>
-</div>
-{% endif %}
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-bold">Thêm môn học/ mô đun</div>
   <div class="card-body">
-    <form method="post" class="row g-3 align-items-end" autocomplete="off">
+    <form method="post" class="row g-2 align-items-end course-create-form" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="col-lg-3"><label class="form-label fw-bold">Tên môn học/ mô đun</label><input class="form-control" name="course_name" required placeholder="Nhập tên môn học"></div>
-      <div class="col-lg-3"><label class="form-label fw-bold">Bộ môn quản lý môn học/ mô đun</label><input class="form-control" name="department_name" list="department-options" required value="{{ me.department_name or '' }}" maxlength="255" placeholder="Chọn hoặc nhập bộ môn"><datalist id="department-options">{% for d in department_options %}<option value="{{ d }}"></option>{% endfor %}</datalist></div>
-      <div class="col-lg-2"><label class="form-label fw-bold">Khoa QL bộ môn</label><input class="form-control" name="faculty_name" list="faculty-options" required value="{{ me.faculty_name or '' }}" maxlength="255" placeholder="Chọn hoặc nhập khoa"><datalist id="faculty-options">{% for f in faculty_options %}<option value="{{ f }}"></option>{% endfor %}</datalist></div>
-      <div class="col-lg-3"><label class="form-label fw-bold">Lớp áp dụng</label>
+      <div class="col-lg-2"><label class="form-label fw-bold text-nowrap">Tên môn học/ mô đun</label><input class="form-control" name="course_name" required placeholder="Nhập tên môn học"></div>
+      <div class="col-lg-2"><label class="form-label fw-bold text-nowrap">Bộ môn quản lý</label><input class="form-control" name="department_name" list="department-options" required maxlength="255" placeholder="Chọn hoặc nhập bộ môn"><datalist id="department-options">{% for d in department_options %}<option value="{{ d }}"></option>{% endfor %}</datalist></div>
+      <div class="col-lg-2"><label class="form-label fw-bold text-nowrap">Khoa QL bộ môn</label><input class="form-control" name="faculty_name" list="faculty-options" required maxlength="255" placeholder="Chọn hoặc nhập khoa"><datalist id="faculty-options">{% for f in faculty_options %}<option value="{{ f }}"></option>{% endfor %}</datalist></div>
+      <div class="col-lg-2"><label class="form-label fw-bold text-nowrap">Lớp áp dụng</label>
         <div class="dropdown"><button type="button" class="btn btn-outline-secondary dropdown-toggle w-100 text-start" data-bs-toggle="dropdown" data-bs-auto-close="outside">Chọn lớp áp dụng</button>
           <div class="dropdown-menu p-2 shadow" style="max-height:220px;overflow-y:auto;min-width:250px">
           {% for cls in available_school_classes %}<label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" name="school_class_ids" value="{{ cls.id }}">{{ cls.name }}</label>
@@ -55,7 +21,7 @@
           </div>
         </div>
       </div>
-      <div class="col-lg-3"><label class="form-label fw-bold">Hoặc thêm lớp chưa có</label><input class="form-control" name="new_class_name" maxlength="255" placeholder="Tên lớp mới (nếu chưa có)"></div>
+      <div class="col-lg-3"><label class="form-label fw-bold text-nowrap">Hoặc thêm lớp chưa có</label><input class="form-control" name="new_class_name" maxlength="255" placeholder="Tên lớp mới (nếu chưa có)"></div>
       <div class="col-lg-1"><button class="btn btn-primary w-100">Thêm</button></div>
     </form>
   </div>
@@ -64,7 +30,7 @@
   <div class="card-header fw-bold">Danh sách môn học/ mô đun đã tạo</div>
   <div class="table-responsive" style="overflow:visible">
     <table class="table table-hover align-middle mb-0">
-      <thead><tr><th>Môn học/ mô đun</th><th>Bộ môn – Khoa</th><th>Video của môn học/ mô đun</th><th>Playlist của môn học/ mô đun</th><th>Số lớp</th><th style="min-width:210px">Lớp của môn học/ mô đun</th><th>Chỉnh sửa</th></tr></thead>
+      <thead><tr><th>Môn học/ mô đun</th><th>Bộ môn – Khoa</th><th>Video của MH/MĐ</th><th>Playlist của MH/MĐ</th><th>Số lớp</th><th style="min-width:210px">Lớp của MH/MĐ</th><th>Chỉnh sửa</th>{% if me.role == 'admin' %}<th style="min-width:220px">Bàn giao cho GV khác</th>{% endif %}</tr></thead>
       <tbody>
       {% for c in courses %}
         {% set ns = namespace(video_qr=0, playlist_total=0, playlist_qr=0, class_total=0) %}
@@ -72,12 +38,12 @@
         {% for link in c.playlist_links if link.active %}{% set ns.playlist_total=ns.playlist_total+1 %}{% if link.qr_id and link.qr and link.qr.active %}{% set ns.playlist_qr=ns.playlist_qr+1 %}{% endif %}{% endfor %}
         {% for link in c.school_class_links if link.active %}{% set ns.class_total=ns.class_total+1 %}{% endfor %}
         <tr id="course-{{ c.id }}" class="library-target-row">
-          <td><strong>{{ c.name }}</strong></td><td><span class="small">{{ c.department_name or 'Chưa cập nhật' }}<br>{{ c.faculty_name or c.unit_name or 'Chưa cập nhật' }}</span></td>
+          <td><strong>{{ c.name }}</strong>{% if me.role == 'admin' %}<div class="small text-muted">GV: {{ c.owner.name or c.owner.email }}</div>{% endif %}</td><td><span class="small">{{ c.department_name or 'Chưa cập nhật' }}<br>{{ c.faculty_name or c.unit_name or 'Chưa cập nhật' }}</span></td>
           <td>Video: <strong>{{ c.video_links|length }}</strong><div class="small text-muted">Đã có mã QR: {{ ns.video_qr }}</div></td>
           <td>Playlist: <strong>{{ ns.playlist_total }}</strong><div class="small text-muted">Đã có mã QR: {{ ns.playlist_qr }}</div></td>
           <td class="text-center"><strong>{{ ns.class_total }}</strong></td>
           <td>
-            <form method="post" action="{{ url_for('set_course_school_classes', course_id=c.id) }}" class="d-flex align-items-center gap-2">
+            {% if c.owner_id == me.id %}<form method="post" action="{{ url_for('set_course_school_classes', course_id=c.id) }}" class="d-flex align-items-center gap-2">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               {% set selected_ids = c.school_class_links|selectattr('active')|map(attribute='school_class_id')|list %}
               <div class="dropdown flex-grow-1">
@@ -95,19 +61,54 @@
               <input class="form-control form-control-sm" name="new_class_name" placeholder="Thêm lớp mới" maxlength="255" required>
               <button class="btn btn-outline-success btn-sm text-nowrap">Thêm</button>
             </form>
+            {% else %}
+            <div class="small text-muted">{% for link in c.school_class_links if link.active %}{{ link.school_class.name }}{% if link.assigned_lecturer_id %} ({{ link.assigned_lecturer.name or link.assigned_lecturer.email }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+            {% endif %}
           </td>
-          <td><details><summary class="btn btn-outline-primary btn-sm">Chỉnh sửa</summary>
+          <td>{% if c.owner_id == me.id %}<details><summary class="btn btn-outline-primary btn-sm">Chỉnh sửa</summary>
             <form method="post" action="{{ url_for('update_course_info',course_id=c.id) }}" class="mt-2" style="min-width:250px">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <label class="small fw-bold">Tên môn học/Mô đun</label><input class="form-control form-control-sm mb-1" name="course_name" value="{{ c.name }}" required maxlength="255">
               <label class="small fw-bold">Bộ môn</label><input class="form-control form-control-sm mb-1" name="department_name" value="{{ c.department_name or '' }}" list="department-options" required maxlength="255">
               <label class="small fw-bold">Khoa QL bộ môn</label><input class="form-control form-control-sm mb-2" name="faculty_name" value="{{ c.faculty_name or c.unit_name or '' }}" list="faculty-options" required maxlength="255">
               <button class="btn btn-primary btn-sm">Lưu thông tin</button>
-            </form></details></td>
+            </form></details>{% else %}<span class="small text-muted">GV chủ môn quản lý</span>{% endif %}</td>
+          {% if me.role == 'admin' %}
+          <td>
+            {% set active_classes = c.school_class_links|selectattr('active')|list %}
+            <form method="post" action="{{ url_for('transfer_course_classes',course_id=c.id) }}" class="d-grid gap-1" onsubmit="return confirm('Bàn giao chỉ những lớp đã chọn? Giảng viên cũ vẫn phụ trách các lớp còn lại. QR và video dùng chung không đổi.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="new_owner_id" class="form-select form-select-sm" aria-label="Chọn giảng viên tiếp nhận" required>
+                <option value="">Chọn giảng viên</option>
+                {% for gv in transfer_lecturers %}<option value="{{ gv.id }}">{{ gv.name or gv.email }}{% if gv.lecturer_code %} ({{ gv.lecturer_code }}){% endif %}</option>{% endfor %}
+              </select>
+              <div class="dropdown"><button class="btn btn-outline-secondary btn-sm dropdown-toggle w-100" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" {% if not active_classes %}disabled{% endif %}>Chọn lớp bàn giao</button>
+                <div class="dropdown-menu p-2 shadow" style="max-height:240px;overflow-y:auto;min-width:220px">
+                  {% for link in active_classes %}<label class="dropdown-item"><input class="form-check-input me-2" type="checkbox" name="school_class_ids" value="{{ link.school_class_id }}">{{ link.school_class.name }}{% if link.assigned_lecturer_id %} ({{ link.assigned_lecturer.name or link.assigned_lecturer.email }}){% endif %}</label>{% endfor %}
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm" {% if not active_classes %}disabled{% endif %}>Bàn giao</button>
+            </form>
+          </td>
+          {% endif %}
         </tr>
-      {% else %}<tr><td colspan="7" class="text-center text-muted py-4">Chưa có môn học/ mô đun.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="{{ 8 if me.role == 'admin' else 7 }}" class="text-center text-muted py-4">Chưa có môn học/ mô đun.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+{% if assigned_links is defined and assigned_links %}
+<div class="card shadow-sm mt-4">
+  <div class="card-header fw-bold">MH/MĐ được bàn giao theo lớp</div>
+  <div class="card-body small text-muted">Các lớp dưới đây đã được phân công cho bạn. Mã QR, video và playlist vẫn dùng chung theo MH/MĐ; quyền chỉnh sửa học liệu và QR thuộc giảng viên chủ môn.</div>
+  <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+    <thead><tr><th>MH/MĐ</th><th>Lớp tiếp nhận</th><th>Giảng viên chủ môn</th><th>Học liệu có QR</th></tr></thead>
+    <tbody>{% for link in assigned_links %}
+    <tr><td>{{ link.course.name }}</td><td>{{ link.school_class.name }}</td>
+      <td>{{ link.course.owner.name or link.course.owner.email }}</td>
+      <td>{% for v in link.course.video_links if v.qr and v.qr.active %}<a href="{{ url_for('public_qr',slug=v.qr.slug) }}" target="_blank" rel="noopener">{{ v.qr.title }}</a> · {% endfor %}{% for p in link.course.playlist_links if p.active and p.qr and p.qr.active %}<a href="{{ url_for('public_qr',slug=p.qr.slug) }}" target="_blank" rel="noopener">{{ p.qr.title }}</a> · {% endfor %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
 {% endblock %}

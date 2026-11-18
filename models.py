@@ -292,12 +292,32 @@ class CourseClass(db.Model):
     course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
     school_class_id = db.Column(db.Integer, db.ForeignKey("school_classes.id", ondelete="CASCADE"), nullable=False, index=True)
     added_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # NULL: lớp do giảng viên chủ quản Course.owner_id trực tiếp giảng dạy.
+    # Giá trị khác NULL: bàn giao riêng lớp cho giảng viên được chỉ định.
+    assigned_lecturer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     active = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
     added_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    assigned_lecturer = db.relationship("User", foreign_keys=[assigned_lecturer_id])
     course = db.relationship("Course", backref=db.backref("school_class_links", cascade="all,delete", order_by="CourseClass.added_at"))
     school_class = db.relationship("SchoolClass", backref=db.backref("course_links", cascade="all,delete"))
     adder = db.relationship("User", foreign_keys=[added_by])
     __table_args__ = (UniqueConstraint("course_id", "school_class_id", name="uq_course_school_class"),)
+
+
+class CourseClassTransfer(db.Model):
+    """Nhật ký bàn giao từng lớp của MH/MĐ; không đổi QR hay liên kết học liệu."""
+    __tablename__ = "course_class_transfers"
+    id = db.Column(db.Integer, primary_key=True)
+    course_class_id = db.Column(db.Integer, db.ForeignKey("course_classes.id", ondelete="CASCADE"), nullable=False, index=True)
+    previous_lecturer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    new_lecturer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    changed_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    effective_on = db.Column(db.Date, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    course_class = db.relationship("CourseClass", backref=db.backref("class_transfer_history", order_by="CourseClassTransfer.created_at"))
+    previous_lecturer = db.relationship("User", foreign_keys=[previous_lecturer_id])
+    new_lecturer = db.relationship("User", foreign_keys=[new_lecturer_id])
+    administrator = db.relationship("User", foreign_keys=[changed_by])
 
 
 class Participant(db.Model):
