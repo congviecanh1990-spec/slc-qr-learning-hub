@@ -33,7 +33,7 @@ from models import (
     db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ClassGroup,
     SchoolClass, Student, ClassEnrollment, CourseClass, Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
     HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
-    ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, YouTubeSyncJob, utcnow
+    ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, CourseClassTransfer, YouTubeSyncJob, utcnow
 )
 from security import encrypt_json, decrypt_json
 from services.error_reporting import login_failure_reason, safe_error_diagnostic
@@ -879,6 +879,11 @@ def ensure_schema_upgrades():
             class_columns = {c["name"] for c in inspector.get_columns("school_classes")}
             if "declared_size" not in class_columns:
                 conn.execute(text("ALTER TABLE school_classes ADD COLUMN declared_size INTEGER"))
+        if "course_classes" in tables:
+            class_columns = {c["name"] for c in inspector.get_columns("course_classes")}
+            if "assigned_lecturer_id" not in class_columns:
+                conn.execute(text("ALTER TABLE course_classes ADD COLUMN assigned_lecturer_id INTEGER REFERENCES users(id) ON DELETE SET NULL"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_course_classes_assigned_lecturer_id ON course_classes (assigned_lecturer_id)"))
         if "courses" in tables:
             columns = {c["name"] for c in inspector.get_columns("courses")}
             if "faculty_name" not in columns:
@@ -2638,8 +2643,13 @@ def register_routes(app):
                     db.session.rollback()
                     flash(f"Không thêm được môn học/ mô đun: {exc}", "danger")
             return redirect(url_for("courses_page"))
-        all_owned_courses = Course.query.filter_by(owner_id=user.id).order_by(Course.created_at.desc()).all()
-        courses = [c for c in all_owned_courses if c.active]
+        courses = (Course.query.filter_by(active=True).order_by(Course.name, Course.id).all()
+                   if user.role == "admin" else
+                   Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all())
+        assigned_links = (CourseClass.query.join(Course, CourseClass.course_id == Course.id)
+            .filter(CourseClass.active.is_(True), Course.active.is_(True),
+                    CourseClass.assigned_lecturer_id == user.id)
+            .order_by(Course.name, CourseClass.id).all())
         # Không gợi ý tên môn học/ mô đun cũ. Tên khoa và bộ môn từng dùng vẫn được giữ
         # trong gợi ý để GV chọn lại nhanh, kể cả khi một môn học/ mô đun cũ đã được ẩn.
         faculty_options = faculty_catalog_options(user)
@@ -2657,7 +2667,7 @@ def register_routes(app):
             "courses.html",
             courses=courses,
             transfer_courses=transfer_courses, transfer_lecturers=transfer_lecturers,
-            transfer_history=transfer_history,
+            transfer_history=transfer_history, assigned_links=assigned_links,
             faculty_options=faculty_options,
             department_options=department_options,
             available_playlists=available_playlists,
@@ -2715,6 +2725,56 @@ def register_routes(app):
             db.session.rollback()
             flash(f"Không bàn giao được môn học/mô đun: {exc}", "danger")
         return redirect(url_for("courses_page") + "#admin-course-transfer")
+
+    @app.post("/admin/courses/<int:course_id>/transfer-classes")
+    @login_required
+    def transfer_course_classes(course_id):
+        """Bàn giao từng lớp, giữ nguyên môn, video, playlist và QR chung."""
+        admin = current_user()
+        if admin.role != "admin":
+            abort(403)
+        target_id = request.form.get("new_owner_id", type=int)
+        raw_ids = request.form.getlist("school_class_ids")
+        selected_ids = {int(item) for item in raw_ids if item.isdecimal() and int(item) > 0}
+        target = db.session.get(User, target_id) if target_id else None
+        if not target or target.role not in {"admin", "lecturer"} or not selected_ids or len(selected_ids) != len(raw_ids):
+            flash("Hãy chọn giảng viên và ít nhất một lớp hợp lệ để bàn giao.", "warning")
+            return redirect(url_for("courses_page") + f"#course-{course_id}")
+        try:
+            course = Course.query.filter_by(id=course_id, active=True).with_for_update().first()
+            if not course:
+                abort(404)
+            links = (CourseClass.query.filter(CourseClass.course_id == course.id,
+                      CourseClass.school_class_id.in_(selected_ids), CourseClass.active.is_(True))
+                     .with_for_update().all())
+            if len(links) != len(selected_ids):
+                db.session.rollback()
+                flash("Danh sách lớp đã thay đổi. Hãy tải lại trang rồi chọn lại.", "warning")
+                return redirect(url_for("courses_page") + f"#course-{course_id}")
+            changed = []
+            for link in links:
+                old_id = link.assigned_lecturer_id or course.owner_id
+                if old_id == target.id:
+                    continue
+                link.assigned_lecturer_id = None if target.id == course.owner_id else target.id
+                db.session.add(CourseClassTransfer(
+                    course_class_id=link.id, previous_lecturer_id=old_id,
+                    new_lecturer_id=target.id, changed_by=admin.id,
+                    effective_on=utcnow().date()))
+                changed.append(link.school_class.name)
+            if not changed:
+                db.session.rollback()
+                flash("Các lớp đã chọn đang do giảng viên này phụ trách.", "info")
+                return redirect(url_for("courses_page") + f"#course-{course_id}")
+            db.session.commit()
+            flash(f"Đã bàn giao {len(changed)} lớp của MH/MĐ ‘{course.name}’ cho "
+                  f"{target.name or target.email}: {', '.join(changed)}. "
+                  "Giữ nguyên các lớp không chọn, QR, video, playlist và lịch sử.", "success")
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception("Lỗi bàn giao lớp của MH/MĐ %s", course_id)
+            flash("Không thể bàn giao lớp; không có thay đổi nào được lưu.", "danger")
+        return redirect(url_for("courses_page") + f"#course-{course_id}")
 
     @app.post("/courses/<int:course_id>/classes/new")
     @login_required
@@ -2835,6 +2895,10 @@ def register_routes(app):
                 db.session.add(CourseClass(course_id=course.id, school_class_id=class_id, added_by=user.id, active=True))
         for class_id, link in existing.items():
             if class_id not in valid_ids:
+                if link.assigned_lecturer_id not in (None, user.id):
+                    db.session.rollback()
+                    flash("Lớp đã bàn giao cho giảng viên khác. Hãy bàn giao lại cho giảng viên chủ môn trước khi bỏ.", "warning")
+                    return redirect(url_for("courses_page") + f"#course-{course.id}")
                 link.active = False
         db.session.commit()
         flash(f"Đã cập nhật lớp áp dụng cho môn học/ mô đun “{course.name}”.", "success")
@@ -5234,6 +5298,7 @@ def backup_table_specs():
         ("playlist_videos", PlaylistVideo),
         ("courses", Course),
         ("course_transfers", CourseTransfer),
+        ("course_class_transfers", CourseClassTransfer),
         ("class_groups", ClassGroup),
         ("school_classes", SchoolClass),
         ("homeroom_changes", HomeroomChange),
