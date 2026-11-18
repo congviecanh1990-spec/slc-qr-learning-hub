@@ -41,7 +41,6 @@ from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, s
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
 from services.websub import subscribe_channel, verify_callback, parse_notification
 from services.one_time_maintenance import cleanup_initial_three_error_logs_once
-from services.startup import prepare_database_once
 
 csrf = CSRFProtect()
 oauth = OAuth()
@@ -819,12 +818,28 @@ def create_app():
 
     with app.app_context():
         if app.config["AUTO_CREATE_DB"]:
-            # v4.3.32: tránh chạy lại toàn bộ ALTER/UPDATE và duyệt lớp cũ
-            # mỗi khi máy chủ Render Free thức dậy. Marker nằm trên PostgreSQL.
-            # Vẫn giữ nguyên cơ chế dọn lỗi 1 lần của v4.3.28.
-            prepare_database_once(db, ensure_schema_upgrades,
-                                  migrate_legacy_classes,
-                                  cleanup_initial_three_error_logs_once)
+            # v4.3.33: HOTFIX — trở về trình tự khởi tạo đã dùng ổn định
+            # trước v4.3.32. Không phụ thuộc services/startup.py hoặc khóa
+            # PostgreSQL ở thời điểm Gunicorn khởi động.
+            # Thao tác dọn lỗi v4.3.28 tự bảo vệ bằng dấu mốc đã lưu trong DB.
+            step = "create_all"
+            try:
+                print("[SLC STARTUP] create_all", flush=True)
+                db.create_all()
+                step = "ensure_schema_upgrades"
+                print("[SLC STARTUP] ensure_schema_upgrades", flush=True)
+                ensure_schema_upgrades()
+                step = "migrate_legacy_classes"
+                print("[SLC STARTUP] migrate_legacy_classes", flush=True)
+                migrate_legacy_classes()
+                step = "cleanup_initial_three_error_logs_once"
+                print("[SLC STARTUP] one-time cleanup marker check", flush=True)
+                cleanup_initial_three_error_logs_once(db.engine)
+            except Exception as exc:
+                # Không in kết nối DB, token hoặc dữ liệu giảng viên vào log.
+                print(f"[SLC STARTUP] FAILED step={step} type={type(exc).__name__}", flush=True)
+                raise
+            print("[SLC STARTUP] database ready", flush=True)
 
     return app
 

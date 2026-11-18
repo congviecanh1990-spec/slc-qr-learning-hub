@@ -1,3 +1,7 @@
+# Triển khai v4.3.33 — bản vá deploy Render
+
+Xem chi tiết trong `HUONG_DAN_KIEM_TRA_V4333.md`. Không xóa database; cập nhật đầy đủ root mã nguồn lên GitHub. Nếu deploy tiếp tục Failed, xem Render → Logs và tìm `[SLC STARTUP]` và `Traceback`. Nếu cần khôi phục gấp, chọn rollback về bản Live thành công gần nhất (trong ảnh là v4.3.30). Vẫn giữ Free cold-start limitation, hotfix không loại bỏ trang loading do Render sinh ra.
+
 # Hướng dẫn triển khai v4.3.32 trên Render
 
 1. **Sao lưu PostgreSQL và mã nguồn đang vận hành** trước khi thay đổi danh mục khoa/bộ môn dùng chung.

@@ -80,8 +80,8 @@ assert count_logs(e) == 3
 # The persistent one-time marker table is deliberately excluded from the
 # application's backup/restore list; restoring an older backup won't re-arm.
 src = (ROOT/'app.py').read_text(encoding='utf-8')
-assert 'prepare_database_once(db, ensure_schema_upgrades' in src
-assert 'cleanup_initial_three_error_logs_once)' in src
+assert 'cleanup_initial_three_error_logs_once(db.engine)' in src
+assert 'from services.one_time_maintenance import cleanup_initial_three_error_logs_once' in src
 backup_fragment = src.split('def backup_table_specs():', 1)[1].split('def build_backup_zip():', 1)[0]
 assert 'app_one_time_maintenance' not in backup_fragment
 print('PASS v4.3.28: exact 3-only, skipped on mismatch, persisted marker, unaffected scans/tests')

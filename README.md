@@ -1,3 +1,11 @@
+## v4.3.33 (18/11/2026) — Hotfix Render deployment
+
+- Ảnh Render: v4.3.32 và v4.3.32_1 `Failed`, nhưng chưa có log nguyên nhân. Hotfix khôi phục khởi tạo DB đã dùng trước v4.3.32, bỏ phụ thuộc mới `services/startup.py` và `connect_timeout` để giảm biến số.
+- In nhật ký an toàn `[SLC STARTUP]` khi khởi động, xác định bước nào thất bại.
+- Giữ cải tiến trình phát video điện thoại, QR, thống kê, liên kết dữ liệu; không xóa PostgreSQL.
+- Giữ dấu mốc xóa 3 error_logs **một lần** đã triển khai từ v4.3.28.
+- Nếu tiếp tục deploy thất bại, **phải xem Render Logs**; không thể suy ra lỗi chính xác từ nhãn Failed.
+
 ## v4.3.32 – Tối ưu lúc Render thức dậy và xử lý lỗi phát YouTube trên điện thoại
 
 - Một lần nâng cấp schema theo dấu mốc PostgreSQL, không chạy lại các thao tác ALTER/UPDATE lịch sử mỗi khi Render Free thức dậy.
