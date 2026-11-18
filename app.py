@@ -2950,6 +2950,10 @@ def register_routes(app):
         course = db.session.get(Course, course_id) or abort(404)
         if not course_owned_by_user(course, user):
             abort(403)
+        if any(link.active and link.assigned_lecturer_id not in (None, user.id)
+               for link in course.school_class_links):
+            flash("MH/MĐ còn lớp đã bàn giao cho giảng viên khác. Hãy nhận lại các lớp trước khi ẩn môn.", "warning")
+            return redirect(url_for("courses_page") + f"#course-{course.id}")
         course.active = False
         for cls in course.classes:
             if hasattr(cls, "active"):
@@ -4870,6 +4874,14 @@ def register_routes(app):
             return redirect(url_for("lecturers_page"))
         if (request.form.get("confirm_email") or "").strip().casefold() != lecturer.email.casefold():
             flash("Chưa xác nhận đúng email của giảng viên cần xóa; chưa có dữ liệu nào bị xóa.", "warning")
+            return redirect(url_for("lecturers_page"))
+        has_delegated_classes = (CourseClass.query.join(Course, CourseClass.course_id == Course.id)
+            .filter(Course.owner_id == lecturer.id, Course.active.is_(True),
+                    CourseClass.active.is_(True),
+                    CourseClass.assigned_lecturer_id.isnot(None),
+                    CourseClass.assigned_lecturer_id != lecturer.id).first())
+        if has_delegated_classes:
+            flash("Giảng viên đang là chủ môn có lớp đã bàn giao. Hãy bàn giao toàn bộ môn phù hợp trước khi xóa tài khoản.", "warning")
             return redirect(url_for("lecturers_page"))
         # Ngăn xóa nguồn video/playlist đang được giảng viên KHÁC sử dụng.
         # Môn đã bàn giao phải bảo toàn QR đã in và lịch sử.
