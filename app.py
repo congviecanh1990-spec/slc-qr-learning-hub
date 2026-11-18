@@ -645,7 +645,9 @@ def class_management_url(user, school_class):
         return url_for("my_classes_page") + anchor
     if db.session.query(CourseClass).join(Course, Course.id == CourseClass.course_id).filter(
         CourseClass.school_class_id == school_class.id, CourseClass.active.is_(True),
-        Course.owner_id == user.id, Course.active.is_(True)).first():
+        Course.active.is_(True),
+        or_(CourseClass.assigned_lecturer_id == user.id,
+            and_(CourseClass.assigned_lecturer_id.is_(None), Course.owner_id == user.id))).first():
         return url_for("teaching_classes_page") + anchor
     return url_for("classes_page") if user.role == "admin" else url_for("teaching_classes_page") + anchor
 
@@ -658,7 +660,9 @@ def can_seed_school_class(user, school_class):
     return (ClassEnrollment.query.filter_by(school_class_id=school_class.id).first() is None and
             db.session.query(CourseClass).join(Course, Course.id == CourseClass.course_id)
             .filter(CourseClass.school_class_id == school_class.id, CourseClass.active.is_(True),
-                    Course.owner_id == user.id, Course.active.is_(True)).first() is not None)
+                    Course.active.is_(True),
+                    or_(CourseClass.assigned_lecturer_id == user.id,
+                        and_(CourseClass.assigned_lecturer_id.is_(None), Course.owner_id == user.id))).first() is not None)
 
 
 def can_manage_school_class(user: User, school_class: SchoolClass) -> bool:
@@ -742,7 +746,8 @@ def analytics_students_for_filters(user: User, course_id: int | None = None,
         if course_id is not None:
             query = query.filter(Course.id == course_id)
         if user.role != "admin":
-            query = query.filter(Course.owner_id == user.id)
+            query = query.filter(or_(CourseClass.assigned_lecturer_id == user.id,
+                and_(CourseClass.assigned_lecturer_id.is_(None), Course.owner_id == user.id)))
     return query.distinct().order_by(Student.full_name, Student.student_code)
 
 
@@ -4202,14 +4207,18 @@ def register_routes(app):
         user = current_user()
         taught = (SchoolClass.query.join(CourseClass, CourseClass.school_class_id == SchoolClass.id)
                  .join(Course, Course.id == CourseClass.course_id)
-                 .filter(Course.owner_id == user.id, Course.active.is_(True),
+                 .filter(or_(CourseClass.assigned_lecturer_id == user.id,
+                             and_(CourseClass.assigned_lecturer_id.is_(None), Course.owner_id == user.id)),
+                         Course.active.is_(True),
                          CourseClass.active.is_(True), SchoolClass.active.is_(True))
                  .distinct().order_by(SchoolClass.name).all())
         class_rows = []
         for cls in taught:
             taught_courses = (Course.query.join(CourseClass, CourseClass.course_id == Course.id)
                 .filter(CourseClass.school_class_id == cls.id, CourseClass.active.is_(True),
-                        Course.owner_id == user.id, Course.active.is_(True))
+                        or_(CourseClass.assigned_lecturer_id == user.id,
+                             and_(CourseClass.assigned_lecturer_id.is_(None), Course.owner_id == user.id)),
+                         Course.active.is_(True))
                 .order_by(Course.name).all())
             class_rows.append({"class": cls, "current_size": class_size_at(cls),
                                "course_names": [c.name for c in taught_courses],
@@ -4928,6 +4937,14 @@ def register_routes(app):
                 {HomeroomChange.new_teacher_id: None}, synchronize_session=False)
             HomeroomChange.query.filter_by(changed_by=lecturer.id).update(
                 {HomeroomChange.changed_by: None}, synchronize_session=False)
+            CourseClassTransfer.query.filter_by(previous_lecturer_id=lecturer.id).update(
+                {CourseClassTransfer.previous_lecturer_id: None}, synchronize_session=False)
+            CourseClassTransfer.query.filter_by(new_lecturer_id=lecturer.id).update(
+                {CourseClassTransfer.new_lecturer_id: None}, synchronize_session=False)
+            CourseClassTransfer.query.filter_by(changed_by=lecturer.id).update(
+                {CourseClassTransfer.changed_by: None}, synchronize_session=False)
+            CourseClass.query.filter_by(assigned_lecturer_id=lecturer.id).update(
+                {CourseClass.assigned_lecturer_id: None}, synchronize_session=False)
             CourseTransfer.query.filter_by(previous_owner_id=lecturer.id).update(
                 {CourseTransfer.previous_owner_id: None}, synchronize_session=False)
             CourseTransfer.query.filter_by(new_owner_id=lecturer.id).update(
@@ -5001,6 +5018,9 @@ def register_routes(app):
                 {CoursePlaylist.qr_id: None}, synchronize_session=False)
             QrCode.query.filter(QrCode.id.in_(qr_ids)).delete(synchronize_session=False)
         if course_ids:
+            owned_links = [row[0] for row in db.session.query(CourseClass.id).filter(CourseClass.course_id.in_(course_ids)).all()]
+            if owned_links:
+                CourseClassTransfer.query.filter(CourseClassTransfer.course_class_id.in_(owned_links)).delete(synchronize_session=False)
             CourseTransfer.query.filter(CourseTransfer.course_id.in_(course_ids)).delete(synchronize_session=False)
             Participant.query.filter(Participant.course_id.in_(course_ids)).delete(synchronize_session=False)
             CourseVideo.query.filter(CourseVideo.course_id.in_(course_ids)).delete(synchronize_session=False)
