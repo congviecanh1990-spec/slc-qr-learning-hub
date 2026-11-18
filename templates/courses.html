@@ -30,7 +30,7 @@
   <div class="card-header fw-bold">Danh sách môn học/ mô đun đã tạo</div>
   <div class="table-responsive" style="overflow:visible">
     <table class="table table-hover align-middle mb-0">
-      <thead><tr><th>Môn học/ mô đun</th><th>Bộ môn – Khoa</th><th>Video của MH/MĐ</th><th>Playlist của MH/MĐ</th><th>Số lớp</th><th style="min-width:210px">Lớp của MH/MĐ</th>{% if me.role == 'admin' %}<th style="min-width:220px">Bàn giao</th>{% endif %}<th>Chỉnh sửa</th></tr></thead>
+      <thead><tr><th>Môn học/ mô đun</th><th>Bộ môn – Khoa</th><th>Video của MH/MĐ</th><th>Playlist của MH/MĐ</th><th>Số lớp</th><th style="min-width:210px">Lớp của MH/MĐ</th>{% if me.role == 'admin' %}<th>Chỉnh sửa</th>{% if me.role == 'admin' %}<th style="min-width:220px">Bàn giao cho GV khác</th>{% endif %}</tr></thead>
       <tbody>
       {% for c in courses %}
         {% set ns = namespace(video_qr=0, playlist_total=0, playlist_qr=0, class_total=0) %}
@@ -65,6 +65,14 @@
             <div class="small text-muted">{% for link in c.school_class_links if link.active %}{{ link.school_class.name }}{% if link.assigned_lecturer_id %} ({{ link.assigned_lecturer.name or link.assigned_lecturer.email }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</div>
             {% endif %}
           </td>
+          <td>{% if c.owner_id == me.id %}<details><summary class="btn btn-outline-primary btn-sm">Chỉnh sửa</summary>
+            <form method="post" action="{{ url_for('update_course_info',course_id=c.id) }}" class="mt-2" style="min-width:250px">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label class="small fw-bold">Tên môn học/Mô đun</label><input class="form-control form-control-sm mb-1" name="course_name" value="{{ c.name }}" required maxlength="255">
+              <label class="small fw-bold">Bộ môn</label><input class="form-control form-control-sm mb-1" name="department_name" value="{{ c.department_name or '' }}" list="department-options" required maxlength="255">
+              <label class="small fw-bold">Khoa QL bộ môn</label><input class="form-control form-control-sm mb-2" name="faculty_name" value="{{ c.faculty_name or c.unit_name or '' }}" list="faculty-options" required maxlength="255">
+              <button class="btn btn-primary btn-sm">Lưu thông tin</button>
+            </form></details>{% else %}<span class="small text-muted">GV chủ môn quản lý</span>{% endif %}</td>
           {% if me.role == 'admin' %}
           <td>
             {% set active_classes = c.school_class_links|selectattr('active')|list %}
@@ -83,14 +91,6 @@
             </form>
           </td>
           {% endif %}
-          <td>{% if c.owner_id == me.id %}<details><summary class="btn btn-outline-primary btn-sm">Chỉnh sửa</summary>
-            <form method="post" action="{{ url_for('update_course_info',course_id=c.id) }}" class="mt-2" style="min-width:250px">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <label class="small fw-bold">Tên môn học/Mô đun</label><input class="form-control form-control-sm mb-1" name="course_name" value="{{ c.name }}" required maxlength="255">
-              <label class="small fw-bold">Bộ môn</label><input class="form-control form-control-sm mb-1" name="department_name" value="{{ c.department_name or '' }}" list="department-options" required maxlength="255">
-              <label class="small fw-bold">Khoa QL bộ môn</label><input class="form-control form-control-sm mb-2" name="faculty_name" value="{{ c.faculty_name or c.unit_name or '' }}" list="faculty-options" required maxlength="255">
-              <button class="btn btn-primary btn-sm">Lưu thông tin</button>
-            </form></details>{% else %}<span class="small text-muted">GV chủ môn quản lý</span>{% endif %}</td>
         </tr>
       {% else %}<tr><td colspan="{{ 8 if me.role == 'admin' else 7 }}" class="text-center text-muted py-4">Chưa có môn học/ mô đun.</td></tr>{% endfor %}
       </tbody>
