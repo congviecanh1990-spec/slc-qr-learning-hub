@@ -5318,13 +5318,13 @@ def backup_table_specs():
         ("playlist_videos", PlaylistVideo),
         ("courses", Course),
         ("course_transfers", CourseTransfer),
-        ("course_class_transfers", CourseClassTransfer),
         ("class_groups", ClassGroup),
         ("school_classes", SchoolClass),
         ("homeroom_changes", HomeroomChange),
         ("students", Student),
         ("class_enrollments", ClassEnrollment),
         ("course_classes", CourseClass),
+        ("course_class_transfers", CourseClassTransfer),
         ("participants", Participant),
         ("qr_codes", QrCode),
         ("course_videos", CourseVideo),
@@ -5375,7 +5375,7 @@ def restore_from_zip(fileobj):
             fn = f"{name}.json"
             if fn not in names:
                 # Các bảng bổ sung ở phiên bản sau là tùy chọn để backup cũ vẫn khôi phục được.
-                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes", "connected_google_accounts", "homeroom_changes", "edit_history", "course_transfers", "youtube_sync_jobs"}:
+                if name in {"research_settings", "course_playlists", "school_classes", "students", "class_enrollments", "course_classes", "connected_google_accounts", "homeroom_changes", "edit_history", "course_transfers", "course_class_transfers", "youtube_sync_jobs"}:
                     payload[name] = []
                     continue
                 raise ValueError(f"Thiếu {fn} trong backup.")
