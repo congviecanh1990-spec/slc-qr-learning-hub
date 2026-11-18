@@ -78,7 +78,9 @@ assert 'def transfer_course_classes(course_id):' in source
 assert 'CourseClass.assigned_lecturer_id == user.id' in source
 assert 'CourseClassTransfer.query.filter(' in source
 assert 'url_for(\'transfer_course_classes\',course_id=c.id)' in html
-assert 'Bộ môn quản lý MH/MĐ' in html
+assert 'Bộ môn quản lý</label>' in html
+assert 'Bàn giao cho GV khác' in html
+assert html.index('<th>Chỉnh sửa</th>') < html.index('Bàn giao cho GV khác')
 assert 'Video của MH/MĐ' in html
 assert 'Playlist của MH/MĐ' in html
 assert 'value="{{ me.department_name or' not in html
