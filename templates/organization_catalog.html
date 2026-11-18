@@ -22,13 +22,13 @@
   Hệ thống sẽ chuyển mọi hồ sơ giảng viên và môn học đang tham chiếu sang tên chuẩn rồi loại tên cũ khỏi danh sách.
   Không xóa giảng viên, môn học, mã QR hoặc lịch sử thống kê.
 </div>
-{% macro catalog_table(rows, field, heading, description, target_list) %}
+{% macro catalog_table(rows, field, heading, target_list) %}
 <section class="card shadow-sm mb-4" id="{{ field }}">
-  <div class="card-header bg-white"><h5 class="mb-0">{{ heading }}</h5><div class="small text-muted mt-1">{{ description }}</div></div>
+  <div class="card-header bg-white"><h5 class="mb-0">{{ heading }}</h5></div>
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
       <thead class="table-light"><tr>
-        <th class="text-nowrap">STT</th><th style="min-width:190px">Tên đang sử dụng</th>
+        <th class="text-nowrap">STT</th><th style="min-width:190px">{{ 'Tên khoa' if field == 'faculty_name' else 'Tên bộ môn' }}</th>
         <th class="text-center">Số giảng viên</th><th class="text-center">Số môn học</th>
         {% if field == 'department_name' %}<th style="min-width:140px">Khoa liên quan</th>{% endif %}
         <th style="min-width:320px">Sửa tên / hợp nhất tên trùng</th>
@@ -61,8 +61,8 @@
 {% endmacro %}
 <datalist id="faculty-targets">{% for row in catalog.faculty_name %}<option value="{{ row.value }}"></option>{% endfor %}</datalist>
 <datalist id="department-targets">{% for row in catalog.department_name %}<option value="{{ row.value }}"></option>{% endfor %}</datalist>
-{{ catalog_table(catalog.faculty_name, 'faculty_name', '1. Danh mục khoa', 'Số giảng viên và môn học đang sử dụng từng tên khoa.', 'faculty-targets') }}
-{{ catalog_table(catalog.department_name, 'department_name', '2. Danh mục bộ môn', 'Số giảng viên, môn học và khoa liên quan đến từng bộ môn.', 'department-targets') }}
+{{ catalog_table(catalog.faculty_name, 'faculty_name', '1. Danh mục khoa', 'faculty-targets') }}
+{{ catalog_table(catalog.department_name, 'department_name', '2. Danh mục bộ môn', 'department-targets') }}
 {% endblock %}
 {% block scripts %}
 <script>
