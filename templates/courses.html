@@ -140,7 +140,7 @@
     <tbody>{% for link in assigned_links %}
     <tr><td>{{ link.course.name }}</td><td>{{ link.school_class.name }}</td>
       <td>{{ link.course.owner.name or link.course.owner.email }}</td>
-      <td>{% for qr in link.course.video_links if qr.qr and qr.qr.active %}<a href="{{ url_for('qr_public',slug=qr.qr.slug) }}" target="_blank" rel="noopener">{{ qr.qr.title }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      <td>{% for qr in link.course.video_links if qr.qr and qr.qr.active %}<a href="{{ url_for('public_qr',slug=qr.qr.slug) }}" target="_blank" rel="noopener">{{ qr.qr.title }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
 </div>
