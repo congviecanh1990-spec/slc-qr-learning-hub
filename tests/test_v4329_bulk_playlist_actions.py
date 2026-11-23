@@ -105,7 +105,7 @@ scope={**{key:getattr(models,key) for key in ('User','YouTubeChannel','Playlist'
  'db':models.db,'or_':sa.or_,'and_':sa.and_,'select':sa.select,'secrets':secrets,'time':time,
  'request':request,'abort':abort,'flash':flash,'record_functional_test':record_functional_test,
  'record_webapp_experiment':record_webapp_experiment,
- 'record_research_qr_creation':lambda course_id, lecturer_id, kind: None,
+ 'record_research_qr_creation':lambda course_id, lecturer_id, kind, qr_id=None: None,
  'current_user':lambda:actor[0],
  'url_for':lambda x:'/videos','redirect':lambda x:x,'parse_qsl':parse_qsl,'urlencode':urlencode}
 for name in helper_names|route_names:
