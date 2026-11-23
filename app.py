@@ -4737,7 +4737,10 @@ def register_routes(app):
                         raise ValueError("Giảng viên không được phân công giảng dạy môn học/mô đun đã chọn.")
                     if ResearchComparisonPair.query.filter_by(pair_code=values["pair_code"]).first():
                         raise ValueError("Mã lượt đo đã tồn tại. Vui lòng nhập mã khác.")
-                    db.session.add(ResearchComparisonPair(**values, observer_id=user.id))
+                    db.session.add(ResearchComparisonPair(
+                        **values, observer_id=user.id,
+                        lecturer_name_snapshot=(lecturer.name or lecturer.email or "")[:255],
+                        course_name_snapshot=(course.name or "")[:255]))
                     flash("Đã lưu cặp đo theo giảng viên và khối lượng; chỉ tính thống kê khi có đủ hai phép đo.", "success")
                 elif form_type == "manual_experiment":
                     task_key = (request.form.get("task_key") or "").strip()
