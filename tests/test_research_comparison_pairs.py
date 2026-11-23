@@ -189,7 +189,9 @@ def test_flask_role_workflow_and_legacy_schema(tmp_path,monkeypatch):
             assert pair.measurement_single_videos==3 and pair.measurement_single_playlists==5
             assert video_coverage(pair)==53 and pair.qr_count==8
         # Không cho giảng viên sửa kết quả WebApp hoặc loại bản ghi.
-        assert client.post(f"/research/comparison/{pid}/void",data={"void_reason":"test invalid"}).status_code==403
+        # Trang nghiên cứu cũ từ chối qua chuyển hướng, API mới từ chối qua 403.
+        assert client.post(f"/research/comparison/{pid}/void",
+            data={"void_reason":"test invalid"}).status_code in (302,403)
         assert client.post(f"/research/comparison/{pid}/reset",data={"reason":"test invalid"}).status_code==403
         with client.session_transaction() as ss:ss["user_id"]=aid
         res=client.get("/research")
