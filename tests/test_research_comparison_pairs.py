@@ -118,7 +118,9 @@ def test_new_table_sqlite_preserves_legacy_experiments():
 
 def test_research_admin_workflow_end_to_end(tmp_path, monkeypatch):
     """GET/POST thật qua Flask: nhập thủ công, hoàn thiện Web App, loại lượt sai."""
-    db_url="sqlite:///"+str(tmp_path/"research-workflow.sqlite3")
+    # CI có thể chạy cùng phép kiểm thử với PostgreSQL tạm thời (không dùng Neon).
+    import os
+    db_url=os.environ.get("TEST_POSTGRES_DATABASE_URL") or ("sqlite:///"+str(tmp_path/"research-workflow.sqlite3"))
     monkeypatch.setenv("DATABASE_URL",db_url)
     monkeypatch.setenv("AUTO_CREATE_DB","0")
     monkeypatch.setenv("SECRET_KEY","ci-only-secret")
