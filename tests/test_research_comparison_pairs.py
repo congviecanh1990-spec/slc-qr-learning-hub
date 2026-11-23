@@ -261,4 +261,7 @@ def test_flask_role_workflow_and_legacy_schema(tmp_path,monkeypatch):
         with client.session_transaction() as ss:ss["user_id"]=aid
         response=client.get("/research")
         assert response.status_code==200
-        assert "Đủ cặp đo".encode() in response.data
+        assert "Nhật ký đối chứng theo giảng viên và học phần".encode() in response.data
+        assert 'Tổng thời gian (giây)'.encode() in response.data
+        assert 'Số thao tác'.encode() in response.data
+        assert 'Chưa xác minh lưu tệp'.encode() in response.data
