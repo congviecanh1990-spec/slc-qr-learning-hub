@@ -21,4 +21,6 @@ jobs:
       - name: Research comparison tests
         run: python -m pytest -q tests/test_research_comparison_pairs.py
       - name: Regression bulk playlist tests
-        run: python -m pytest -q tests/test_v4329_bulk_playlist_actions.py tests/test_v4330_bulk_ui_profile_cleanup.py
+        run: |
+          python tests/test_v4329_bulk_playlist_actions.py
+          python tests/test_v4330_bulk_ui_profile_cleanup.py
