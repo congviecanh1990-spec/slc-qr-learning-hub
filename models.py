@@ -515,6 +515,14 @@ class ResearchComparisonPair(db.Model):
     # Để NULL cho đến khi cùng GV hoàn thành phép đo Web App trên cùng bộ học liệu.
     webapp_operations = db.Column(db.Integer, nullable=True)
     webapp_seconds = db.Column(db.Float, nullable=True)
+    # Ghi nhận tự động khi GV bấm bắt đầu/kết thúc; không cho người nhập tay.
+    measurement_started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    measurement_finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    measurement_operations = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    measurement_single_videos = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    measurement_single_playlists = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    measurement_bulk_videos = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    measurement_verified = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     note = db.Column(db.Text, nullable=True)
     active = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
     void_reason = db.Column(db.Text, nullable=True)
@@ -526,7 +534,8 @@ class ResearchComparisonPair(db.Model):
 
     @property
     def is_paired(self):
-        return self.active and self.webapp_operations is not None and self.webapp_seconds is not None
+        return (self.active and self.measurement_verified and
+                self.webapp_operations is not None and self.webapp_seconds is not None)
 
 
 class FunctionalTestRun(db.Model):
