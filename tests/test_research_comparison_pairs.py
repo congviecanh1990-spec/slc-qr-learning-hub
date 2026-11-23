@@ -156,6 +156,37 @@ def test_research_admin_workflow_end_to_end(tmp_path, monkeypatch):
             assert webapp.inspect(db.engine).has_table("research_comparison_pairs")
             assert User.query.count()==2 and Course.query.count()==1
         assert b"pair_create" in response.data
+        # Tái hiện chính xác lỗi Neon trên Render: bảng đã tồn tại,
+        # nhưng thiếu 2 cột *_name_snapshot thêm ở phiên bản sau.
+        with application.app_context():
+            from sqlalchemy import text as sql_text
+            legacy_values=validate_pair_form(dict(BASE, pair_code="LEGACY-PAIR",
+                        webapp_operations="", webapp_seconds=""))
+            legacy_values.update(lecturer_id=teacher_id, course_id=course_id)
+            db.session.add(ResearchComparisonPair(
+                **legacy_values, lecturer_name_snapshot="Tên cũ",
+                course_name_snapshot="Học phần cũ"))
+            db.session.commit()
+            db.session.remove()  # giải phóng lock trước khi ALTER TABLE
+            with db.engine.begin() as conn:
+                conn.execute(sql_text(
+                    "ALTER TABLE research_comparison_pairs DROP COLUMN lecturer_name_snapshot"))
+                conn.execute(sql_text(
+                    "ALTER TABLE research_comparison_pairs DROP COLUMN course_name_snapshot"))
+            current_columns={c["name"] for c in
+                webapp.inspect(db.engine).get_columns("research_comparison_pairs")}
+            assert "lecturer_name_snapshot" not in current_columns
+            assert "course_name_snapshot" not in current_columns
+        response=client.get("/research")
+        assert response.status_code==200
+        with application.app_context():
+            restored_columns={c["name"] for c in
+                webapp.inspect(db.engine).get_columns("research_comparison_pairs")}
+            assert "lecturer_name_snapshot" in restored_columns
+            assert "course_name_snapshot" in restored_columns
+            previous=ResearchComparisonPair.query.filter_by(pair_code="LEGACY-PAIR").one()
+            assert previous.manual_seconds==450.5
+            assert User.query.count()==2 and Course.query.count()==1
         form=dict(BASE,form_type="pair_create",lecturer_id=str(teacher_id),
                   course_id=str(course_id),webapp_operations="",webapp_seconds="")
         result=client.post("/research",data=form,follow_redirects=False)
