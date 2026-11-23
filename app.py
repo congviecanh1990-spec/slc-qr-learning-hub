@@ -1034,6 +1034,9 @@ def ensure_research_comparison_schema():
         "measurement_single_playlists": "INTEGER NOT NULL DEFAULT 0",
         "measurement_bulk_videos": "INTEGER NOT NULL DEFAULT 0",
         "measurement_verified": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "measurement_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
+        "measurement_save_method": "VARCHAR(32)",
+        "measurement_saved_at": "TIMESTAMP WITH TIME ZONE",
     }
     missing = [name for name in additions if name not in columns]
     if missing:
@@ -1062,21 +1065,59 @@ def active_research_measurement(user_id=None):
     return pair
 
 
-def record_research_qr_creation(course_id, lecturer_id, kind):
-    """Đếm mã QR THỰC SỰ tạo mới, theo đúng đường dẫn nút của bài đo."""
+def research_created_qr_ids(pair):
+    try:
+        found = json.loads(pair.measurement_qr_ids or "[]")
+        return [int(x) for x in found if isinstance(x, int) and x > 0] if isinstance(found, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
+    """Chỉ ghi QR mới, đúng chức năng đã chọn ở Kho học liệu và đúng học phần."""
     if not has_request_context() or not session.get("research_measurement_id"):
         return
     pair = active_research_measurement(lecturer_id)
-    if not pair or pair.course_id != course_id:
+    if not pair or pair.course_id != course_id or not qr_id:
         return
     endpoint = request.endpoint
-    if kind == "video" and endpoint in {"create_video_qr_from_library", "qr_page"}:
+    task = normalize_kind(pair.task_kind)
+    single_video = kind == "video" and endpoint == "create_video_qr_from_library"
+    single_playlist = kind == "playlist" and endpoint == "create_playlist_qr_from_library"
+    bulk_video = kind == "video" and endpoint == "bulk_create_selected_video_qrs"
+    if not ((task == "QR_TUNG_VIDEO_PLAYLIST" and (single_video or single_playlist)) or
+            (task == "QR_VIDEO_HANG_LOAT" and bulk_video)):
+        return
+    known = research_created_qr_ids(pair)
+    if qr_id in known or len(known) >= pair.qr_count:
+        return
+    known.append(qr_id)
+    pair.measurement_qr_ids = json.dumps(known)
+    if single_video:
         pair.measurement_single_videos += 1
-    elif kind == "playlist" and endpoint in {"create_playlist_qr_from_library", "create_playlist_qr"}:
+    elif single_playlist:
         pair.measurement_single_playlists += 1
-    elif kind == "video" and endpoint == "create_course_qrs_bulk":
+    else:
         pair.measurement_bulk_videos += 1
-    # Không coi video từ playlist tạo hàng loạt là thao tác tạo QR từng playlist.
+
+
+def research_measurement_complete_qrs(pair):
+    """Đủ mã QR theo nhiệm vụ và không tính mã bị xoá."""
+    if not pair or not pair.active or not pair.measurement_started_at:
+        return False
+    qr_ids = research_created_qr_ids(pair)
+    if len(qr_ids) != pair.qr_count:
+        return False
+    qrs = QrCode.query.filter(QrCode.id.in_(qr_ids), QrCode.active.is_(True),
+                              QrCode.course_id == pair.course_id).all()
+    if len(qrs) != len(qr_ids):
+        return False
+    if normalize_kind(pair.task_kind) == "QR_VIDEO_HANG_LOAT":
+        return pair.measurement_bulk_videos == pair.video_count and all(not q.is_playlist for q in qrs)
+    return (pair.measurement_single_videos == pair.video_count and
+            pair.measurement_single_playlists == pair.playlist_count and
+            sum(not q.is_playlist for q in qrs) == pair.video_count and
+            sum(q.is_playlist for q in qrs) == pair.playlist_count)
 
 
 def research_setting(key, default=""):
@@ -1395,7 +1436,7 @@ def create_qr_for_course_playlist(course: Course, playlist: Playlist, user: User
         link.qr_id = qr.id
     db.session.flush()
     qr.processing_seconds = round(time.perf_counter() - t0, 4)
-    record_research_qr_creation(course.id, user.id, "playlist")
+    record_research_qr_creation(course.id, user.id, "playlist", qr.id)
     return qr, True
 
 
@@ -1539,7 +1580,7 @@ def create_qr_for_course_video(course: Course, video: Video, user: User, link: C
         link.qr_id = qr.id
     db.session.flush()
     qr.processing_seconds = round(time.perf_counter() - t0, 4)
-    record_research_qr_creation(course.id, user.id, "video")
+    record_research_qr_creation(course.id, user.id, "video", qr.id)
     return qr, True
 
 
