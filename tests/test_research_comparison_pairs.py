@@ -197,6 +197,31 @@ def test_flask_role_workflow_and_legacy_schema(tmp_path,monkeypatch):
         with app.app_context():
             checked=db.session.get(ResearchComparisonPair,pid)
             assert checked.active and checked.is_paired
+        # Loại thứ hai: chỉ chấp nhận QR video tạo qua đúng nút hàng loạt.
+        with client.session_transaction() as ss:ss["user_id"]=aid
+        bulk_data=dict(BULK,form_type="pair_create",lecturer_id=str(tid),course_id=str(cid))
+        assert client.post("/research",data=bulk_data).status_code==302
+        with app.app_context():
+            second=ResearchComparisonPair.query.filter_by(
+                lecturer_id=tid,task_kind="QR_VIDEO_HANG_LOAT").one()
+            second_id=second.id
+        with client.session_transaction() as ss:ss["user_id"]=tid
+        assert client.post(f"/research/measurement/{second_id}/start").status_code==302
+        with app.test_request_context(f"/courses/{cid}/qr/bulk",method="POST"):
+            from flask import session
+            session["user_id"]=tid
+            session["research_measurement_id"]=second_id
+            for _ in range(15):web.record_research_qr_creation(cid,tid,"video")
+            db.session.commit()
+        assert client.post("/research/measurement/progress",
+            data={"operations_count":"8"}).status_code==200
+        assert client.post(f"/research/measurement/{second_id}/finish",
+            data={"operations_count":"9"}).status_code==302
+        with app.app_context():
+            second=db.session.get(ResearchComparisonPair,second_id)
+            assert second.is_paired and second.measurement_bulk_videos==15
+            summary,totals=pair_metrics(ResearchComparisonPair.query.all())
+            assert len(summary)==2 and totals["video_coverage"]==68
         with client.session_transaction() as ss:ss["user_id"]=aid
         res=client.get("/research")
         assert res.status_code==200
