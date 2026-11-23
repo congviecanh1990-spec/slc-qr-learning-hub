@@ -132,8 +132,8 @@ def test_research_admin_workflow_end_to_end(tmp_path, monkeypatch):
     )
     with application.app_context():
         db.create_all()
-        admin=User(email="admin-r@example.test",name="Admin",role="admin")
-        teacher=User(email="teacher-r@example.test",name="GV thực nghiệm",role="lecturer")
+        admin=User(email="admin-r@example.test",name="Admin",role="admin",profile_completed=True)
+        teacher=User(email="teacher-r@example.test",name="GV thực nghiệm",role="lecturer",profile_completed=True)
         db.session.add_all([admin,teacher]);db.session.flush()
         course=Course(owner_id=teacher.id,name="Lập trình Python",code="HP001")
         db.session.add(course);db.session.commit()
