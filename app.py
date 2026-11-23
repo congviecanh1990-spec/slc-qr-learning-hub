@@ -2472,10 +2472,19 @@ def register_routes(app):
         if len(raw_ids) > 2000 or any(not str(value).isascii() or not str(value).isdigit() or int(value) <= 0 for value in raw_ids):
             abort(400)
         override_ids = {int(value) for value in raw_ids}
+        # Tạo QR chỉ cho playlist thuộc đúng kết quả lọc mà người dùng đang chọn;
+        # không tự tạo QR cho playlist khác của cùng môn nằm ngoài từ khóa.
+        playlist_search = request.form.get("p_q", "").strip()[:150]
+        playlist_assignment = request.form.get("p_assignment", "").strip()
+        if playlist_assignment not in {"", "assigned", "unassigned"}:
+            abort(400)
+        filtered_ids = {playlist.id for playlist in
+                        filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()}
         all_links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
         links = [link for link in all_links
-                 if ((link.playlist_id not in override_ids) if selection_mode == "all"
-                     else (link.playlist_id in override_ids))]
+                 if link.playlist_id in filtered_ids and
+                 ((link.playlist_id not in override_ids) if selection_mode == "all"
+                  else (link.playlist_id in override_ids))]
         if not links:
             flash("Không có playlist nào được chọn và đã gán môn để tạo mã QR.", "warning")
             return redirect(redirect_to)
@@ -2516,7 +2525,8 @@ def register_routes(app):
         record_functional_test(
             "QR_PLAYLIST_FILTERED_BULK", "Tạo QR cho playlist đã chọn và đã gán môn", passed,
             owner_id=user.id,
-            note=f"Môn: {course.name}; tổng playlist đã gán {len(all_links)}; được chọn {len(links)}; "
+            note=f"Môn: {course.name}; bộ lọc {playlist_search!r}/{playlist_assignment or 'tất cả'}; "
+                 f"tổng playlist đã gán {len(all_links)}; trong phạm vi và được chọn {len(links)}; "
                  f"bỏ chọn {len(all_links)-len(links)}; QR mới {created}; đã có {existing}; bỏ qua {skipped}.",
         )
         record_webapp_experiment(
