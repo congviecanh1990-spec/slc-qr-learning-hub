@@ -52,25 +52,20 @@
   <div class="card-header fw-bold">1. Hiệu quả quy trình – đo đối chứng theo từng cặp</div>
   <div class="card-body">
     <div class="alert alert-info small">
-      <strong>Nguyên tắc đo:</strong> Mỗi mã lượt đo gồm <strong>cùng giảng viên, cùng học phần,
-      cùng tập học liệu, cùng số QR</strong> và hai cách thực hiện (thủ công / Web App).
-      Đo <strong>toàn bộ thời gian người dùng thao tác</strong> từ bắt đầu đến khi lưu đủ mã QR,
-      không thay bằng thời gian xử lý máy chủ tự ghi. Số thao tác đếm theo cùng
-      quy ước (ví dụ: nhấp/chọn, sao chép/dán, điều hướng, lưu/tải). <strong>QR playlist:
-      mỗi playlist chỉ tính một QR; số video trong playlist được ghi riêng.</strong>
-      Nếu giảng viên tạo 3 QR video và 5 QR playlist chứa 50 video, phải ghi
-      <strong>hai cặp đo riêng</strong>, không gộp thành một lượt.
+      <strong>Đo theo 2 loại nhiệm vụ:</strong> Tạo QR cho từng video hoặc playlist,
+      và tạo QR video hàng loạt. Giây/video = <strong>tổng số giây / tổng số video học liệu</strong>
+      (video lẻ + video trong playlist). Mỗi playlist chỉ tạo 1 QR nhưng có thể bao phủ nhiều video.
+      Quản trị viên nhập kết quả <strong>thủ công</strong>; mã lượt đo tự sinh.
+      Giảng viên chỉ bấm <strong>Bắt đầu/Kết thúc đo</strong> tại mục
+      <a href="{{ url_for('research_measurement_page') }}">Đo Web App</a>;
+      hệ thống tự ghi số thao tác và thời gian trên Web App, kiểm tra số QR tạo mới.
     </div>
     <h5 class="mb-3">A. Lập lượt đo đối chứng mới</h5>
     <form method="post" class="border rounded p-3 mb-4" action="{{ url_for('research_page') }}#cap-do-chi-tiet">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="form_type" value="pair_create">
       <div class="row g-3">
-        <div class="col-lg-3">
-          <label class="form-label fw-semibold">Mã lượt đo *</label>
-          <input class="form-control" name="pair_code" placeholder="TN01-QRVIDEO" maxlength="64"
-                 pattern="[A-Za-z0-9_-]{3,64}" required>
-        </div>
+
         <div class="col-lg-4">
           <label class="form-label fw-semibold">Giảng viên thực nghiệm *</label>
           <select class="form-select" name="lecturer_id" required>
@@ -94,10 +89,7 @@
             {% for key, name in pair_kinds %}<option value="{{ key }}">{{ name }}</option>{% endfor %}
           </select>
         </div>
-        <div class="col-lg-7">
-          <div class="small text-muted pt-lg-4">Ví dụ: 15 QR video lẻ = 15 video, 0 playlist, 15 QR;
-          5 QR playlist chứa 50 video = 0 video lẻ, 5 playlist, 50 video trong playlist, 5 QR.</div>
-        </div>
+
         <div class="col-sm-6 col-lg-3">
           <label class="form-label">Số video lẻ *</label>
           <input class="form-control" name="video_count" type="number" min="0" value="0" required>
@@ -111,14 +103,14 @@
           <input class="form-control" name="playlist_video_count" type="number" min="0" value="0" required>
         </div>
         <div class="col-sm-6 col-lg-3">
-          <label class="form-label fw-semibold">Số mã QR cần tạo *</label>
-          <input class="form-control" name="qr_count" type="number" min="1" required>
+          <label class="form-label fw-semibold">Số QR cần tạo (tự tính)</label>
+          <input class="form-control" type="text" value="= Số video lẻ + Số playlist" disabled>
         </div>
       </div>
       <div class="row g-3 mt-1">
         <div class="col-lg-6">
           <div class="border rounded p-3 h-100">
-            <h6 class="fw-bold">Quy trình thủ công (bắt buộc)</h6>
+            <h6 class="fw-bold">Quy trình thủ công – chỉ quản trị viên nhập</h6>
             <label class="form-label">Số thao tác thủ công *</label>
             <input class="form-control mb-2" name="manual_operations" type="number" min="1" required>
             <label class="form-label">Tổng thời gian thủ công (giây) *</label>
@@ -126,13 +118,12 @@
           </div>
         </div>
         <div class="col-lg-6">
-          <div class="border rounded p-3 h-100">
-            <h6 class="fw-bold">Quy trình Web App (có thể bổ sung sau)</h6>
-            <label class="form-label">Số thao tác trên Web App</label>
-            <input class="form-control mb-2" name="webapp_operations" type="number" min="1">
-            <label class="form-label">Tổng thời gian thực tế trên Web App (giây)</label>
-            <input class="form-control" name="webapp_seconds" type="number" min="0.01" step="0.01">
-            <div class="small text-muted mt-2">Nếu chưa đo Web App, để trống cả hai ô. Lượt đo sẽ ở trạng thái chờ, chưa tính vào báo cáo.</div>
+          <div class="border rounded bg-light p-3 h-100">
+            <h6 class="fw-bold">Web App – hoàn toàn tự động</h6>
+            Hệ thống tự tính thời gian từ Bắt đầu đến Kết thúc, tự đếm số lần nhấn/chọn
+            trên giao diện và đối chiếu số QR được tạo mới.
+            <div class="small text-muted mt-2">Không có ô nhập thời gian hoặc thao tác Web App.
+            Kết quả chỉ được chấp nhận khi đúng giảng viên, môn học và khối lượng.</div>
           </div>
         </div>
       </div>
@@ -147,34 +138,35 @@
     <h5 class="mb-2">B. Kết quả đối chứng theo từng loại học liệu</h5>
     <div class="small text-muted mb-2">
       Chỉ tổng hợp các lượt có cả hai phép đo, cùng giảng viên và cùng khối lượng.
-      Trung bình/QR = tổng thời gian của các cặp hợp lệ chia tổng số QR tương ứng;
-      các nhóm video lẻ, video hàng loạt và playlist được trình bày riêng.
+      Thời gian bình quân/video = tổng thời gian chia tổng số video học liệu bao phủ;
+      chỉ có hai nhóm nhiệm vụ, và chỉ tính lượt Web App đã đo, đối chiếu QR thành công.
     </div>
     <div class="table-responsive mb-3">
       <table class="table table-bordered table-sm align-middle">
         <thead class="table-light"><tr>
-          <th>Loại nhiệm vụ</th><th>Số cặp</th><th>Số QR</th>
-          <th>Thủ công (giây/QR)</th><th>Web App (giây/QR)</th>
+          <th>Loại nhiệm vụ</th><th>Số cặp</th><th>Số QR</th><th>Video học liệu</th>
+          <th>Thủ công (giây/video)</th><th>Web App (giây/video)</th>
           <th>Thao tác/QR (thủ công → Web App)</th>
           <th>Giảm thời gian</th><th>Giảm thao tác</th>
         </tr></thead>
         <tbody>
         {% for g in paired_groups %}
           <tr>
-            <td>{{ g.label }}</td><td>{{ g.n }}</td><td>{{ g.qr_count }}</td>
-            <td>{{ '%.2f'|format(g.manual_per_qr) }}</td>
-            <td>{{ '%.2f'|format(g.app_per_qr) }}</td>
+            <td>{{ g.label }}</td><td>{{ g.n }}</td><td>{{ g.qr_count }}</td><td>{{ g.video_coverage }}</td>
+            <td>{{ '%.2f'|format(g.manual_per_video) }}</td>
+            <td>{{ '%.2f'|format(g.app_per_video) }}</td>
             <td>{{ '%.2f'|format(g.manual_ops_per_qr) }} → {{ '%.2f'|format(g.app_ops_per_qr) }}</td>
             <td>{{ g.time_reduction }}%</td><td>{{ g.ops_reduction }}%</td>
           </tr>
         {% else %}
-          <tr><td colspan="8" class="text-center text-muted">Chưa có cặp đo đầy đủ và hợp lệ. Chưa tính tỷ lệ tiết kiệm.</td></tr>
+          <tr><td colspan="9" class="text-center text-muted">Chưa có cặp đo Web App tự động đã xác minh. Chưa tính tỷ lệ tiết kiệm.</td></tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
     <p class="small mb-4"><strong>Tổng số cặp hoàn chỉnh:</strong> {{ paired_totals.paired_count }};
-      <strong>tổng QR cùng khối lượng được đối chứng:</strong> {{ paired_totals.qr_count }}.
+      <strong>tổng QR được đối chứng:</strong> {{ paired_totals.qr_count }};
+      <strong>tổng video học liệu:</strong> {{ paired_totals.video_coverage }}.
       {% if paired_totals.time_reduction is not none %}
       Mức giảm thời gian gộp các cặp đã hoàn thành: <strong>{{ paired_totals.time_reduction }}%</strong>;
       giảm thao tác: <strong>{{ paired_totals.ops_reduction }}%</strong>.
@@ -196,19 +188,19 @@
             <td><strong>{{ p.pair_code }}</strong><div class="small text-muted">{{ p.created_at.strftime('%d/%m/%Y') if p.created_at else '' }}</div></td>
             <td>{{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}
               <div class="small text-muted">{{ p.course.name if p.course else p.course_name_snapshot }}</div></td>
-            <td>{{ dict(pair_kinds).get(p.task_kind, p.task_kind) }}
+            <td>{{ dict(pair_kinds).get(normalize_pair_kind(p.task_kind), p.task_kind) }}
               <div class="small text-muted">{{ p.video_count }} video lẻ; {{ p.playlist_count }} playlist;
                 {{ p.playlist_video_count }} video trong playlist; <strong>{{ p.qr_count }} QR</strong></div>
               {% if p.note %}<div class="small text-muted">{{ p.note }}</div>{% endif %}
             </td>
             <td>{{ p.manual_operations }} thao tác
               <div>{{ '%.2f'|format(p.manual_seconds) }} giây</div>
-              <div class="small text-muted">{{ '%.2f'|format(p.manual_seconds / p.qr_count) }} giây/QR</div></td>
+              <div class="small text-muted">{{ '%.2f'|format(p.manual_seconds / (p.video_count + p.playlist_video_count)) }} giây/video</div></td>
             <td>
               {% if p.webapp_seconds is not none and p.webapp_operations is not none %}
-                {{ p.webapp_operations }} thao tác
+                {{ p.webapp_operations }} thao tác (tự ghi)
                 <div>{{ '%.2f'|format(p.webapp_seconds) }} giây</div>
-                <div class="small text-muted">{{ '%.2f'|format(p.webapp_seconds / p.qr_count) }} giây/QR</div>
+                <div class="small text-muted">{{ '%.2f'|format(p.webapp_seconds / (p.video_count + p.playlist_video_count)) }} giây/video</div>
               {% else %}<span class="text-muted">Chưa đo</span>{% endif %}
             </td>
             <td>
@@ -219,15 +211,19 @@
                 <span class="text-success fw-semibold">Đủ cặp đo</span>
                 <div class="small">Giảm thời gian: {{ '%.1f'|format(100 * (p.manual_seconds - p.webapp_seconds) / p.manual_seconds) }}%</div>
               {% else %}
-                <div class="text-warning-emphasis fw-semibold mb-1">Chờ bổ sung Web App</div>
-                <form method="post" action="{{ url_for('research_pair_webapp_result', pair_id=p.id) }}#cap-do-chi-tiet" class="border rounded p-2">
+                <div class="text-warning-emphasis fw-semibold mb-1">{{ 'Đang đo' if p.measurement_started_at else 'Chờ giảng viên bắt đầu đo' }}</div>
+                <div class="small text-muted">Web App sẽ tự điền kết quả khi giảng viên hoàn tất đủ mã QR.</div>
+              {% endif %}
+              {% if p.active and p.measurement_started_at and not p.measurement_verified %}
+              <details class="mt-2">
+                <summary class="small text-muted">Đặt lại lượt đo chưa hoàn thành</summary>
+                <form method="post" action="{{ url_for('research_measurement_admin_reset', pair_id=p.id) }}#cap-do-chi-tiet">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <label class="small">Thao tác</label>
-                  <input class="form-control form-control-sm mb-1" name="webapp_operations" type="number" min="1" required>
-                  <label class="small">Giây thực tế</label>
-                  <input class="form-control form-control-sm mb-2" name="webapp_seconds" type="number" min="0.01" step="0.01" required>
-                  <button class="btn btn-primary btn-sm">Bổ sung Web App</button>
+                  <input name="reason" class="form-control form-control-sm my-1" minlength="5"
+                         maxlength="250" placeholder="Lý do đặt lại" required>
+                  <button class="btn btn-outline-secondary btn-sm">Đặt lại phiên đo</button>
                 </form>
+              </details>
               {% endif %}
               {% if p.active %}
               <details class="mt-2">
