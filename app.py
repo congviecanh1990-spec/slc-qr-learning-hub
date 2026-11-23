@@ -5006,56 +5006,89 @@ def register_routes(app):
     @app.get("/research/measurement")
     @login_required
     def research_measurement_page():
-        """Giảng viên chỉ bắt đầu/kết thúc đo, không nhập dữ liệu đối chứng."""
-        user = current_user()
-        ensure_research_comparison_schema()
-        pairs = (ResearchComparisonPair.query
-                 .filter_by(lecturer_id=user.id, active=True)
-                 .order_by(ResearchComparisonPair.created_at.desc()).limit(100).all())
-        active = active_research_measurement(user.id)
-        return render_template("research_measurement.html", research_pairs=pairs,
-                               active_pair=active, pair_kind_names=RESEARCH_PAIR_KIND_NAMES,
-                               normalize_pair_kind=normalize_kind)
+        # Địa chỉ cũ chuyển vào Kho học liệu; không còn giao diện đo riêng.
+        return redirect(url_for("videos_page") + "#thuc-nghiem-qr")
 
-    @app.post("/research/measurement/<int:pair_id>/start")
+    def research_auto_status_payload(pair):
+        if not pair:
+            return {"active": False}
+        complete = research_measurement_complete_qrs(pair)
+        return {
+            "active": True, "id": pair.id, "code": pair.pair_code,
+            "course_id": pair.course_id, "kind": normalize_kind(pair.task_kind),
+            "expected": pair.qr_count, "created": len(research_created_qr_ids(pair)),
+            "ready_to_save": complete, "operations": pair.measurement_operations,
+            "video_count": pair.video_count, "playlist_count": pair.playlist_count,
+        }
+
+    @app.get("/research/auto/status")
     @login_required
-    def research_measurement_start(pair_id):
+    def research_auto_status():
         user = current_user()
+        if user.role == "admin":
+            return jsonify({"active": False})
         ensure_research_comparison_schema()
-        pair = db.session.get(ResearchComparisonPair, pair_id) or abort(404)
-        if pair.lecturer_id != user.id or not pair.active:
-            abort(403)
-        course = db.session.get(Course, pair.course_id)
+        return jsonify(research_auto_status_payload(active_research_measurement(user.id)))
+
+    @app.post("/research/auto/start")
+    @login_required
+    def research_auto_start():
+        """Kích hoạt lúc GV chọn chức năng+môn ở Kho học liệu, không có trang đo."""
+        user = current_user()
+        if user.role == "admin":
+            return jsonify({"active": False, "message": "Chủ nhiệm chỉ nhập kết quả thủ công."})
+        ensure_research_comparison_schema()
+        course_id = request.form.get("course_id", type=int)
+        kind = (request.form.get("task_kind") or "").strip()
+        if kind not in RESEARCH_PAIR_KIND_NAMES:
+            abort(400)
+        course = db.session.get(Course, course_id) if course_id else None
         if not course or not course.active or course.owner_id != user.id:
             abort(403)
-        if pair.measurement_verified:
-            flash("Lượt đo đã hoàn thành, không đo trùng.", "warning")
-        elif pair.measurement_started_at:
-            if session.get("research_measurement_id") == pair.id:
-                flash("Phiên đo đang thực hiện. Tiếp tục tạo QR hoặc kết thúc đo.", "info")
-            else:
-                flash("Lượt đo đã được bắt đầu ở phiên khác. Liên hệ quản trị viên để đặt lại nếu cần.", "warning")
+        active_pair = active_research_measurement(user.id)
+        if active_pair:
+            if active_pair.course_id != course_id or normalize_kind(active_pair.task_kind) != kind:
+                return jsonify({"active": False,
+                                "message": "Có lượt đo khác đang thực hiện. Hãy lưu đủ QR của lượt đó trước."}), 409
+            return jsonify(research_auto_status_payload(active_pair))
+        ongoing = ResearchComparisonPair.query.filter(
+            ResearchComparisonPair.lecturer_id == user.id,
+            ResearchComparisonPair.active.is_(True),
+            ResearchComparisonPair.measurement_started_at.isnot(None),
+            ResearchComparisonPair.measurement_finished_at.is_(None)
+        ).order_by(ResearchComparisonPair.created_at).first()
+        if ongoing:
+            if ongoing.course_id != course_id or normalize_kind(ongoing.task_kind) != kind:
+                return jsonify({"active": False,
+                                "message": "Đang có lượt đo khác chưa kết thúc. Liên hệ quản trị viên."}), 409
+            # Tiếp tục đo đã khởi động nếu trình duyệt bị đóng/trở lại phiên đăng nhập.
+            pair = ongoing
         else:
-            ongoing = ResearchComparisonPair.query.filter(
+            pair = ResearchComparisonPair.query.filter(
                 ResearchComparisonPair.lecturer_id == user.id,
+                ResearchComparisonPair.course_id == course_id,
                 ResearchComparisonPair.active.is_(True),
-                ResearchComparisonPair.measurement_started_at.isnot(None),
-                ResearchComparisonPair.measurement_finished_at.is_(None)).first()
-            if ongoing:
-                flash("Bạn đang có lượt đo khác chưa kết thúc.", "warning")
-            else:
-                pair.measurement_started_at = utcnow()
-                pair.measurement_operations = 0
-                pair.measurement_single_videos = 0
-                pair.measurement_single_playlists = 0
-                pair.measurement_bulk_videos = 0
-                pair.measurement_verified = False
-                db.session.commit()
-                session["research_measurement_id"] = pair.id
-                session["research_measurement_nonce"] = secrets.token_hex(8)
-                flash("Đã bắt đầu đo. Chỉ dùng tab này; tạo QR như thường lệ rồi kết thúc đo.", "success")
-                return redirect(url_for("videos_page"))
-        return redirect(url_for("research_measurement_page"))
+                ResearchComparisonPair.measurement_started_at.is_(None),
+                ResearchComparisonPair.measurement_verified.is_(False),
+                ResearchComparisonPair.task_kind == kind
+            ).order_by(ResearchComparisonPair.created_at, ResearchComparisonPair.id).first()
+            if not pair:
+                return jsonify({"active": False,
+                    "message": "Chưa có lượt đối chứng tương ứng do quản trị viên lập. Bạn vẫn có thể tạo QR bình thường."})
+            pair.measurement_started_at = utcnow()
+            pair.measurement_finished_at = None
+            pair.measurement_saved_at = None
+            pair.measurement_save_method = None
+            pair.measurement_operations = 0
+            pair.measurement_single_videos = 0
+            pair.measurement_single_playlists = 0
+            pair.measurement_bulk_videos = 0
+            pair.measurement_qr_ids = "[]"
+            pair.measurement_verified = False
+            db.session.commit()
+        session["research_measurement_id"] = pair.id
+        session["research_measurement_nonce"] = secrets.token_hex(12)
+        return jsonify(research_auto_status_payload(pair))
 
     @app.post("/research/measurement/progress")
     @login_required
@@ -5072,56 +5105,88 @@ def register_routes(app):
         db.session.commit()
         return jsonify({"ok": True, "operations": pair.measurement_operations})
 
-    @app.post("/research/measurement/<int:pair_id>/finish")
+    @app.get("/research/auto/files")
     @login_required
-    def research_measurement_finish(pair_id):
-        user = current_user()
-        pair = active_research_measurement(user.id)
-        if not pair or pair.id != pair_id:
-            abort(403)
+    def research_auto_files():
+        pair = active_research_measurement(current_user().id)
+        if not pair or not research_measurement_complete_qrs(pair):
+            return jsonify({"ok": False, "reason": "incomplete"}), 409
+        ids = research_created_qr_ids(pair)
+        qrs = {qr.id:qr for qr in QrCode.query.filter(QrCode.id.in_(ids)).all()}
+        return jsonify({"ok":True,"pair_id":pair.id,
+                        "files":[{"id":i,"name":qr_download_name(qrs[i]),
+                                  "url":url_for("qr_png", qr_id=i)} for i in ids]})
+
+    @app.get("/research/auto/zip")
+    @login_required
+    def research_auto_zip():
+        pair = active_research_measurement(current_user().id)
+        if not pair or not research_measurement_complete_qrs(pair):
+            abort(409)
+        ids = research_created_qr_ids(pair)
+        qrs = {qr.id:qr for qr in QrCode.query.filter(QrCode.id.in_(ids)).all()}
+        memory = io.BytesIO()
+        names = set()
+        with zipfile.ZipFile(memory, "w", zipfile.ZIP_DEFLATED) as archive:
+            for i in ids:
+                qr = qrs[i]
+                data = io.BytesIO()
+                generate_branded_qr(qr).save(data, format="PNG")
+                filename = qr_download_name(qr)
+                if filename in names:
+                    stem, ext = os.path.splitext(filename)
+                    filename = f"{stem}_{qr.slug}{ext}"
+                names.add(filename)
+                archive.writestr(filename, data.getvalue())
+        memory.seek(0)
+        return send_file(memory, mimetype="application/zip",
+                         as_attachment=True, download_name=f"QR_thuc_nghiem_{pair.pair_code}.zip")
+
+    @app.post("/research/auto/complete")
+    @login_required
+    def research_auto_complete():
+        """Hoàn tất CHỈ SAU lưu; fallback cần GV xác nhận đã giải nén đúng thư mục."""
+        pair = active_research_measurement(current_user().id)
+        if not pair or not research_measurement_complete_qrs(pair):
+            return jsonify({"ok":False,"message":"Chưa đủ mã QR mới thuộc đúng học phần và nhiệm vụ."}), 409
+        method = (request.form.get("save_method") or "").strip()
+        if method not in {"directory_picker", "manual_confirmed"}:
+            abort(400)
+        if method == "manual_confirmed" and request.form.get("user_confirmed") != "yes":
+            return jsonify({"ok":False,"message":"Cần xác nhận đã tải và lưu đủ tệp QR."}), 400
+        raw_ids = request.form.get("saved_qr_ids", "")
+        try:
+            saved_ids = json.loads(raw_ids)
+        except (TypeError, ValueError):
+            abort(400)
+        created_ids = research_created_qr_ids(pair)
+        if not isinstance(saved_ids, list) or len(saved_ids) != len(created_ids) or (
+            set(saved_ids) != set(created_ids)):
+            return jsonify({"ok":False,"message":"Danh sách QR đã lưu không khớp mã QR được tạo mới."}), 400
         reported_ops = request.form.get("operations_count", type=int)
-        if reported_ops is not None and 0 <= reported_ops <= 100000:
-            pair.measurement_operations = max(pair.measurement_operations or 0, reported_ops)
-        # Đếm các QR tạo mới theo đúng nút/luồng nghiệp vụ đã sử dụng.
-        if normalize_kind(pair.task_kind) == "QR_VIDEO_HANG_LOAT":
-            complete = (pair.measurement_bulk_videos == pair.video_count and
-                        pair.measurement_single_videos == 0 and
-                        pair.measurement_single_playlists == 0)
-        else:
-            complete = (pair.measurement_single_videos == pair.video_count and
-                        pair.measurement_single_playlists == pair.playlist_count and
-                        pair.measurement_bulk_videos == 0)
-        if not complete or not pair.measurement_operations:
-            db.session.commit()
-            flash(
-                f"Chưa đủ QR mới hoặc thao tác để kết thúc đo: đã tạo từng video "
-                f"{pair.measurement_single_videos}/{pair.video_count}, playlist "
-                f"{pair.measurement_single_playlists}/{pair.playlist_count}, "
-                f"video hàng loạt {pair.measurement_bulk_videos}; "
-                f"thao tác {pair.measurement_operations}. Không ghi kết quả chưa hoàn thành.",
-                "warning")
-            return redirect(url_for("research_measurement_page"))
+        if reported_ops is None or reported_ops < 1 or reported_ops > 100000:
+            return jsonify({"ok":False,"message":"Chưa có số thao tác được ghi."}), 400
         finished_at = utcnow()
         started_at = pair.measurement_started_at
         if started_at.tzinfo is None:
             started_at = started_at.replace(tzinfo=timezone.utc)
         elapsed = (finished_at - started_at).total_seconds()
-        if not 0 < elapsed <= 864000:
-            flash("Thời lượng đo vượt giới hạn. Liên hệ quản trị viên để đặt lại lượt đo.", "warning")
-            return redirect(url_for("research_measurement_page"))
+        if elapsed <= 0 or elapsed > 864000:
+            return jsonify({"ok":False,"message":"Thời gian đo vượt giới hạn; cần quản trị viên kiểm tra."}), 409
+        pair.measurement_operations = max(pair.measurement_operations or 0, reported_ops)
         pair.webapp_operations = pair.measurement_operations
         pair.webapp_seconds = round(elapsed, 2)
         pair.measurement_finished_at = finished_at
+        pair.measurement_saved_at = finished_at
+        pair.measurement_save_method = method
         pair.measurement_verified = True
         pair.updated_at = finished_at
         db.session.commit()
         session.pop("research_measurement_id", None)
         session.pop("research_measurement_nonce", None)
-        flash(
-            f"Đã ghi tự động lượt {pair.pair_code}: {pair.webapp_seconds:.2f} giây; "
-            f"{pair.webapp_operations} thao tác; {pair.qr_count} QR; "
-            f"{video_coverage(pair)} video học liệu được bao phủ.", "success")
-        return redirect(url_for("research_measurement_page"))
+        return jsonify({"ok":True,"elapsed_seconds":pair.webapp_seconds,
+                        "operations":pair.webapp_operations,"qr_count":pair.qr_count,
+                        "save_method":method})
 
     @app.post("/research/comparison/<int:pair_id>/reset")
     @login_required
@@ -5144,6 +5209,9 @@ def register_routes(app):
         pair.measurement_single_playlists = 0
         pair.measurement_bulk_videos = 0
         pair.measurement_verified = False
+        pair.measurement_qr_ids = "[]"
+        pair.measurement_save_method = None
+        pair.measurement_saved_at = None
         pair.webapp_operations = None
         pair.webapp_seconds = None
         pair.note = ((pair.note or "") + f" | Đặt lại lượt đo: {reason}")[-2000:]
