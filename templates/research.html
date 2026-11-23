@@ -197,7 +197,7 @@
               <div>{{ '%.2f'|format(p.manual_seconds) }} giây</div>
               <div class="small text-muted">{{ '%.2f'|format(p.manual_seconds / (p.video_count + p.playlist_video_count)) }} giây/video</div></td>
             <td>
-              {% if p.webapp_seconds is not none and p.webapp_operations is not none %}
+              {% if p.is_paired %}
                 {{ p.webapp_operations }} thao tác (tự ghi)
                 <div>{{ '%.2f'|format(p.webapp_seconds) }} giây</div>
                 <div class="small text-muted">{{ '%.2f'|format(p.webapp_seconds / (p.video_count + p.playlist_video_count)) }} giây/video</div>
