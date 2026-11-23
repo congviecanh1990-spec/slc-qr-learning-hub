@@ -143,14 +143,14 @@ def test_research_admin_workflow_end_to_end(tmp_path, monkeypatch):
         # Render có thể đang dùng Neon nhánh test được tạo trước bản cập nhật:
         # mô phỏng cơ sở dữ liệu thiếu đúng bảng mới, phải tự bổ sung không mất dữ liệu.
         ResearchComparisonPair.__table__.drop(bind=db.engine)
-        assert not db.inspect(db.engine).has_table("research_comparison_pairs")
+        assert not webapp.inspect(db.engine).has_table("research_comparison_pairs")
     with application.test_client() as client:
         with client.session_transaction() as session:
             session["user_id"]=admin_id
         response=client.get("/research")
         assert response.status_code==200
         with application.app_context():
-            assert db.inspect(db.engine).has_table("research_comparison_pairs")
+            assert webapp.inspect(db.engine).has_table("research_comparison_pairs")
             assert User.query.count()==2 and Course.query.count()==1
         assert b"pair_create" in response.data
         form=dict(BASE,form_type="pair_create",lecturer_id=str(teacher_id),
