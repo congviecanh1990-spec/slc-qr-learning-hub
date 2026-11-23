@@ -20,7 +20,7 @@ from PIL import Image
 from qrcode.constants import ERROR_CORRECT_H
 from authlib.integrations.flask_client import OAuth
 from flask import (
-    Flask, Response, abort, current_app, flash, jsonify, redirect,
+    Flask, Response, abort, current_app, flash, jsonify, redirect, has_request_context,
     render_template, request, send_file, session, url_for
 )
 from flask_wtf.csrf import CSRFProtect
@@ -38,7 +38,7 @@ from models import (
 from security import encrypt_json, decrypt_json
 from research_comparison import (
     RESEARCH_PAIR_KINDS, RESEARCH_PAIR_KIND_NAMES, validate_pair_form,
-    validate_webapp_observation, pair_metrics,
+    normalize_kind, pair_metrics, video_coverage,
 )
 from services.error_reporting import login_failure_reason, safe_error_diagnostic
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
@@ -1013,6 +1013,70 @@ def record_webapp_experiment(owner_id, task_key, elapsed_seconds, operations_cou
     ))
 
 
+def ensure_research_comparison_schema():
+    """Nâng cấp gia tăng bảng đối chứng, không đổi dữ liệu cũ trên Neon."""
+    connection = db.session.connection()
+    table = ResearchComparisonPair.__tablename__
+    if not inspect(connection).has_table(table):
+        ResearchComparisonPair.__table__.create(bind=connection, checkfirst=True)
+        db.session.commit()
+        return
+    columns = {col["name"] for col in inspect(connection).get_columns(table)}
+    additions = {
+        "lecturer_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
+        "course_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
+        "measurement_started_at": "TIMESTAMP WITH TIME ZONE",
+        "measurement_finished_at": "TIMESTAMP WITH TIME ZONE",
+        "measurement_operations": "INTEGER NOT NULL DEFAULT 0",
+        "measurement_single_videos": "INTEGER NOT NULL DEFAULT 0",
+        "measurement_single_playlists": "INTEGER NOT NULL DEFAULT 0",
+        "measurement_bulk_videos": "INTEGER NOT NULL DEFAULT 0",
+        "measurement_verified": "BOOLEAN NOT NULL DEFAULT FALSE",
+    }
+    missing = [name for name in additions if name not in columns]
+    if missing:
+        for name in missing:
+            dtype = additions[name]
+            if db.engine.dialect.name == "sqlite" and dtype == "TIMESTAMP WITH TIME ZONE":
+                dtype = "DATETIME"
+            db.session.execute(text(
+                f"ALTER TABLE research_comparison_pairs ADD COLUMN {name} {dtype}"))
+        db.session.commit()
+        current_app.logger.info("Research comparison columns added: %s", ", ".join(missing))
+
+
+def active_research_measurement(user_id=None):
+    """Chỉ nhận phiên đo đã được chính tài khoản giảng viên khởi động."""
+    if not has_request_context():
+        return None
+    pair_id = session.get("research_measurement_id")
+    if not pair_id:
+        return None
+    user_id = user_id or session.get("user_id")
+    pair = db.session.get(ResearchComparisonPair, pair_id)
+    if not pair or not pair.active or pair.lecturer_id != user_id or (
+        not pair.measurement_started_at or pair.measurement_finished_at):
+        return None
+    return pair
+
+
+def record_research_qr_creation(course_id, lecturer_id, kind):
+    """Đếm mã QR THỰC SỰ tạo mới, theo đúng đường dẫn nút của bài đo."""
+    if not has_request_context() or not session.get("research_measurement_id"):
+        return
+    pair = active_research_measurement(lecturer_id)
+    if not pair or pair.course_id != course_id:
+        return
+    endpoint = request.endpoint
+    if kind == "video" and endpoint in {"create_video_qr_from_library", "qr_page"}:
+        pair.measurement_single_videos += 1
+    elif kind == "playlist" and endpoint in {"create_playlist_qr_from_library", "create_playlist_qr"}:
+        pair.measurement_single_playlists += 1
+    elif kind == "video" and endpoint == "create_course_qrs_bulk":
+        pair.measurement_bulk_videos += 1
+    # Không coi video từ playlist tạo hàng loạt là thao tác tạo QR từng playlist.
+
+
 def research_setting(key, default=""):
     row = ResearchSetting.query.filter_by(key=key).first()
     return row.value if row and row.value else default
@@ -1329,6 +1393,7 @@ def create_qr_for_course_playlist(course: Course, playlist: Playlist, user: User
         link.qr_id = qr.id
     db.session.flush()
     qr.processing_seconds = round(time.perf_counter() - t0, 4)
+    record_research_qr_creation(course.id, user.id, "playlist")
     return qr, True
 
 
@@ -1472,6 +1537,7 @@ def create_qr_for_course_video(course: Course, video: Video, user: User, link: C
         link.qr_id = qr.id
     db.session.flush()
     qr.processing_seconds = round(time.perf_counter() - t0, 4)
+    record_research_qr_creation(course.id, user.id, "video")
     return qr, True
 
 
