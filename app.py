@@ -2404,7 +2404,18 @@ def register_routes(app):
         if playlist_assignment not in {"", "assigned", "unassigned"}:
             abort(400)
         redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
-        candidates = filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()
+        # Chọn mặc định mọi playlist đúng bộ lọc, bao gồm các trang khác;
+        # chỉ loại trừ những playlist được người dùng chủ động bỏ tích.
+        raw_exclusions = (request.form.getlist("excluded_playlist_ids")
+                          if hasattr(request.form, "getlist") else [])
+        if len(raw_exclusions) > 2000 or any(not str(value).isdecimal() for value in raw_exclusions):
+            abort(400)
+        excluded_ids = {int(value) for value in raw_exclusions}
+        all_candidates = filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()
+        candidates = [playlist for playlist in all_candidates if playlist.id not in excluded_ids]
+        if not candidates:
+            flash("Không có playlist nào được chọn để gán cho môn học/mô đun.", "warning")
+            return redirect(redirect_to)
         created = already = skipped = 0
         started = time.perf_counter()
         for playlist in candidates:
@@ -2422,10 +2433,11 @@ def register_routes(app):
         else:
             auto_added = auto_removed = 0
         record_functional_test(
-            "ASSIGN_PLAYLIST_FILTERED_BULK", "Gán tất cả playlist theo bộ lọc", bool(created or already),
+            "ASSIGN_PLAYLIST_FILTERED_BULK", "Gán playlist đã chọn theo bộ lọc", bool(created or already),
             owner_id=user.id,
             note=(f"Môn: {course.name}; bộ lọc: {playlist_search!r}/{playlist_assignment or 'tất cả'}; "
-                  f"khớp {len(candidates)}; gán mới/khôi phục {created}; đã gán {already}; "
+                  f"khớp {len(all_candidates)}; được chọn {len(candidates)}; bỏ chọn {len(all_candidates)-len(candidates)}; "
+                  f"gán mới/khôi phục {created}; đã gán {already}; "
                   f"không khả dụng {skipped}; tự thêm video {auto_added}; tự bỏ video {auto_removed}."),
         )
         db.session.commit()
@@ -2444,7 +2456,16 @@ def register_routes(app):
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
         redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
-        links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
+        raw_exclusions = (request.form.getlist("excluded_playlist_ids")
+                          if hasattr(request.form, "getlist") else [])
+        if len(raw_exclusions) > 2000 or any(not str(value).isdecimal() for value in raw_exclusions):
+            abort(400)
+        excluded_ids = {int(value) for value in raw_exclusions}
+        all_links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
+        links = [link for link in all_links if link.playlist_id not in excluded_ids]
+        if not links:
+            flash("Không có playlist nào được chọn và đã gán môn để tạo mã QR.", "warning")
+            return redirect(redirect_to)
         playlist_ids = [link.playlist_id for link in links]
         playable_ids = set()
         if playlist_ids:
@@ -2480,9 +2501,10 @@ def register_routes(app):
         elapsed = time.perf_counter() - started
         passed = bool(created or existing)
         record_functional_test(
-            "QR_PLAYLIST_FILTERED_BULK", "Tạo QR cho mọi playlist đã gán môn", passed,
+            "QR_PLAYLIST_FILTERED_BULK", "Tạo QR cho playlist đã chọn và đã gán môn", passed,
             owner_id=user.id,
-            note=f"Môn: {course.name}; tổng playlist đã gán {len(links)}; QR mới {created}; đã có {existing}; bỏ qua {skipped}.",
+            note=f"Môn: {course.name}; tổng playlist đã gán {len(all_links)}; được chọn {len(links)}; "
+                 f"bỏ chọn {len(all_links)-len(links)}; QR mới {created}; đã có {existing}; bỏ qua {skipped}.",
         )
         record_webapp_experiment(
             user.id, "TAO_QR_HANG_LOAT", elapsed, operations_count=1, success=passed,
