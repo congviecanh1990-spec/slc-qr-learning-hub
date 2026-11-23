@@ -22,7 +22,7 @@
   const bulkCourse=document.getElementById('videoBulkQrCourse');
   const bulkCount=document.getElementById('researchBulkCount');
   const STATE_KEY='slc-research-ui-v2:'+String(panel?.dataset.userId||'');
-  let active=null,operations=0,lastSent=-1;
+  let active=null,operations=0,lastSent=-1,pendingStartOperations=0;
   let chosenVideos=new Set(),fallbackFiles=null,interactionsOn=false;
   const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';
   const selectedMode=()=>modeInputs.find(i=>i.checked)?.value||'QR_TUNG_VIDEO_PLAYLIST';
@@ -71,6 +71,11 @@
     if(!active?.nonce)active.nonce=api.nonce||'';
     try{operations=Math.max(state.operations||0,Number(sessionStorage.getItem(fileKey()))||0);}catch(_){operations=state.operations||0;}
     interactionsOn=true;
+    if(pendingStartOperations){
+      operations+=pendingStartOperations;
+      pendingStartOperations=0;
+      try{sessionStorage.setItem(fileKey(),String(operations));}catch(_){}
+    }
     if(course)course.value=String(state.course_id);
     modeInputs.forEach(i=>i.checked=i.value===state.kind);
     setModeVisibility();
@@ -115,6 +120,9 @@
     if(active){
       if(String(active.course_id)===course.value&&active.kind===selectedMode())return;
       info('Có lượt đo khác đang thực hiện. Hãy hoàn tất lưu QR của lượt hiện tại.',true);
+      if(course)course.value=String(active.course_id);
+      modeInputs.forEach(i=>i.checked=i.value===active.kind);
+      setModeVisibility();
       return;
     }
     info('Đang kiểm tra nhiệm vụ đối chứng đã được giao…');
@@ -241,8 +249,14 @@
   },true);
   document.addEventListener('change',event=>{
     const target=event.target;
-    if(target.matches('input[name="qrWorkMode"]')){setModeVisibility();startSelectedMeasurement();}
-    if(target===course){setModeVisibility();startSelectedMeasurement();}
+    if(target.matches('input[name="qrWorkMode"]')){
+      if(!active)pendingStartOperations++;
+      setModeVisibility();startSelectedMeasurement();
+    }
+    if(target===course){
+      if(!active)pendingStartOperations++;
+      setModeVisibility();startSelectedMeasurement();
+    }
     if(target.matches('.video-check')){
       const id=Number(target.value);
       if(Number.isSafeInteger(id)&&id>0){
@@ -279,7 +293,10 @@
       event.preventDefault();info('Đang đo môn học khác. Chỉ tạo QR cho đúng môn đã chọn.',true);
     }
   },true);
-  window.addEventListener('qr-library-row-updated',()=>{if(active)window.setTimeout(refresh,200);});
+  window.addEventListener('qr-library-row-updated',()=>{
+    setModeVisibility();
+    if(active)window.setTimeout(refresh,200);
+  });
   window.addEventListener('pageshow',()=>{if(active)refresh();});
   saveDirectory?.addEventListener('click',saveDirect);
   zipButton?.addEventListener('click',fallbackZip);
