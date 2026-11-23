@@ -6,11 +6,12 @@
 </div>
 
 <div class="row g-2 mb-3">
-  <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">Tổng mã QR đã tạo</span><strong class="fs-4">{{ all_time_qrs }}</strong></div></div>
-  <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">QR đang sử dụng</span><strong class="fs-4">{{ total_qrs }}</strong></div></div>
+  <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">Tổng mã QR hiện có</span><strong class="fs-4">{{ total_qrs }}</strong></div></div>
+  <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">QR đã xóa/ngừng sử dụng (lịch sử)</span><strong class="fs-4">{{ inactive_qr_count }}</strong></div></div>
   <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">QR playlist đang dùng</span><strong class="fs-4">{{ playlist_qr_count }}</strong></div></div>
   <div class="col-sm-6 col-lg-3"><div class="card card-body py-2"><span class="small text-muted">QR video đang dùng</span><strong class="fs-4">{{ video_qr_count }}</strong></div></div>
 </div>
+<p class="small text-muted mb-3">Tổng mã QR hiện có chỉ tính các mã còn hoạt động. QR đã xóa/ngừng sử dụng không còn xuất hiện trong kho mã QR hoặc được quét để xem học liệu, nhưng được lưu lại để bảo toàn lịch sử quét/xem phục vụ nghiên cứu.</p>
 <form method="get" action="{{ url_for('qr_page') }}" class="card card-body shadow-sm mb-4" id="qr-course-filter">
   <div class="row g-2 align-items-end">
     <div class="col-lg-8">
