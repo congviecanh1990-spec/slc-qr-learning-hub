@@ -5180,7 +5180,10 @@ def register_routes(app):
         pair.measurement_finished_at = finished_at
         pair.measurement_saved_at = finished_at
         pair.measurement_save_method = method
-        pair.measurement_verified = True
+        # Chỉ lượt lưu PNG trực tiếp qua API trình duyệt mới được tính
+        # là đã xác minh. ZIP tự xác nhận giữ lại để kiểm tra, KHÔNG trộn
+        # vào các tỷ lệ giảm thời gian/thao tác của báo cáo khoa học.
+        pair.measurement_verified = method == "directory_picker"
         pair.updated_at = finished_at
         db.session.commit()
         session.pop("research_measurement_id", None)
