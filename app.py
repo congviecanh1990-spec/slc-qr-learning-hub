@@ -4722,6 +4722,13 @@ def register_routes(app):
             flash("Bạn không có quyền truy cập chức năng này. Chức năng chỉ dành cho Quản trị viên.", "warning")
             return redirect(url_for("index"))
 
+        # Bảng cặp đo được bổ sung sau khi dịch vụ thử nghiệm đã hoạt động.
+        # Nếu Render chưa khởi tạo schema mới, chỉ tạo bảng còn thiếu;
+        # KHÔNG sửa, xóa hoặc khởi tạo lại các bảng/dữ liệu nghiệp vụ cũ.
+        if not inspect(db.engine).has_table(ResearchComparisonPair.__tablename__):
+            ResearchComparisonPair.__table__.create(bind=db.engine, checkfirst=True)
+            current_app.logger.info("Research comparisons schema created on first admin access")
+
         if request.method == "POST":
             form_type = request.form.get("form_type")
             try:
