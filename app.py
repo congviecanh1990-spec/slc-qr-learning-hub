@@ -4729,10 +4729,29 @@ def register_routes(app):
         # nếu tạo bảng bằng kết nối khác trong khi phiên hiện tại đang mở giao dịch,
         # FK có thể bị chờ khóa và trang /research đứng quá lâu.
         schema_conn = db.session.connection()
-        if not inspect(schema_conn).has_table(ResearchComparisonPair.__tablename__):
+        pair_table = ResearchComparisonPair.__tablename__
+        if not inspect(schema_conn).has_table(pair_table):
             ResearchComparisonPair.__table__.create(bind=schema_conn, checkfirst=True)
             db.session.commit()  # xác nhận DDL trên Neon/PostgreSQL
             current_app.logger.info("Research comparisons table initialized safely")
+        else:
+            # Bảng này từng được tạo trước khi thêm hai cột lưu tên.
+            # create_all/checkfirst KHÔNG nâng cấp cột cho bảng đã có.
+            pair_columns = {col["name"] for col in inspect(schema_conn).get_columns(pair_table)}
+            new_columns = {
+                "lecturer_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
+                "course_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
+            }
+            missing_columns = [name for name in new_columns if name not in pair_columns]
+            if missing_columns:
+                for name in missing_columns:
+                    # Chỉ ALTER ADD COLUMN, không DROP/UPDATE dữ liệu cũ.
+                    db.session.execute(text(
+                        f"ALTER TABLE research_comparison_pairs ADD COLUMN {name} {new_columns[name]}"
+                    ))
+                db.session.commit()
+                current_app.logger.info(
+                    "Research comparisons schema upgraded: %s", ", ".join(missing_columns))
 
         if request.method == "POST":
             form_type = request.form.get("form_type")
