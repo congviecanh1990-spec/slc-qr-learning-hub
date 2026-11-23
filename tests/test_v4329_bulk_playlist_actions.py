@@ -194,6 +194,51 @@ request.form=Form(course_id=str(selection_course.id),p_q='Python',
 try:scope['bulk_assign_filtered_library_playlists']();assert False
 except PermissionError as e:assert str(e)=='400'
 
+# Header checkbox regression: Bỏ chọn TẤT CẢ trên mọi trang, sau đó tích lại
+# một số playlist rải ở cả trang 1 và trang 2.
+none_course=models.Course(owner_id=u1.id, code='C-NONE', name='Bỏ tất cả rồi chọn lại', active=True)
+s.add(none_course);s.commit()
+request.form=Form(course_id=str(none_course.id),p_q='Python',p_assignment='',
+    playlist_selection_mode='none',selected_playlist_ids=[str(pls[1].id),str(pls[6].id)])
+scope['bulk_assign_filtered_library_playlists']()
+rows={x.playlist_id for x in models.CoursePlaylist.query.filter_by(course_id=none_course.id,active=True).all()}
+assert rows=={pls[1].id,pls[6].id},rows
+# Không gán bất kỳ playlist không được tích, dù ở trang khác.
+assert all(p.id not in rows for p in pls if p.id not in {pls[1].id,pls[6].id})
+# Chỉ tạo QR cho playlist được tích lại và có video phát được.
+request.form=Form(course_id=str(none_course.id),playlist_selection_mode='none',
+    selected_playlist_ids=[str(pls[1].id)])
+scope['bulk_create_playlist_qrs_from_library']()
+none_qrs={x.playlist_id for x in models.QrCode.query.filter_by(
+    course_id=none_course.id,target_type='playlist',active=True).all()}
+assert none_qrs=={pls[1].id},none_qrs
+# Bỏ chọn tất cả mà không tích lại cái nào: cả hai thao tác là no-op.
+previous_links=models.CoursePlaylist.query.filter_by(course_id=none_course.id).count()
+previous_qrs=models.QrCode.query.filter_by(course_id=none_course.id).count()
+request.form=Form(course_id=str(none_course.id),p_q='Python',
+    playlist_selection_mode='none',selected_playlist_ids=[])
+scope['bulk_assign_filtered_library_playlists']()
+scope['bulk_create_playlist_qrs_from_library']()
+assert models.CoursePlaylist.query.filter_by(course_id=none_course.id).count()==previous_links
+assert models.QrCode.query.filter_by(course_id=none_course.id).count()==previous_qrs
+# Chọn tất cả bằng ô tiêu đề: danh sách chọn lại bị xóa, xử lý mọi kết quả lọc.
+all_course=models.Course(owner_id=u1.id, code='C-ALL', name='Tích tất cả mọi trang', active=True)
+s.add(all_course);s.commit()
+request.form=Form(course_id=str(all_course.id),p_q='Python',p_assignment='',
+    playlist_selection_mode='all',excluded_playlist_ids=[])
+scope['bulk_assign_filtered_library_playlists']()
+assert {x.playlist_id for x in models.CoursePlaylist.query.filter_by(
+    course_id=all_course.id,active=True).all()}=={p.id for p in pls}
+# Trường chọn không hợp lệ không được âm thầm chuyển thành chọn hết.
+request.form=Form(course_id=str(none_course.id),p_q='Python',
+    playlist_selection_mode='invalid',selected_playlist_ids=[])
+try:scope['bulk_assign_filtered_library_playlists']();assert False
+except PermissionError as e:assert str(e)=='400'
+request.form=Form(course_id=str(none_course.id),
+    playlist_selection_mode='none',selected_playlist_ids=['oops'])
+try:scope['bulk_create_playlist_qrs_from_library']();assert False
+except PermissionError as e:assert str(e)=='400'
+
 # Existing single-playlist forms still exist; bulk is a separate, non-nested form.
 ui=(ROOT/'templates/videos.html').read_text()
 env=Environment(loader=FileSystemLoader(str(ROOT/'templates')))
@@ -209,7 +254,9 @@ assert 'playlistBulkActions' in ui and 'data-confirm-bulk' not in ui
 assert 'id="selectAllPlaylists"' in ui
 assert 'excluded_playlist_ids' in ui and 'sessionStorage.setItem' in ui
 assert 'playlist-bulk-check' in (ROOT/'templates/_playlist_library_row.html').read_text()
-assert "selected_playlist_ids" not in ui  # server uses exclusion list to preserve pagination semantics
+assert "selected_playlist_ids" in ui and "playlist_selection_mode" in ui
+assert "Đã BỎ CHỌN TẤT CẢ playlist trên mọi trang." in ui
+assert "selectAllPlaylists" in ui and "master.checked ? 'all' : 'none'" in ui
 assert 'set_playlist_course_assignments' in (ROOT/'templates/_playlist_library_row.html').read_text()
 assert 'create_playlist_qr_from_library' in (ROOT/'templates/_playlist_library_row.html').read_text()
 print('PASS v4.3.29: all pages; server filters; no cross-user writes; additive assignment; reusing QR; no QR for empty/unusable playlists; preserved single actions.')
