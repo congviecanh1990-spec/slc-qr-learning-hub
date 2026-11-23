@@ -140,6 +140,9 @@ def test_research_admin_workflow_end_to_end(tmp_path, monkeypatch):
         course=Course(owner_id=teacher.id,name="Lập trình Python",code="HP001")
         db.session.add(course);db.session.commit()
         admin_id,teacher_id,course_id=admin.id,teacher.id,course.id
+        # Kết thúc transaction đọc User/Course trước khi DROP TABLE có FK
+        # đến hai bảng này; trên PostgreSQL nếu không sẽ tự chờ khóa.
+        db.session.remove()
         # Render có thể đang dùng Neon nhánh test được tạo trước bản cập nhật:
         # mô phỏng cơ sở dữ liệu thiếu đúng bảng mới, phải tự bổ sung không mất dữ liệu.
         ResearchComparisonPair.__table__.drop(bind=db.engine)
