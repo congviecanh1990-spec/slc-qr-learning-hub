@@ -93,6 +93,8 @@ def pair_metrics(pairs):
     """
     valid = [
         p for p in pairs if p.active and getattr(p, "measurement_verified", False)
+        and getattr(p, "measurement_save_method", None) == "directory_picker"
+        and getattr(p, "measurement_saved_at", None) is not None
         and p.webapp_operations is not None and p.webapp_seconds is not None
         and p.manual_seconds > 0 and p.manual_operations > 0
         and video_coverage(p) > 0
