@@ -10,7 +10,7 @@ import secrets
 import unicodedata
 import zipfile
 import time
-from datetime import timedelta, datetime, date
+from datetime import timedelta, datetime, date, timezone
 from functools import wraps
 from urllib.parse import urlparse, parse_qsl, urlencode
 
@@ -5021,7 +5021,10 @@ def register_routes(app):
                 "warning")
             return redirect(url_for("research_measurement_page"))
         finished_at = utcnow()
-        elapsed = (finished_at - pair.measurement_started_at).total_seconds()
+        started_at = pair.measurement_started_at
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        elapsed = (finished_at - started_at).total_seconds()
         if not 0 < elapsed <= 864000:
             flash("Thời lượng đo vượt giới hạn. Liên hệ quản trị viên để đặt lại lượt đo.", "warning")
             return redirect(url_for("research_measurement_page"))
