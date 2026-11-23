@@ -91,14 +91,14 @@
          aria-disabled="true"
          title="Tải tệp ZIP gồm các QR đã tạo của môn học đang chọn">Tải QR đã tạo</a>
     </div>
-    <div class="text-muted small mt-2">Ô tích ở tiêu đề bảng sẽ Chọn tất cả hoặc Bỏ chọn tất cả playlist trên MỌI trang kết quả lọc. Sau khi bỏ tất cả, bạn có thể tích lại từng playlist cần xử lý, kể cả khi chuyển trang. Gán môn chỉ áp dụng cho playlist đã chọn thuộc kết quả lọc; tạo QR chỉ áp dụng cho playlist đã chọn và đã gán vào môn. Khi đổi bộ lọc, lựa chọn trước đó vẫn được giữ trong cùng môn.</div>
-    <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">Mặc định đã chọn tất cả playlist.</div>
+    <div class="text-muted small mt-2">Mặc định không chọn playlist nào khi chưa tìm kiếm. Nhập từ khóa và nhấn Lọc playlist: tự tích chọn tất cả playlist khớp từ khóa ở mọi trang. Xóa từ khóa và Lọc lại: bỏ chọn toàn bộ. Bạn có thể dùng ô tích tiêu đề để chọn/bỏ chọn tất cả ở mọi trang, hoặc tích/bỏ tích từng playlist. Hai nút Gán môn và Tạo QR chỉ xử lý playlist đã chọn (tạo QR yêu cầu playlist đã gán môn).</div>
+    <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">{{ 'Các playlist tìm được đang được chọn.' if playlist_search else 'Chưa chọn playlist nào.' }}</div>
   </form>
 
   <div class="table-responsive playlist-table-wrap">
     <table class="table table-hover align-middle bg-white">
       <thead><tr>
-        <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllPlaylists" checked
+        <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllPlaylists" {{ 'checked' if playlist_search else '' }}
             aria-label="Chọn tất cả hoặc bỏ chọn tất cả playlist ở mọi trang"
             title="Chọn tất cả / Bỏ chọn tất cả playlist trên mọi trang, không chỉ trang đang xem"></th>
         <th>Playlist</th><th>Kênh YouTube</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
@@ -472,61 +472,67 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
 
 </script>
 <script>
-// Chọn tất cả / bỏ chọn tất cả áp dụng cho MỌI trang. Lưu trạng thái theo môn.
-// mode=all: mặc định chọn hết, ids là các playlist đã bỏ tích.
-// mode=none: mặc định bỏ hết, ids là các playlist được tích lại.
+// Chọn hoặc bỏ chọn TOÀN BỘ playlist trên MỌI trang của bộ lọc hiện tại.
+// Không có từ khóa: bỏ chọn hết. Khi nhấn Lọc với từ khóa: chọn mọi kết quả.
+// mode=all: tất cả playlist được chọn, ids là các mục bỏ tích.
+// mode=none: tất cả playlist bị bỏ chọn, ids là các mục tích lại.
 (function () {
   'use strict';
   const form=document.getElementById('playlistBulkActions');
+  const filterForm=document.getElementById('playlistLibraryFilterForm');
   const master=document.getElementById('selectAllPlaylists');
   const summary=document.getElementById('playlistBulkSelectedSummary');
-  if (!form) return;
-  const storagePrefix='slc-playlist-selection-v3:';
-  const scopeKey=()=>storagePrefix+JSON.stringify([
+  if(!form)return;
+  const storagePrefix='slc-playlist-selection-v4:';
+  const currentKeyword=(form.querySelector('[name="p_q"]')?.value || '').trim();
+  const defaultMode=keyword=>keyword.trim() ? 'all' : 'none';
+  const scopeKey=(courseId,keyword)=>storagePrefix+JSON.stringify([
     form.dataset.userId || '',
-    bulkCourseSelector?.value || ''
+    String(courseId || ''),
+    keyword.trim()
   ]);
-  const read=(key)=>{
+  const read=(key,keyword)=>{
     try {
-      const stored=JSON.parse(sessionStorage.getItem(key)||'null');
-      const mode=stored?.mode==='none' ? 'none' : 'all';
-      const ids=Array.isArray(stored?.ids) ? stored.ids.filter(
-        id=>Number.isSafeInteger(id) && id>0) : [];
-      return {mode,ids:new Set(ids)};
-    } catch (_) { return {mode:'all',ids:new Set()}; }
+      const stored=JSON.parse(sessionStorage.getItem(key) || 'null');
+      if(stored && (stored.mode==='none'||stored.mode==='all')){
+        const ids=Array.isArray(stored.ids) ? stored.ids.filter(
+          id=>Number.isSafeInteger(id) && id>0) : [];
+        return {mode:stored.mode,ids:new Set(ids)};
+      }
+    }catch(_){}
+    return {mode:defaultMode(keyword),ids:new Set()};
   };
-  let activeKey=scopeKey();
-  let initial=read(activeKey);
+  let activeKey=scopeKey(bulkCourseSelector?.value,currentKeyword);
+  let initial=read(activeKey,currentKeyword);
   let mode=initial.mode;
   let overrides=initial.ids;
-  const write=()=>{
-    try {sessionStorage.setItem(activeKey,JSON.stringify({mode,ids:[...overrides]}));}catch(_){}
-  };
-  const isSelected=id=>(mode==='all') ? !overrides.has(id) : overrides.has(id);
+  function write(){
+    try{sessionStorage.setItem(activeKey,JSON.stringify({mode,ids:[...overrides]}));}catch(_){}
+  }
+  const isSelected=id=>(mode==='all')?!overrides.has(id):overrides.has(id);
   function refresh(){
     const checks=[...document.querySelectorAll('.playlist-bulk-check')];
     checks.forEach(check=>{check.checked=isSelected(Number(check.value));});
     const selected=checks.filter(check=>check.checked).length;
     if(master){
-      // Ô tiêu đề thể hiện lựa chọn TOÀN CỤC, không phải chỉ 5 dòng/trang.
       master.checked=mode==='all' && overrides.size===0;
       master.indeterminate=overrides.size>0;
     }
     if(summary){
-      let status='';
-      if(mode==='all'){
-        status=overrides.size===0
-          ? 'Đã chọn TẤT CẢ playlist trên mọi trang.'
-          : 'Đã chọn tất cả playlist trên mọi trang, TRỪ '+overrides.size+' playlist bỏ tích.';
+      let description='';
+      if(mode==='none'){
+        description=overrides.size===0
+          ? 'Chưa chọn playlist nào trên tất cả các trang.'
+          : 'Đã tích chọn riêng '+overrides.size+' playlist trên các trang.';
       }else{
-        status=overrides.size===0
-          ? 'Đã BỎ CHỌN TẤT CẢ playlist trên mọi trang.'
-          : 'Đã bỏ chọn tất cả, sau đó tích lại '+overrides.size+' playlist trên các trang.';
+        description=overrides.size===0
+          ? 'Đã tích chọn TẤT CẢ playlist trong kết quả lọc, bao gồm các trang khác.'
+          : 'Đã chọn tất cả, trừ '+overrides.size+' playlist đã bỏ tích.';
       }
-      summary.textContent=status+' Trang này: '+selected+'/'+checks.length+' playlist được tích.';
+      summary.textContent=description+' Trang này: '+selected+'/'+checks.length+' được tích.';
     }
   }
-  function changeCheck(check){
+  function changeRow(check){
     const id=Number(check.value);
     if(!Number.isSafeInteger(id)||id<=0)return;
     if(mode==='all'){
@@ -534,22 +540,28 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
     }else{
       if(check.checked)overrides.add(id);else overrides.delete(id);
     }
-    write();
-    refresh();
+    write();refresh();
   }
   document.addEventListener('change',event=>{
     if(event.target===master){
-      mode=master.checked ? 'all' : 'none';
-      overrides.clear();
+      mode=master.checked?'all':'none';
+      overrides=new Set();
       write();refresh();
     }else if(event.target.matches('.playlist-bulk-check')){
-      changeCheck(event.target);
+      changeRow(event.target);
     }
   });
+  // Nhấn Lọc playlist là một lựa chọn mới, dù từ khóa giống lần trước.
+  // Xóa từ khóa rồi lọc lại LUÔN bỏ chọn tất cả, không giữ trạng thái cũ.
+  filterForm?.addEventListener('submit',()=>{
+    const nextKeyword=(filterForm.querySelector('[name="p_q"]')?.value||'').trim();
+    const key=scopeKey(bulkCourseSelector?.value,nextKeyword);
+    try{sessionStorage.setItem(key,JSON.stringify({mode:defaultMode(nextKeyword),ids:[]}));}catch(_){}
+  });
   bulkCourseSelector?.addEventListener('change',()=>{
-    // Mỗi lần người dùng chọn môn mới: chọn tất cả playlist theo mặc định.
-    activeKey=scopeKey();
-    mode='all';overrides=new Set();
+    activeKey=scopeKey(bulkCourseSelector.value,currentKeyword);
+    mode=defaultMode(currentKeyword);
+    overrides=new Set();
     write();refresh();
   });
   form.addEventListener('submit',()=>{
@@ -563,7 +575,7 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
     for(const id of overrides){
       const hidden=document.createElement('input');
       hidden.type='hidden';
-      hidden.name=(mode==='all') ? 'excluded_playlist_ids' : 'selected_playlist_ids';
+      hidden.name=(mode==='all')?'excluded_playlist_ids':'selected_playlist_ids';
       hidden.value=String(id);
       hidden.dataset.playlistSelection='1';
       form.append(hidden);
