@@ -76,6 +76,12 @@ def validate_pair_form(form):
     )
 
 
+def validate_webapp_observation(form):
+    operations=_positive_int(form.get("webapp_operations"), "Số thao tác Web App")
+    seconds=_positive_seconds(form.get("webapp_seconds"), "Thời gian Web App")
+    return operations, seconds
+
+
 def pair_metrics(pairs):
     """Tính trên các cặp tương đồng và đủ hai phép đo, bỏ qua bản ghi cũ."""
     valid = [p for p in pairs if p.active and p.webapp_operations is not None
