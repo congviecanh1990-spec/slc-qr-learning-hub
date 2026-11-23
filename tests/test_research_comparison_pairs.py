@@ -192,7 +192,11 @@ def test_flask_role_workflow_and_legacy_schema(tmp_path,monkeypatch):
         # Trang nghiên cứu cũ từ chối qua chuyển hướng, API mới từ chối qua 403.
         assert client.post(f"/research/comparison/{pid}/void",
             data={"void_reason":"test invalid"}).status_code in (302,403)
-        assert client.post(f"/research/comparison/{pid}/reset",data={"reason":"test invalid"}).status_code==403
+        assert client.post(f"/research/comparison/{pid}/reset",
+            data={"reason":"test invalid"}).status_code in (302,403)
+        with app.app_context():
+            checked=db.session.get(ResearchComparisonPair,pid)
+            assert checked.active and checked.is_paired
         with client.session_transaction() as ss:ss["user_id"]=aid
         res=client.get("/research")
         assert res.status_code==200
