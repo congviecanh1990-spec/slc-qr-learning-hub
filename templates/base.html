@@ -53,6 +53,7 @@
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'teaching_classes' else '' }}" href="{{ url_for('teaching_classes_page') }}">Danh sách lớp đang dạy</a></li>
           {% if me.role == 'admin' %}<li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'class_admin' else '' }}" href="{{ url_for('classes_page') }}">Quản lý lớp</a></li>{% endif %}
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'videos' else '' }}" href="{{ url_for('videos_page') }}">Kho video học liệu</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('research_measurement_page') }}">Đo Web App{% if session.get('research_measurement_id') %} ●{% endif %}</a></li>
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'qr' else '' }}" href="{{ url_for('qr_page') }}">Mã QR động</a></li>
           <li class="nav-item"><a class="nav-link {{ 'nav-current' if active_section == 'analytics' else '' }}" href="{{ url_for('analytics') }}">Thống kê khai thác</a></li>
           {% if me.role == 'admin' %}
@@ -95,6 +96,14 @@
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 {% block scripts %}{% endblock %}
+{% if me and me.profile_completed and session.get('research_measurement_id') %}
+<script>window.researchMeasurement = {
+  id: {{ session.get('research_measurement_id')|tojson }},
+  nonce: {{ session.get('research_measurement_nonce', '')|tojson }},
+  progressUrl: {{ url_for('research_measurement_progress')|tojson }}
+};</script>
+<script defer src="{{ url_for('static', filename='research_measurement.js') }}"></script>
+{% endif %}
 {% if me and me.profile_completed %}
 <script>window.youtubeSyncAutoStart = {{ 'true' if session.get('yt_auto_sync_request') else 'false' }};</script>
 <script defer src="{{ url_for('static', filename='youtube_sync.js') }}"></script>
