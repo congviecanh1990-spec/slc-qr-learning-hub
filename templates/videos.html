@@ -91,7 +91,7 @@
          aria-disabled="true"
          title="Tải tệp ZIP gồm các QR đã tạo của môn học đang chọn">Tải QR đã tạo</a>
     </div>
-    <div class="text-muted small mt-2">Mặc định tất cả playlist đều được tích chọn, kể cả ở các trang khác. Bỏ tích playlist không muốn gán môn hoặc tạo QR. Lựa chọn bỏ tích được giữ khi chuyển trang hoặc đổi bộ lọc trong cùng môn đã chọn. Gán theo kết quả lọc; tạo QR chỉ cho playlist đã gán vào môn và không bị bỏ tích. Để loại một playlist đã gán trước đó khi tạo QR, hãy chọn bộ lọc Tất cả hoặc Đã gán rồi bỏ tích playlist đó.</div>
+    <div class="text-muted small mt-2">Ô tích ở tiêu đề bảng sẽ Chọn tất cả hoặc Bỏ chọn tất cả playlist trên MỌI trang kết quả lọc. Sau khi bỏ tất cả, bạn có thể tích lại từng playlist cần xử lý, kể cả khi chuyển trang. Gán môn chỉ áp dụng cho playlist đã chọn thuộc kết quả lọc; tạo QR chỉ áp dụng cho playlist đã chọn và đã gán vào môn. Khi đổi bộ lọc, lựa chọn trước đó vẫn được giữ trong cùng môn.</div>
     <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">Mặc định đã chọn tất cả playlist.</div>
   </form>
 
@@ -99,8 +99,8 @@
     <table class="table table-hover align-middle bg-white">
       <thead><tr>
         <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllPlaylists" checked
-            aria-label="Tích hoặc bỏ tích toàn bộ playlist trên trang hiện tại"
-            title="Tích hoặc bỏ tích tất cả playlist trên trang đang hiển thị"></th>
+            aria-label="Chọn tất cả hoặc bỏ chọn tất cả playlist ở mọi trang"
+            title="Chọn tất cả / Bỏ chọn tất cả playlist trên mọi trang, không chỉ trang đang xem"></th>
         <th>Playlist</th><th>Kênh YouTube</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
       </tr></thead>
       <tbody>
@@ -472,72 +472,100 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
 
 </script>
 <script>
-// Lưu các playlist BỎ chọn giữa các trang; mặc định toàn bộ kết quả được chọn.
-// Khóa lưu phụ thuộc người dùng và môn học; giữ lựa chọn khi đổi trang/bộ lọc.
+// Chọn tất cả / bỏ chọn tất cả áp dụng cho MỌI trang. Lưu trạng thái theo môn.
+// mode=all: mặc định chọn hết, ids là các playlist đã bỏ tích.
+// mode=none: mặc định bỏ hết, ids là các playlist được tích lại.
 (function () {
   'use strict';
   const form=document.getElementById('playlistBulkActions');
   const master=document.getElementById('selectAllPlaylists');
   const summary=document.getElementById('playlistBulkSelectedSummary');
   if (!form) return;
-  const storagePrefix='slc-playlist-excluded-v2:';
+  const storagePrefix='slc-playlist-selection-v3:';
   const scopeKey=()=>storagePrefix+JSON.stringify([
     form.dataset.userId || '',
     bulkCourseSelector?.value || ''
   ]);
   const read=(key)=>{
     try {
-      const stored=JSON.parse(sessionStorage.getItem(key)||'[]');
-      return new Set(Array.isArray(stored) ? stored.filter(x=>Number.isSafeInteger(x)&&x>0) : []);
-    } catch (_) { return new Set(); }
-  };
-  const write=()=>{
-    try { sessionStorage.setItem(activeKey,JSON.stringify([...excluded])); } catch (_) {}
+      const stored=JSON.parse(sessionStorage.getItem(key)||'null');
+      const mode=stored?.mode==='none' ? 'none' : 'all';
+      const ids=Array.isArray(stored?.ids) ? stored.ids.filter(
+        id=>Number.isSafeInteger(id) && id>0) : [];
+      return {mode,ids:new Set(ids)};
+    } catch (_) { return {mode:'all',ids:new Set()}; }
   };
   let activeKey=scopeKey();
-  let excluded=read(activeKey);
+  let initial=read(activeKey);
+  let mode=initial.mode;
+  let overrides=initial.ids;
+  const write=()=>{
+    try {sessionStorage.setItem(activeKey,JSON.stringify({mode,ids:[...overrides]}));}catch(_){}
+  };
+  const isSelected=id=>(mode==='all') ? !overrides.has(id) : overrides.has(id);
   function refresh(){
     const checks=[...document.querySelectorAll('.playlist-bulk-check')];
-    checks.forEach(check=>{check.checked=!excluded.has(Number(check.value));});
+    checks.forEach(check=>{check.checked=isSelected(Number(check.value));});
     const selected=checks.filter(check=>check.checked).length;
     if(master){
-      master.checked=checks.length>0 && selected===checks.length;
-      master.indeterminate=selected>0 && selected<checks.length;
+      // Ô tiêu đề thể hiện lựa chọn TOÀN CỤC, không phải chỉ 5 dòng/trang.
+      master.checked=mode==='all' && overrides.size===0;
+      master.indeterminate=overrides.size>0;
     }
-    if(summary)summary.textContent='Đã tích '+selected+'/'+checks.length+
-      ' playlist trên trang · Đã bỏ tích '+excluded.size+
-      ' playlist trong các trang đã thao tác. Các trang chưa mở vẫn được tích mặc định.';
+    if(summary){
+      let status='';
+      if(mode==='all'){
+        status=overrides.size===0
+          ? 'Đã chọn TẤT CẢ playlist trên mọi trang.'
+          : 'Đã chọn tất cả playlist trên mọi trang, TRỪ '+overrides.size+' playlist bỏ tích.';
+      }else{
+        status=overrides.size===0
+          ? 'Đã BỎ CHỌN TẤT CẢ playlist trên mọi trang.'
+          : 'Đã bỏ chọn tất cả, sau đó tích lại '+overrides.size+' playlist trên các trang.';
+      }
+      summary.textContent=status+' Trang này: '+selected+'/'+checks.length+' playlist được tích.';
+    }
   }
   function changeCheck(check){
     const id=Number(check.value);
     if(!Number.isSafeInteger(id)||id<=0)return;
-    if(check.checked)excluded.delete(id);else excluded.add(id);
-    write();refresh();
+    if(mode==='all'){
+      if(check.checked)overrides.delete(id);else overrides.add(id);
+    }else{
+      if(check.checked)overrides.add(id);else overrides.delete(id);
+    }
+    write();
+    refresh();
   }
   document.addEventListener('change',event=>{
     if(event.target===master){
-      document.querySelectorAll('.playlist-bulk-check').forEach(check=>{
-        const id=Number(check.value);
-        check.checked=master.checked;
-        if(master.checked)excluded.delete(id);else excluded.add(id);
-      });
+      mode=master.checked ? 'all' : 'none';
+      overrides.clear();
       write();refresh();
-    } else if(event.target.matches('.playlist-bulk-check')) changeCheck(event.target);
+    }else if(event.target.matches('.playlist-bulk-check')){
+      changeCheck(event.target);
+    }
   });
   bulkCourseSelector?.addEventListener('change',()=>{
-    // Mỗi lần chọn môn học mới: chọn lại mặc định toàn bộ playlist.
+    // Mỗi lần người dùng chọn môn mới: chọn tất cả playlist theo mặc định.
     activeKey=scopeKey();
-    excluded=new Set();
+    mode='all';overrides=new Set();
     write();refresh();
   });
   form.addEventListener('submit',()=>{
-    form.querySelectorAll('[data-playlist-exclusion]').forEach(el=>el.remove());
-    for(const id of excluded){
+    form.querySelectorAll('[data-playlist-selection]').forEach(el=>el.remove());
+    const modeInput=document.createElement('input');
+    modeInput.type='hidden';
+    modeInput.name='playlist_selection_mode';
+    modeInput.value=mode;
+    modeInput.dataset.playlistSelection='1';
+    form.append(modeInput);
+    for(const id of overrides){
       const hidden=document.createElement('input');
       hidden.type='hidden';
-      hidden.name='excluded_playlist_ids';
+      hidden.name=(mode==='all') ? 'excluded_playlist_ids' : 'selected_playlist_ids';
       hidden.value=String(id);
-      hidden.dataset.playlistExclusion='1';
+      hidden.dataset.playlistSelection='1';
       form.append(hidden);
     }
   });
