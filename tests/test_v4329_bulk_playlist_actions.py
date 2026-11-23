@@ -86,6 +86,9 @@ class Form(dict):
             try:return type(value)
             except(ValueError,TypeError):return default
         return value
+    def getlist(self,name):
+        value=super().get(name,[])
+        return value if isinstance(value,list) else ([value] if value is not None else [])
 
 actor=[u1]
 request=types.SimpleNamespace(form=Form())
@@ -161,6 +164,36 @@ assert {q.playlist_id:q.slug for q in qrs}==slugs
 assert models.FunctionalTestRun.query.filter_by(case_code='QR_PLAYLIST_FILTERED_BULK').count()==2
 assert models.FunctionalTestRun.query.filter_by(case_code='ASSIGN_PLAYLIST_FILTERED_BULK').count()==2
 
+# Regression: remove two playlist checkmarks across pages; only the selected
+# entries can be linked. An excluded playlist can never receive a bulk QR.
+selection_course=models.Course(owner_id=u1.id, code='C-SELECT', name='Chỉ playlist được tích', active=True)
+s.add(selection_course);s.commit()
+excluded_assign={pls[1].id,pls[5].id}
+request.form=Form(course_id=str(selection_course.id),p_q='Python',p_assignment='',
+                  excluded_playlist_ids=[str(i) for i in excluded_assign])
+scope['bulk_assign_filtered_library_playlists']()
+selected_assigned={r.playlist_id for r in models.CoursePlaylist.query.filter_by(
+    course_id=selection_course.id,active=True).all()}
+assert selected_assigned == {p.id for p in pls}-excluded_assign, selected_assigned
+assert models.CoursePlaylist.query.filter_by(course_id=selection_course.id,playlist_id=foreign.id).count()==0
+assert models.CoursePlaylist.query.filter_by(course_id=selection_course.id,playlist_id=uploads.id).count()==0
+
+excluded_qr={pls[0].id}
+request.form=Form(course_id=str(selection_course.id),
+                  excluded_playlist_ids=[str(i) for i in excluded_qr])
+scope['bulk_create_playlist_qrs_from_library']()
+selected_qrs={q.playlist_id for q in models.QrCode.query.filter_by(
+    course_id=selection_course.id,target_type='playlist',active=True).all()}
+assert selected_qrs=={pls[i].id for i in (2,3,4)},selected_qrs
+assert excluded_qr.isdisjoint(selected_qrs)
+assert excluded_assign.isdisjoint(selected_qrs)
+assert s.query(models.CourseVideo).count()>=1
+
+request.form=Form(course_id=str(selection_course.id),p_q='Python',
+                  excluded_playlist_ids=['not-a-number'])
+try:scope['bulk_assign_filtered_library_playlists']();assert False
+except PermissionError as e:assert str(e)=='400'
+
 # Existing single-playlist forms still exist; bulk is a separate, non-nested form.
 ui=(ROOT/'templates/videos.html').read_text()
 env=Environment(loader=FileSystemLoader(str(ROOT/'templates')))
@@ -170,9 +203,13 @@ assert 'id="playlistBulkActions"' in ui
 assert 'value="{{ playlist_search }}"' in ui
 assert 'value="{{ playlist_assignment }}"' in ui
 assert 'formaction="{{ url_for(\'bulk_create_playlist_qrs_from_library\') }}"' in ui
-assert 'Gán MH cho tất cả playlist' in ui
-assert 'Tạo QR cho tất cả playlist của môn' in ui
+assert 'Gán MH cho playlist đã chọn' in ui
+assert 'Tạo QR cho playlist đã chọn' in ui
 assert 'playlistBulkActions' in ui and 'data-confirm-bulk' not in ui
+assert 'id="selectAllPlaylists"' in ui
+assert 'excluded_playlist_ids' in ui and 'sessionStorage.setItem' in ui
+assert 'playlist-bulk-check' in (ROOT/'templates/_playlist_library_row.html').read_text()
+assert "selected_playlist_ids" not in ui  # server uses exclusion list to preserve pagination semantics
 assert 'set_playlist_course_assignments' in (ROOT/'templates/_playlist_library_row.html').read_text()
 assert 'create_playlist_qr_from_library' in (ROOT/'templates/_playlist_library_row.html').read_text()
 print('PASS v4.3.29: all pages; server filters; no cross-user writes; additive assignment; reusing QR; no QR for empty/unusable playlists; preserved single actions.')
