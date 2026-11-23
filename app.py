@@ -4725,9 +4725,14 @@ def register_routes(app):
         # Bảng cặp đo được bổ sung sau khi dịch vụ thử nghiệm đã hoạt động.
         # Nếu Render chưa khởi tạo schema mới, chỉ tạo bảng còn thiếu;
         # KHÔNG sửa, xóa hoặc khởi tạo lại các bảng/dữ liệu nghiệp vụ cũ.
-        if not inspect(db.engine).has_table(ResearchComparisonPair.__tablename__):
-            ResearchComparisonPair.__table__.create(bind=db.engine, checkfirst=True)
-            current_app.logger.info("Research comparisons schema created on first admin access")
+        # Dùng CÙNG kết nối với transaction đăng nhập hiện tại. Với PostgreSQL,
+        # nếu tạo bảng bằng kết nối khác trong khi phiên hiện tại đang mở giao dịch,
+        # FK có thể bị chờ khóa và trang /research đứng quá lâu.
+        schema_conn = db.session.connection()
+        if not inspect(schema_conn).has_table(ResearchComparisonPair.__tablename__):
+            ResearchComparisonPair.__table__.create(bind=schema_conn, checkfirst=True)
+            db.session.commit()  # xác nhận DDL trên Neon/PostgreSQL
+            current_app.logger.info("Research comparisons table initialized safely")
 
         if request.method == "POST":
             form_type = request.form.get("form_type")
