@@ -6,6 +6,9 @@
   {% set usable.count = usable.count + 1 %}
 {% endfor %}
         <tr id="playlist-{{ p.id }}" class="library-target-row" data-playlist-usable="{{ '1' if p.is_available and usable.count > 0 else '0' }}">
+          <td><input class="form-check-input playlist-bulk-check" type="checkbox" value="{{ p.id }}" checked
+                     aria-label="Chọn playlist {{ p.title }} để gán môn hoặc tạo QR hàng loạt"
+                     title="Bỏ tích để loại playlist này khỏi gán môn và tạo QR hàng loạt"></td>
           <td>
             <div class="fw-semibold">{{ p.title }}</div>{% if not p.is_available %}<span class="badge text-bg-warning">Playlist không còn trên YouTube</span><div class="small text-muted">QR cũ được giữ để tra cứu lịch sử; có thể ngừng sử dụng QR.</div>{% endif %}
           </td>
