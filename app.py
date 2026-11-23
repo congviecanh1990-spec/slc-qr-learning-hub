@@ -2404,15 +2404,22 @@ def register_routes(app):
         if playlist_assignment not in {"", "assigned", "unassigned"}:
             abort(400)
         redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
-        # Chọn mặc định mọi playlist đúng bộ lọc, bao gồm các trang khác;
-        # chỉ loại trừ những playlist được người dùng chủ động bỏ tích.
-        raw_exclusions = (request.form.getlist("excluded_playlist_ids")
-                          if hasattr(request.form, "getlist") else [])
-        if len(raw_exclusions) > 2000 or any(not str(value).isdecimal() for value in raw_exclusions):
+        # Lựa chọn ở ô tiêu đề áp dụng cho TOÀN BỘ các trang.
+        # all: mọi playlist đúng bộ lọc, trừ danh sách bỏ tích.
+        # none: bỏ tất cả, chỉ xử lý danh sách tích lại (có thể ở trang khác).
+        selection_mode = request.form.get("playlist_selection_mode", "all")
+        if selection_mode not in {"all", "none"}:
             abort(400)
-        excluded_ids = {int(value) for value in raw_exclusions}
+        list_name = ("excluded_playlist_ids" if selection_mode == "all"
+                     else "selected_playlist_ids")
+        raw_ids = request.form.getlist(list_name) if hasattr(request.form, "getlist") else []
+        if len(raw_ids) > 2000 or any(not str(value).isascii() or not str(value).isdigit() or int(value) <= 0 for value in raw_ids):
+            abort(400)
+        override_ids = {int(value) for value in raw_ids}
         all_candidates = filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()
-        candidates = [playlist for playlist in all_candidates if playlist.id not in excluded_ids]
+        candidates = [playlist for playlist in all_candidates
+                      if ((playlist.id not in override_ids) if selection_mode == "all"
+                          else (playlist.id in override_ids))]
         if not candidates:
             flash("Không có playlist nào được chọn để gán cho môn học/mô đun.", "warning")
             return redirect(redirect_to)
@@ -2456,13 +2463,19 @@ def register_routes(app):
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
         redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
-        raw_exclusions = (request.form.getlist("excluded_playlist_ids")
-                          if hasattr(request.form, "getlist") else [])
-        if len(raw_exclusions) > 2000 or any(not str(value).isdecimal() for value in raw_exclusions):
+        selection_mode = request.form.get("playlist_selection_mode", "all")
+        if selection_mode not in {"all", "none"}:
             abort(400)
-        excluded_ids = {int(value) for value in raw_exclusions}
+        list_name = ("excluded_playlist_ids" if selection_mode == "all"
+                     else "selected_playlist_ids")
+        raw_ids = request.form.getlist(list_name) if hasattr(request.form, "getlist") else []
+        if len(raw_ids) > 2000 or any(not str(value).isascii() or not str(value).isdigit() or int(value) <= 0 for value in raw_ids):
+            abort(400)
+        override_ids = {int(value) for value in raw_ids}
         all_links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
-        links = [link for link in all_links if link.playlist_id not in excluded_ids]
+        links = [link for link in all_links
+                 if ((link.playlist_id not in override_ids) if selection_mode == "all"
+                     else (link.playlist_id in override_ids))]
         if not links:
             flash("Không có playlist nào được chọn và đã gán môn để tạo mã QR.", "warning")
             return redirect(redirect_to)
