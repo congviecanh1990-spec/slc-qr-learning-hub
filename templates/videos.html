@@ -91,7 +91,7 @@
          aria-disabled="true"
          title="Tải tệp ZIP gồm các QR đã tạo của môn học đang chọn">Tải QR đã tạo</a>
     </div>
-    <div class="text-muted small mt-2">Mặc định tất cả playlist đều được tích chọn, kể cả ở các trang khác. Bỏ tích playlist không muốn gán môn hoặc tạo QR. Lựa chọn bỏ tích được giữ khi chuyển trang trong cùng bộ lọc và môn đã chọn. Gán theo kết quả lọc; tạo QR chỉ cho playlist đã gán vào môn và không bị bỏ tích. Để loại một playlist đã gán trước đó khi tạo QR, hãy chọn bộ lọc Tất cả hoặc Đã gán rồi bỏ tích playlist đó.</div>
+    <div class="text-muted small mt-2">Mặc định tất cả playlist đều được tích chọn, kể cả ở các trang khác. Bỏ tích playlist không muốn gán môn hoặc tạo QR. Lựa chọn bỏ tích được giữ khi chuyển trang hoặc đổi bộ lọc trong cùng môn đã chọn. Gán theo kết quả lọc; tạo QR chỉ cho playlist đã gán vào môn và không bị bỏ tích. Để loại một playlist đã gán trước đó khi tạo QR, hãy chọn bộ lọc Tất cả hoặc Đã gán rồi bỏ tích playlist đó.</div>
     <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">Mặc định đã chọn tất cả playlist.</div>
   </form>
 
@@ -416,11 +416,7 @@
 const bulkCourseSelector=document.getElementById('playlistBulkCourse');
 const bulkDownload=document.getElementById('playlistBulkDownloadQr');
 const bulkForm=document.getElementById('playlistBulkActions');
-const bulkCourseStorageKey='slc-bulk-course-v1:'+JSON.stringify([
-  bulkForm?.dataset.userId || '',
-  bulkForm?.querySelector('[name="p_q"]')?.value || '',
-  bulkForm?.querySelector('[name="p_assignment"]')?.value || ''
-]);
+const bulkCourseStorageKey='slc-bulk-course-v2:'+(bulkForm?.dataset.userId || '');
 function rememberBulkCourse(){
   try {
     if(bulkCourseSelector?.value) sessionStorage.setItem(bulkCourseStorageKey,bulkCourseSelector.value);
@@ -428,7 +424,7 @@ function rememberBulkCourse(){
   } catch (_) {}
 }
 function restoreBulkCourse(){
-  // Giữ môn đã chọn khi chuyển giữa các trang cùng bộ lọc.
+  // Giữ môn đã chọn khi chuyển trang hoặc đổi bộ lọc.
   try {
     const remembered=sessionStorage.getItem(bulkCourseStorageKey);
     if(remembered && bulkCourseSelector?.querySelector(`option[value="${Number(remembered)}"]`)){
@@ -477,19 +473,17 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
 </script>
 <script>
 // Lưu các playlist BỎ chọn giữa các trang; mặc định toàn bộ kết quả được chọn.
-// Khóa lưu phụ thuộc môn học và bộ lọc. Không đưa dữ liệu người học vào storage.
+// Khóa lưu phụ thuộc người dùng và môn học; giữ lựa chọn khi đổi trang/bộ lọc.
 (function () {
   'use strict';
   const form=document.getElementById('playlistBulkActions');
   const master=document.getElementById('selectAllPlaylists');
   const summary=document.getElementById('playlistBulkSelectedSummary');
   if (!form) return;
-  const storagePrefix='slc-playlist-excluded-v1:';
+  const storagePrefix='slc-playlist-excluded-v2:';
   const scopeKey=()=>storagePrefix+JSON.stringify([
     form.dataset.userId || '',
-    bulkCourseSelector?.value || '',
-    form.querySelector('[name="p_q"]')?.value || '',
-    form.querySelector('[name="p_assignment"]')?.value || ''
+    bulkCourseSelector?.value || ''
   ]);
   const read=(key)=>{
     try {
