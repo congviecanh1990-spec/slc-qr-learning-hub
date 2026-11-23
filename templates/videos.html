@@ -65,7 +65,7 @@
 
   {# Mỗi playlist được chọn mặc định; các playlist bỏ tích được giữ lại khi chuyển trang. #}
   <form id="playlistBulkActions" method="post" action="{{ url_for('bulk_assign_filtered_library_playlists') }}"
-        class="card card-body shadow-sm mb-3">
+        data-user-id="{{ me.id }}" class="card card-body shadow-sm mb-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="return_query" value="{{ library_return_query }}">
     <input type="hidden" name="p_q" value="{{ playlist_search }}">
@@ -460,6 +460,7 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
   if (!form) return;
   const storagePrefix='slc-playlist-excluded-v1:';
   const scopeKey=()=>storagePrefix+JSON.stringify([
+    form.dataset.userId || '',
     bulkCourseSelector?.value || '',
     form.querySelector('[name="p_q"]')?.value || '',
     form.querySelector('[name="p_assignment"]')?.value || ''
