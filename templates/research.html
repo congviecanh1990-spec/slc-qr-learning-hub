@@ -194,8 +194,8 @@
         {% for p in research_pairs %}
           <tr class="{{ 'table-secondary' if not p.active else '' }}">
             <td><strong>{{ p.pair_code }}</strong><div class="small text-muted">{{ p.created_at.strftime('%d/%m/%Y') if p.created_at else '' }}</div></td>
-            <td>{{ p.lecturer.name or p.lecturer.email if p.lecturer else 'Giảng viên đã bị xóa' }}
-              <div class="small text-muted">{{ p.course.name if p.course else 'Học phần không còn' }}</div></td>
+            <td>{{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}
+              <div class="small text-muted">{{ p.course.name if p.course else p.course_name_snapshot }}</div></td>
             <td>{{ dict(pair_kinds).get(p.task_kind, p.task_kind) }}
               <div class="small text-muted">{{ p.video_count }} video lẻ; {{ p.playlist_count }} playlist;
                 {{ p.playlist_video_count }} video trong playlist; <strong>{{ p.qr_count }} QR</strong></div>
