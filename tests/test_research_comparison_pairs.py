@@ -75,6 +75,17 @@ def test_code_jinja_and_admin_only_data_form():
     assert 'name="webapp_seconds"' not in research
     assert 'name="webapp_operations"' not in research
     assert "Ví dụ: 15 QR video lẻ" not in research
+    # Bảng báo cáo: 4 cột thông tin + 2 cột thao tác + 2 cột thời gian.
+    assert "Web App – hoàn toàn tự động" not in research
+    assert "<th>Mã lượt đo</th>" not in research
+    assert "<th>Trạng thái / Thao tác</th>" not in research
+    assert 'rowspan="2" scope="col" class="align-middle text-start">Giảng viên</th>' in research
+    assert 'rowspan="2" scope="col" class="align-middle text-start">Học phần/mô đun</th>' in research
+    assert 'rowspan="2" scope="col" class="align-middle text-start">Loại QR</th>' in research
+    assert 'rowspan="2" scope="col" class="align-middle text-start">Số lượng</th>' in research
+    assert 'colspan="2" scope="colgroup">Số thao tác</th>' in research
+    assert 'colspan="2" scope="colgroup">Tổng thời gian (giây)</th>' in research
+    assert 'Quản lý bản ghi đối chứng cần điều chỉnh' in research
     assert "manual_seconds" not in library and "manual_operations" not in library
     assert 'id="thuc-nghiem-qr"' in library
     assert 'id="researchQrSaveDirectory"' in library
