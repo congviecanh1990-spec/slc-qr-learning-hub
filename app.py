@@ -4788,36 +4788,7 @@ def register_routes(app):
             flash("Bạn không có quyền truy cập chức năng này. Chức năng chỉ dành cho Quản trị viên.", "warning")
             return redirect(url_for("index"))
 
-        # Bảng cặp đo được bổ sung sau khi dịch vụ thử nghiệm đã hoạt động.
-        # Nếu Render chưa khởi tạo schema mới, chỉ tạo bảng còn thiếu;
-        # KHÔNG sửa, xóa hoặc khởi tạo lại các bảng/dữ liệu nghiệp vụ cũ.
-        # Dùng CÙNG kết nối với transaction đăng nhập hiện tại. Với PostgreSQL,
-        # nếu tạo bảng bằng kết nối khác trong khi phiên hiện tại đang mở giao dịch,
-        # FK có thể bị chờ khóa và trang /research đứng quá lâu.
-        schema_conn = db.session.connection()
-        pair_table = ResearchComparisonPair.__tablename__
-        if not inspect(schema_conn).has_table(pair_table):
-            ResearchComparisonPair.__table__.create(bind=schema_conn, checkfirst=True)
-            db.session.commit()  # xác nhận DDL trên Neon/PostgreSQL
-            current_app.logger.info("Research comparisons table initialized safely")
-        else:
-            # Bảng này từng được tạo trước khi thêm hai cột lưu tên.
-            # create_all/checkfirst KHÔNG nâng cấp cột cho bảng đã có.
-            pair_columns = {col["name"] for col in inspect(schema_conn).get_columns(pair_table)}
-            new_columns = {
-                "lecturer_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
-                "course_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
-            }
-            missing_columns = [name for name in new_columns if name not in pair_columns]
-            if missing_columns:
-                for name in missing_columns:
-                    # Chỉ ALTER ADD COLUMN, không DROP/UPDATE dữ liệu cũ.
-                    db.session.execute(text(
-                        f"ALTER TABLE research_comparison_pairs ADD COLUMN {name} {new_columns[name]}"
-                    ))
-                db.session.commit()
-                current_app.logger.info(
-                    "Research comparisons schema upgraded: %s", ", ".join(missing_columns))
+        ensure_research_comparison_schema()
 
         if request.method == "POST":
             form_type = request.form.get("form_type")
@@ -4832,13 +4803,14 @@ def register_routes(app):
                         course_id=course.id, assigned_lecturer_id=lecturer.id, active=True).first()
                     if course.owner_id != lecturer.id and not assigned:
                         raise ValueError("Giảng viên không được phân công giảng dạy môn học/mô đun đã chọn.")
-                    if ResearchComparisonPair.query.filter_by(pair_code=values["pair_code"]).first():
-                        raise ValueError("Mã lượt đo đã tồn tại. Vui lòng nhập mã khác.")
+                    if course.owner_id != lecturer.id:
+                        raise ValueError("Chỉ đo tạo QR cho học phần mà giảng viên đang sở hữu và có quyền tạo QR.")
+                    generated_code = "TN" + secrets.token_hex(8).upper()
                     db.session.add(ResearchComparisonPair(
-                        **values, observer_id=user.id,
+                        **values, pair_code=generated_code, observer_id=user.id,
                         lecturer_name_snapshot=(lecturer.name or lecturer.email or "")[:255],
                         course_name_snapshot=(course.name or "")[:255]))
-                    flash("Đã lưu cặp đo theo giảng viên và khối lượng; chỉ tính thống kê khi có đủ hai phép đo.", "success")
+                    flash(f"Đã tạo lượt đo {generated_code}. Giảng viên chọn 'Đo Web App' để bắt đầu; hệ thống tự ghi thời gian và thao tác.", "success")
                 elif form_type == "manual_experiment":
                     task_key = (request.form.get("task_key") or "").strip()
                     operations_count = int(request.form.get("operations_count") or 0)
@@ -4947,25 +4919,150 @@ def register_routes(app):
             courses_for_research=courses_for_research,
         )
 
-    @app.post("/research/comparison/<int:pair_id>/webapp")
+    @app.get("/research/measurement")
     @login_required
-    def research_pair_webapp_result(pair_id):
+    def research_measurement_page():
+        """Giảng viên chỉ bắt đầu/kết thúc đo, không nhập dữ liệu đối chứng."""
+        user = current_user()
+        ensure_research_comparison_schema()
+        pairs = (ResearchComparisonPair.query
+                 .filter_by(lecturer_id=user.id, active=True)
+                 .order_by(ResearchComparisonPair.created_at.desc()).limit(100).all())
+        active = active_research_measurement(user.id)
+        return render_template("research_measurement.html", research_pairs=pairs,
+                               active_pair=active, pair_kind_names=RESEARCH_PAIR_KIND_NAMES,
+                               normalize_pair_kind=normalize_kind)
+
+    @app.post("/research/measurement/<int:pair_id>/start")
+    @login_required
+    def research_measurement_start(pair_id):
+        user = current_user()
+        ensure_research_comparison_schema()
+        pair = db.session.get(ResearchComparisonPair, pair_id) or abort(404)
+        if pair.lecturer_id != user.id or not pair.active:
+            abort(403)
+        course = db.session.get(Course, pair.course_id)
+        if not course or not course.active or course.owner_id != user.id:
+            abort(403)
+        if pair.measurement_verified:
+            flash("Lượt đo đã hoàn thành, không đo trùng.", "warning")
+        elif pair.measurement_started_at:
+            if session.get("research_measurement_id") == pair.id:
+                flash("Phiên đo đang thực hiện. Tiếp tục tạo QR hoặc kết thúc đo.", "info")
+            else:
+                flash("Lượt đo đã được bắt đầu ở phiên khác. Liên hệ quản trị viên để đặt lại nếu cần.", "warning")
+        else:
+            ongoing = ResearchComparisonPair.query.filter(
+                ResearchComparisonPair.lecturer_id == user.id,
+                ResearchComparisonPair.active.is_(True),
+                ResearchComparisonPair.measurement_started_at.isnot(None),
+                ResearchComparisonPair.measurement_finished_at.is_(None)).first()
+            if ongoing:
+                flash("Bạn đang có lượt đo khác chưa kết thúc.", "warning")
+            else:
+                pair.measurement_started_at = utcnow()
+                pair.measurement_operations = 0
+                pair.measurement_single_videos = 0
+                pair.measurement_single_playlists = 0
+                pair.measurement_bulk_videos = 0
+                pair.measurement_verified = False
+                db.session.commit()
+                session["research_measurement_id"] = pair.id
+                session["research_measurement_nonce"] = secrets.token_hex(8)
+                flash("Đã bắt đầu đo. Chỉ dùng tab này; tạo QR như thường lệ rồi kết thúc đo.", "success")
+                return redirect(url_for("videos_page"))
+        return redirect(url_for("research_measurement_page"))
+
+    @app.post("/research/measurement/progress")
+    @login_required
+    def research_measurement_progress():
+        user = current_user()
+        pair = active_research_measurement(user.id)
+        if not pair:
+            return jsonify({"ok": False, "reason": "not_active"}), 409
+        value = request.form.get("operations_count", type=int)
+        if value is None or value < 0 or value > 100000:
+            abort(400)
+        pair.measurement_operations = max(pair.measurement_operations or 0, value)
+        pair.updated_at = utcnow()
+        db.session.commit()
+        return jsonify({"ok": True, "operations": pair.measurement_operations})
+
+    @app.post("/research/measurement/<int:pair_id>/finish")
+    @login_required
+    def research_measurement_finish(pair_id):
+        user = current_user()
+        pair = active_research_measurement(user.id)
+        if not pair or pair.id != pair_id:
+            abort(403)
+        reported_ops = request.form.get("operations_count", type=int)
+        if reported_ops is not None and 0 <= reported_ops <= 100000:
+            pair.measurement_operations = max(pair.measurement_operations or 0, reported_ops)
+        # Đếm các QR tạo mới theo đúng nút/luồng nghiệp vụ đã sử dụng.
+        if normalize_kind(pair.task_kind) == "QR_VIDEO_HANG_LOAT":
+            complete = (pair.measurement_bulk_videos == pair.video_count and
+                        pair.measurement_single_videos == 0 and
+                        pair.measurement_single_playlists == 0)
+        else:
+            complete = (pair.measurement_single_videos == pair.video_count and
+                        pair.measurement_single_playlists == pair.playlist_count and
+                        pair.measurement_bulk_videos == 0)
+        if not complete or not pair.measurement_operations:
+            db.session.commit()
+            flash(
+                f"Chưa đủ QR mới hoặc thao tác để kết thúc đo: đã tạo từng video "
+                f"{pair.measurement_single_videos}/{pair.video_count}, playlist "
+                f"{pair.measurement_single_playlists}/{pair.playlist_count}, "
+                f"video hàng loạt {pair.measurement_bulk_videos}; "
+                f"thao tác {pair.measurement_operations}. Không ghi kết quả chưa hoàn thành.",
+                "warning")
+            return redirect(url_for("research_measurement_page"))
+        finished_at = utcnow()
+        elapsed = (finished_at - pair.measurement_started_at).total_seconds()
+        if not 0 < elapsed <= 864000:
+            flash("Thời lượng đo vượt giới hạn. Liên hệ quản trị viên để đặt lại lượt đo.", "warning")
+            return redirect(url_for("research_measurement_page"))
+        pair.webapp_operations = pair.measurement_operations
+        pair.webapp_seconds = round(elapsed, 2)
+        pair.measurement_finished_at = finished_at
+        pair.measurement_verified = True
+        pair.updated_at = finished_at
+        db.session.commit()
+        session.pop("research_measurement_id", None)
+        session.pop("research_measurement_nonce", None)
+        flash(
+            f"Đã ghi tự động lượt {pair.pair_code}: {pair.webapp_seconds:.2f} giây; "
+            f"{pair.webapp_operations} thao tác; {pair.qr_count} QR; "
+            f"{video_coverage(pair)} video học liệu được bao phủ.", "success")
+        return redirect(url_for("research_measurement_page"))
+
+    @app.post("/research/comparison/<int:pair_id>/reset")
+    @login_required
+    def research_measurement_admin_reset(pair_id):
         user = current_user()
         if user.role != "admin":
             abort(403)
         pair = db.session.get(ResearchComparisonPair, pair_id) or abort(404)
-        if not pair.active:
-            abort(404)
-        try:
-            operations, seconds = validate_webapp_observation(request.form)
-            pair.webapp_operations = operations
-            pair.webapp_seconds = seconds
-            pair.updated_at = utcnow()
-            db.session.commit()
-            flash(f"Đã bổ sung kết quả Web App cho lượt đo {pair.pair_code}.", "success")
-        except ValueError as exc:
-            db.session.rollback()
-            flash(str(exc), "danger")
+        if not pair.active or pair.measurement_verified:
+            flash("Chỉ đặt lại được lượt đo chưa hoàn thành.", "warning")
+            return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+        reason = (request.form.get("reason") or "").strip()
+        if len(reason) < 5:
+            flash("Vui lòng ghi lý do đặt lại (từ 5 ký tự).", "warning")
+            return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+        pair.measurement_started_at = None
+        pair.measurement_finished_at = None
+        pair.measurement_operations = 0
+        pair.measurement_single_videos = 0
+        pair.measurement_single_playlists = 0
+        pair.measurement_bulk_videos = 0
+        pair.measurement_verified = False
+        pair.webapp_operations = None
+        pair.webapp_seconds = None
+        pair.note = ((pair.note or "") + f" | Đặt lại lượt đo: {reason}")[-2000:]
+        pair.updated_at = utcnow()
+        db.session.commit()
+        flash("Đã đặt lại phiên đo. Dữ liệu thủ công vẫn giữ nguyên.", "success")
         return redirect(url_for("research_page") + "#cap-do-chi-tiet")
 
     @app.post("/research/comparison/<int:pair_id>/void")
