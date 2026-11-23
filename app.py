@@ -5015,6 +5015,7 @@ def register_routes(app):
         complete = research_measurement_complete_qrs(pair)
         return {
             "active": True, "id": pair.id, "code": pair.pair_code,
+            "nonce": session.get("research_measurement_nonce", ""),
             "course_id": pair.course_id, "kind": normalize_kind(pair.task_kind),
             "expected": pair.qr_count, "created": len(research_created_qr_ids(pair)),
             "ready_to_save": complete, "operations": pair.measurement_operations,
