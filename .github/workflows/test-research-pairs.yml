@@ -37,7 +37,9 @@ jobs:
       - name: Research page with PostgreSQL (Render-compatible)
         env:
           TEST_POSTGRES_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/research_test
-        run: python -m pytest -q -v tests/test_research_comparison_pairs.py -k test_research_admin_workflow_end_to_end
+        run: python -m pytest -q -v tests/test_research_comparison_pairs.py -k test_flask_role_workflow_and_legacy_schema
+      - name: Check browser operation-counter JavaScript syntax
+        run: node --check static/research_measurement.js
       - name: Regression bulk playlist tests
         run: |
           python tests/test_v4329_bulk_playlist_actions.py
