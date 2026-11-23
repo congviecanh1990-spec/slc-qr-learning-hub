@@ -61,17 +61,20 @@ def test_code_jinja_and_admin_only_data_form():
     for path in (ROOT/"templates").glob("*.html"):
         env.parse(path.read_text(encoding="utf-8"))
     research=(ROOT/"templates/research.html").read_text(encoding="utf-8")
-    lecturer=(ROOT/"templates/research_measurement.html").read_text(encoding="utf-8")
+    library=(ROOT/"templates/videos.html").read_text(encoding="utf-8")
     app=(ROOT/"app.py").read_text(encoding="utf-8")
     assert "pair_create" in research
     assert 'name="pair_code"' not in research
     assert 'name="webapp_seconds"' not in research
     assert 'name="webapp_operations"' not in research
     assert "Ví dụ: 15 QR video lẻ" not in research
-    assert "manual_seconds" not in lecturer and "manual_operations" not in lecturer
-    assert 'research_measurement_start' in lecturer and 'research_measurement_finish' in lecturer
-    assert 'record_research_qr_creation(course.id, user.id, "video")' in app
-    assert 'record_research_qr_creation(course.id, user.id, "playlist")' in app
+    assert "manual_seconds" not in library and "manual_operations" not in library
+    assert 'id="thuc-nghiem-qr"' in library
+    assert 'id="researchQrSaveDirectory"' in library
+    assert 'id="videoBulkQrForm"' in library
+    assert 'research_auto_start' in app and 'research_auto_complete' in app
+    assert 'record_research_qr_creation(course.id, user.id, "video", qr.id)' in app
+    assert 'record_research_qr_creation(course.id, user.id, "playlist", qr.id)' in app
     assert "ensure_research_comparison_schema" in app
 
 
@@ -102,7 +105,8 @@ def test_db_preserves_old_experiment_and_unverified_measurement():
 
 
 def test_flask_role_workflow_and_legacy_schema(tmp_path,monkeypatch):
-    """Kiểm cả SQLite và Postgres tạm ở CI; KHÔNG truy cập Neon thật."""
+    """Admin khai báo thủ công, GV tạo và lưu QR ở Kho, không còn trang đo riêng."""
+    import json
     db_url=os.environ.get("TEST_POSTGRES_DATABASE_URL") or ("sqlite:///"+str(tmp_path/"research.sqlite"))
     monkeypatch.setenv("DATABASE_URL",db_url)
     monkeypatch.setenv("AUTO_CREATE_DB","0")
@@ -110,7 +114,7 @@ def test_flask_role_workflow_and_legacy_schema(tmp_path,monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID","")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET","")
     import app as web
-    from models import db, User, Course, ResearchComparisonPair
+    from models import db, User, Course, QrCode, ResearchComparisonPair
     app=web.create_app()
     app.config.update(TESTING=True,WTF_CSRF_ENABLED=False,SESSION_COOKIE_SECURE=False)
     with app.app_context():
@@ -122,107 +126,121 @@ def test_flask_role_workflow_and_legacy_schema(tmp_path,monkeypatch):
         db.session.add(course);db.session.commit()
         aid,tid,cid=admin.id,teacher.id,course.id
         db.session.remove()
-        # Giả lập db test tạo ở phiên bản cũ, có table nhưng thiếu cột đo.
+        # DB Neon test cũ có bảng nhưng thiếu cột mới; không DROP dữ liệu.
         from sqlalchemy import text as sql_text
         with db.engine.begin() as conn:
-            conn.execute(sql_text(
-                "ALTER TABLE research_comparison_pairs DROP COLUMN measurement_verified"))
-            conn.execute(sql_text(
-                "ALTER TABLE research_comparison_pairs DROP COLUMN measurement_operations"))
-        assert "measurement_verified" not in {
-            col["name"] for col in web.inspect(db.engine).get_columns("research_comparison_pairs")}
+            for field in ("measurement_qr_ids","measurement_saved_at","measurement_save_method"):
+                conn.execute(sql_text(f"ALTER TABLE research_comparison_pairs DROP COLUMN {field}"))
     with app.test_client() as client:
         with client.session_transaction() as ss:ss["user_id"]=aid
-        response=client.get("/research")
-        assert response.status_code==200
+        assert client.get("/research").status_code==200
         with app.app_context():
-            cols={c["name"] for c in web.inspect(db.engine).get_columns("research_comparison_pairs")}
-            assert {"measurement_verified","measurement_operations"}<=cols
+            cols={x["name"] for x in web.inspect(db.engine).get_columns("research_comparison_pairs")}
+            assert {"measurement_qr_ids","measurement_saved_at","measurement_save_method"}<=cols
             assert User.query.count()==2 and Course.query.count()==1
         form=dict(MIXED,form_type="pair_create",lecturer_id=str(tid),course_id=str(cid))
-        res=client.post("/research",data=form)
-        assert res.status_code==302
+        assert client.post("/research",data=form).status_code==302
         with app.app_context():
             pair=ResearchComparisonPair.query.filter_by(lecturer_id=tid).one()
             pid=pair.id
             assert pair.pair_code.startswith("TN") and pair.qr_count==8
             assert pair.webapp_seconds is None
-        # Giảng viên không được nhập biểu mẫu nghiên cứu (chỉ có quyền đo).
         with client.session_transaction() as ss:ss["user_id"]=tid
-        res=client.get("/research")
-        assert res.status_code==302
-        res=client.post("/research",data=form)
-        assert res.status_code==302
-        assert client.get("/research/measurement").status_code==200
-        res=client.post(f"/research/measurement/{pid}/start")
-        assert res.status_code==302
+        assert client.get("/research").status_code==302
+        assert client.post("/research",data=form).status_code==302
+        assert client.get("/research/measurement").status_code==302  # không có trang riêng
+        before=client.get("/research/auto/files")
+        assert before.status_code in (403,409)
+        started=client.post("/research/auto/start",data={
+            "course_id":cid,"task_kind":"QR_TUNG_VIDEO_PLAYLIST"})
+        assert started.status_code==200 and started.json["active"]
+        assert started.json["created"]==0 and started.json["expected"]==8
+        assert client.get("/research/auto/files").status_code==409
+        # Tạo 8 bản ghi QR mới, mô phỏng đúng hai đường dẫn đơn lẻ trong Kho.
         with app.app_context():
-            pair=db.session.get(ResearchComparisonPair,pid)
-            assert pair.measurement_started_at is not None
-        # Không được kết thúc khi chưa tạo đủ QR / chưa có thao tác.
-        res=client.post(f"/research/measurement/{pid}/finish",data={"operations_count":"8"})
-        assert res.status_code==302
-        with app.app_context():
-            pair=db.session.get(ResearchComparisonPair,pid)
-            assert not pair.is_paired and pair.webapp_seconds is None
-        # Mô phỏng sự kiện QR thực sự tạo mới từ đúng các route đang instrument.
-        with app.test_request_context("/videos/21/qr",method="POST"):
-            from flask import session
-            session["user_id"]=tid
-            session["research_measurement_id"]=pid
-            for _ in range(3):web.record_research_qr_creation(cid,tid,"video")
+            ids=[]
+            for n in range(8):
+                qr=QrCode(owner_id=tid,course_id=cid,slug=f"testqr{n}",
+                    title=f"Video YouTube hoặc playlist {n}",target_type="video" if n<3 else "playlist")
+                db.session.add(qr);db.session.flush()
+                ids.append(qr.id)
             db.session.commit()
-        with app.test_request_context("/playlists/8/qr",method="POST"):
-            from flask import session
-            session["user_id"]=tid
-            session["research_measurement_id"]=pid
-            for _ in range(5):web.record_research_qr_creation(cid,tid,"playlist")
-            db.session.commit()
-        progress=client.post("/research/measurement/progress",data={"operations_count":"21"})
-        assert progress.status_code==200
-        res=client.post(f"/research/measurement/{pid}/finish",data={"operations_count":"23"})
-        assert res.status_code==302
+        for kind,route,subset in [
+            ("video","/videos/21/qr",ids[:3]),
+            ("playlist","/playlists/8/qr",ids[3:])
+        ]:
+            with app.test_request_context(route,method="POST"):
+                from flask import session
+                session["user_id"]=tid
+                session["research_measurement_id"]=pid
+                for qr_id in subset:web.record_research_qr_creation(cid,tid,kind,qr_id)
+                db.session.commit()
+        assert client.post("/research/measurement/progress",
+            data={"operations_count":"21"}).status_code==200
+        files=client.get("/research/auto/files")
+        assert files.status_code==200 and len(files.json["files"])==8
+        finish=client.post("/research/auto/complete",data={
+            "save_method":"directory_picker",
+            "saved_qr_ids":json.dumps(ids),"operations_count":"23"})
+        assert finish.status_code==200 and finish.json["ok"]
         with app.app_context():
             pair=db.session.get(ResearchComparisonPair,pid)
             assert pair.is_paired and pair.measurement_verified
-            assert pair.webapp_seconds > 0 and pair.webapp_operations==23
+            assert pair.measurement_save_method=="directory_picker"
+            assert pair.webapp_seconds>0 and pair.webapp_operations==23
             assert pair.measurement_single_videos==3 and pair.measurement_single_playlists==5
             assert video_coverage(pair)==53 and pair.qr_count==8
-        # Không cho giảng viên sửa kết quả WebApp hoặc loại bản ghi.
-        # Trang nghiên cứu cũ từ chối qua chuyển hướng, API mới từ chối qua 403.
+        # GV không được sửa dữ liệu của quản trị viên.
         assert client.post(f"/research/comparison/{pid}/void",
-            data={"void_reason":"test invalid"}).status_code in (302,403)
+            data={"void_reason":"sai dữ liệu"}).status_code in (302,403)
         assert client.post(f"/research/comparison/{pid}/reset",
-            data={"reason":"test invalid"}).status_code in (302,403)
+            data={"reason":"sai dữ liệu"}).status_code in (302,403)
         with app.app_context():
-            checked=db.session.get(ResearchComparisonPair,pid)
-            assert checked.active and checked.is_paired
-        # Loại thứ hai: chỉ chấp nhận QR video tạo qua đúng nút hàng loạt.
+            pair=db.session.get(ResearchComparisonPair,pid)
+            assert pair.is_paired
+        # Nhóm thứ 2: chỉ các QR được tạo bởi route video hàng loạt mới được ghi.
         with client.session_transaction() as ss:ss["user_id"]=aid
-        bulk_data=dict(BULK,form_type="pair_create",lecturer_id=str(tid),course_id=str(cid))
-        assert client.post("/research",data=bulk_data).status_code==302
+        bulk_form=dict(BULK,form_type="pair_create",lecturer_id=str(tid),course_id=str(cid))
+        assert client.post("/research",data=bulk_form).status_code==302
         with app.app_context():
             second=ResearchComparisonPair.query.filter_by(
                 lecturer_id=tid,task_kind="QR_VIDEO_HANG_LOAT").one()
-            second_id=second.id
+            sid=second.id
         with client.session_transaction() as ss:ss["user_id"]=tid
-        assert client.post(f"/research/measurement/{second_id}/start").status_code==302
-        with app.test_request_context(f"/courses/{cid}/qr/bulk",method="POST"):
+        started=client.post("/research/auto/start",data={
+            "course_id":cid,"task_kind":"QR_VIDEO_HANG_LOAT"})
+        assert started.status_code==200 and started.json["id"]==sid
+        with app.app_context():
+            bulk_ids=[]
+            for n in range(15):
+                qr=QrCode(owner_id=tid,course_id=cid,slug=f"bulkqr{n}",
+                    title=f"Video hàng loạt {n}",target_type="video")
+                db.session.add(qr);db.session.flush()
+                bulk_ids.append(qr.id)
+            db.session.commit()
+        with app.test_request_context("/videos/qr/bulk-selected",method="POST"):
             from flask import session
             session["user_id"]=tid
-            session["research_measurement_id"]=second_id
-            for _ in range(15):web.record_research_qr_creation(cid,tid,"video")
+            session["research_measurement_id"]=sid
+            for qr_id in bulk_ids:web.record_research_qr_creation(cid,tid,"video",qr_id)
             db.session.commit()
-        assert client.post("/research/measurement/progress",
-            data={"operations_count":"8"}).status_code==200
-        assert client.post(f"/research/measurement/{second_id}/finish",
-            data={"operations_count":"9"}).status_code==302
+        # ZIP chưa giải nén hoặc chưa xác nhận thì không kết thúc được.
+        invalid=client.post("/research/auto/complete",data={
+            "save_method":"manual_confirmed","saved_qr_ids":json.dumps(bulk_ids),
+            "operations_count":"9"})
+        assert invalid.status_code==400
+        finish=client.post("/research/auto/complete",data={
+            "save_method":"manual_confirmed","saved_qr_ids":json.dumps(bulk_ids),
+            "operations_count":"9","user_confirmed":"yes"})
+        assert finish.status_code==200
         with app.app_context():
-            second=db.session.get(ResearchComparisonPair,second_id)
-            assert second.is_paired and second.measurement_bulk_videos==15
-            summary,totals=pair_metrics(ResearchComparisonPair.query.all())
-            assert len(summary)==2 and totals["video_coverage"]==68
+            second=db.session.get(ResearchComparisonPair,sid)
+            assert second.measurement_saved_at is not None
+            assert second.measurement_save_method=="manual_confirmed"
+            assert second.measurement_verified is False
+            groups,totals=pair_metrics(ResearchComparisonPair.query.all())
+            assert len(groups)==1 and totals["video_coverage"]==53
         with client.session_transaction() as ss:ss["user_id"]=aid
-        res=client.get("/research")
-        assert res.status_code==200
-        assert "Đủ cặp đo".encode() in res.data
+        response=client.get("/research")
+        assert response.status_code==200
+        assert "Đủ cặp đo".encode() in response.data
