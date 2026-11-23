@@ -3142,6 +3142,46 @@ def register_routes(app):
         )
         return redirect(url_for("courses_page"))
 
+    @app.post("/videos/qr/bulk-selected")
+    @login_required
+    def bulk_create_selected_video_qrs():
+        """Tạo QR đúng cho các video được chọn trong Kho học liệu, không tạo cho toàn môn."""
+        user = current_user()
+        course_id = request.form.get("course_id", type=int)
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        raw = request.form.getlist("video_ids")
+        if not raw or len(raw) > 500 or any(not str(v).isascii() or not str(v).isdigit() for v in raw):
+            flash("Hãy chọn từ 1 đến 500 video hợp lệ để tạo mã QR hàng loạt.", "warning")
+            return redirect(url_for("videos_page") + "#videos")
+        video_ids = list(dict.fromkeys(int(v) for v in raw))
+        if not all(v > 0 for v in video_ids):
+            abort(400)
+        videos = {v.id: v for v in visible_video_query(user).filter(Video.id.in_(video_ids)).all()}
+        if len(videos) != len(video_ids):
+            abort(403)
+        created = existing = skipped = 0
+        for video_id in video_ids:
+            video = videos[video_id]
+            if not video_is_usable(video) or not video_accessible_to_lecturer(video, user):
+                skipped += 1
+                continue
+            link, _ = ensure_course_video_link(course, video, user, manual=True)
+            _, was_created = create_qr_for_course_video(course, video, user, link)
+            if was_created:
+                created += 1
+            else:
+                existing += 1
+        record_functional_test(
+            "QR_BULK_SELECTED", "Tạo mã QR video đã chọn từ Kho học liệu",
+            bool(created or existing), owner_id=user.id,
+            note=f"MH/MĐ: {course.name}; chọn {len(video_ids)}; mới {created}; đã có {existing}; bỏ qua {skipped}.")
+        db.session.commit()
+        flash(f"Đã tạo {created} mã QR video mới; {existing} đã có mã; {skipped} chưa đủ điều kiện.",
+              "success" if created else "warning")
+        return redirect(url_for("videos_page") + "#videos")
+
     @app.post("/courses/<int:course_id>/qr/bulk")
     @login_required
     def create_course_qrs_bulk(course_id):
