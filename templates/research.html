@@ -123,15 +123,6 @@
             <input class="form-control" name="manual_seconds" type="number" min="0.01" step="0.01" required>
           </div>
         </div>
-        <div class="col-lg-6">
-          <div class="border rounded bg-light p-3 h-100">
-            <h6 class="fw-bold">Web App – hoàn toàn tự động</h6>
-            Hệ thống tự tính thời gian từ Bắt đầu đến Kết thúc, tự đếm số lần nhấn/chọn
-            trên giao diện và đối chiếu số QR được tạo mới.
-            <div class="small text-muted mt-2">Không có ô nhập thời gian hoặc thao tác Web App.
-            Kết quả chỉ được chấp nhận khi đúng giảng viên, môn học và khối lượng.</div>
-          </div>
-        </div>
       </div>
       <div class="mt-3">
         <label class="form-label">Ghi chú minh chứng: danh sách video/playlist, thiết bị, mạng, thời điểm đo</label>
@@ -181,99 +172,103 @@
       Chưa đủ cặp đo để tính mức giảm chung.
       {% endif %}
     </p>
-    <h5 class="mb-2" id="cap-do-chi-tiet">C. Nhật ký cặp đo theo giảng viên và học phần</h5>
+    <h5 class="mb-2" id="cap-do-chi-tiet">C. Nhật ký đối chứng theo giảng viên và học phần</h5>
     <div class="table-responsive">
       <table class="table table-bordered table-sm align-middle">
-        <thead class="table-light">
-          <tr><th>Mã lượt đo</th><th>Giảng viên – Học phần</th><th>Loại QR và khối lượng</th>
-          <th>Thủ công</th><th>Web App</th><th>Trạng thái / Thao tác</th></tr>
+        <thead class="table-light text-center">
+          <tr>
+            <th rowspan="2" scope="col" class="align-middle text-start">Giảng viên</th>
+            <th rowspan="2" scope="col" class="align-middle text-start">Học phần/mô đun</th>
+            <th rowspan="2" scope="col" class="align-middle text-start">Loại QR</th>
+            <th rowspan="2" scope="col" class="align-middle text-start">Số lượng</th>
+            <th colspan="2" scope="colgroup">Số thao tác</th>
+            <th colspan="2" scope="colgroup">Tổng thời gian (giây)</th>
+          </tr>
+          <tr>
+            <th scope="col">Thủ công</th>
+            <th scope="col">Web App</th>
+            <th scope="col">Thủ công</th>
+            <th scope="col">Web App</th>
+          </tr>
         </thead>
         <tbody>
         {% for p in research_pairs %}
           <tr class="{{ 'table-secondary' if not p.active else '' }}">
-            <td><strong>{{ p.pair_code }}</strong><div class="small text-muted">{{ p.created_at.strftime('%d/%m/%Y') if p.created_at else '' }}</div></td>
-            <td>{{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}
-              <div class="small text-muted">{{ p.course.name if p.course else p.course_name_snapshot }}</div></td>
-            <td>{{ dict(pair_kinds).get(normalize_pair_kind(p.task_kind), p.task_kind) }}
-              <div class="small text-muted">{{ p.video_count }} video lẻ; {{ p.playlist_count }} playlist;
-                {{ p.playlist_video_count }} video trong playlist; <strong>{{ p.qr_count }} QR</strong></div>
-              {% if p.note %}<div class="small text-muted">{{ p.note }}</div>{% endif %}
-            </td>
-            <td>{{ p.manual_operations }} thao tác
-              <div>{{ '%.2f'|format(p.manual_seconds) }} giây</div>
-              <div class="small text-muted">{{ '%.2f'|format(p.manual_seconds / (p.video_count + p.playlist_video_count)) }} giây/video</div></td>
+            <td>{{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}</td>
+            <td>{{ p.course.name if p.course else p.course_name_snapshot }}</td>
+            <td>{{ dict(pair_kinds).get(normalize_pair_kind(p.task_kind), p.task_kind) }}</td>
             <td>
-              {% if p.webapp_seconds is not none and p.webapp_operations is not none %}
-                {{ p.webapp_operations }} thao tác ghi nhận trên Web App
-                <div>{{ '%.2f'|format(p.webapp_seconds) }} giây</div>
-                <div class="small text-muted">{{ '%.2f'|format(p.webapp_seconds / (p.video_count + p.playlist_video_count)) }} giây/video</div>
-                <div class="small {{ 'text-success' if p.measurement_save_method == 'directory_picker' else 'text-warning-emphasis' }}">
-                  {{ 'Đã ghi vào thư mục chọn qua trình duyệt' if p.measurement_save_method == 'directory_picker'
-                  else 'Lưu ZIP do giảng viên xác nhận – chưa tính nghiệm thu' if p.measurement_save_method == 'manual_confirmed'
-                  else 'Chưa xác nhận lưu tệp' }}
-                </div>
-              {% else %}<span class="text-muted">Chưa đo</span>{% endif %}
+              <strong>{{ p.qr_count }} mã QR</strong>
+              {% if p.video_count %}<div class="small text-muted">{{ p.video_count }} video lẻ</div>{% endif %}
+              {% if p.playlist_count %}
+                <div class="small text-muted">{{ p.playlist_count }} playlist ({{ p.playlist_video_count }} video trong playlist)</div>
+              {% endif %}
             </td>
-            <td>
-              {% if not p.active %}
-                <span class="text-muted">Đã loại khỏi báo cáo</span>
-                <div class="small text-muted">{{ p.void_reason or '' }}</div>
-              {% elif p.is_paired %}
-                <span class="text-success fw-semibold">Đủ cặp đo, đã lưu tệp</span>
-                <div class="small">Giảm thời gian: {{ '%.1f'|format(100 * (p.manual_seconds - p.webapp_seconds) / p.manual_seconds) }}%</div>
-              {% else %}
-                <div class="text-warning-emphasis fw-semibold mb-1">{{
-                  'Đã tải/lưu do giảng viên xác nhận – chờ kiểm chứng ngoài Web App'
-                  if p.measurement_save_method == 'manual_confirmed'
-                  else 'Đang tạo hoặc lưu mã QR'
-                  if p.measurement_started_at else 'Chờ giảng viên thao tác trong Kho học liệu'
-                }}</div>
-                {% if p.measurement_started_at %}
-                <div class="small text-muted">Đã tự ghi {{ p.measurement_operations or 0 }} thao tác.</div>
-                <div class="small text-muted">QR video đơn: {{ p.measurement_single_videos or 0 }}/{{ p.video_count }};
-                  QR playlist đơn: {{ p.measurement_single_playlists or 0 }}/{{ p.playlist_count }};
-                  QR video hàng loạt: {{ p.measurement_bulk_videos or 0 }}.</div>
-                {% endif %}
-                <div class="small text-muted">Web App tự ghi thời gian, số thao tác và QR mới.
-                  Chỉ cặp đo đủ QR và lưu trực tiếp qua trình duyệt mới được tính trong bảng so sánh;
-                  bản tải ZIP xác nhận thủ công cần minh chứng bổ sung và chưa tính vào nghiệm thu.</div>
+            <td class="text-center text-nowrap">{{ p.manual_operations }}</td>
+            <td class="text-center text-nowrap">
+              {{ p.webapp_operations if p.webapp_operations is not none else '—' }}
+              {% if p.webapp_operations is not none and not p.is_paired %}
+                <div class="small text-muted">Chưa xác minh lưu tệp</div>
               {% endif %}
-              {% if p.active and p.measurement_started_at and not p.measurement_verified %}
-              <details class="mt-2">
-                <summary class="small text-muted">Đặt lại lượt đo chưa hoàn thành</summary>
-                <form method="post" action="{{ url_for('research_measurement_admin_reset', pair_id=p.id) }}#cap-do-chi-tiet">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input name="reason" class="form-control form-control-sm my-1" minlength="5"
-                         maxlength="250" placeholder="Lý do đặt lại" required>
-                  <button class="btn btn-outline-secondary btn-sm">Đặt lại phiên đo</button>
-                </form>
-              </details>
-              {% endif %}
-              {% if p.active %}
-              <details class="mt-2">
-                <summary class="small text-muted">Loại lượt đo nhập sai</summary>
-                <form method="post" class="mt-2" action="{{ url_for('research_pair_void', pair_id=p.id) }}#cap-do-chi-tiet"
-                  onsubmit="return confirm('Xác nhận loại lượt đo khỏi báo cáo? Dữ liệu vẫn được giữ để kiểm tra lịch sử.');">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input class="form-control form-control-sm mb-1" name="void_reason" minlength="5" maxlength="500"
-                    placeholder="Lý do loại (bắt buộc)" required>
-                  <button class="btn btn-outline-danger btn-sm">Loại khỏi thống kê</button>
-                </form>
-              </details>
-              {% endif %}
+            </td>
+            <td class="text-center text-nowrap">{{ '%.2f'|format(p.manual_seconds) }}</td>
+            <td class="text-center text-nowrap">
+              {{ '%.2f'|format(p.webapp_seconds) if p.webapp_seconds is not none else '—' }}
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="6" class="text-muted text-center">Chưa có lượt đo đối chứng mới.</td></tr>
+          <tr><td colspan="8" class="text-center text-muted">Chưa có dữ liệu đối chứng.</td></tr>
         {% endfor %}
         </tbody>
       </table>
-      <p class="small text-muted">Chỉ hiển thị 120 lượt đo gần nhất; số liệu tổng hợp được tính trên toàn bộ cặp đo hợp lệ.
-        Bản ghi đã loại vẫn lưu trong cơ sở dữ liệu để kiểm chứng. Nhật ký kỹ thuật cũ:
-        {{ webapp_runs|length }} lượt Web App và {{ manual_runs|length }} lượt thủ công (hiển thị tối đa 200 lượt gần nhất);
-        <strong>không ghép cặp hoặc dùng các nhật ký này để tính tỷ lệ tiết kiệm chính thức</strong>.
+      <p class="small text-muted">
+        Dấu “—”: chưa có số đo Web App. Số đo đã ghi nhưng chưa xác minh lưu tệp
+        vẫn được giữ trong nhật ký, chưa cộng vào thống kê nghiệm thu.
+        Bản ghi đã loại được hiển thị nền xám.
       </p>
     </div>
+    <details class="mt-3">
+      <summary class="small fw-semibold">Quản lý bản ghi đối chứng cần điều chỉnh (chỉ quản trị viên)</summary>
+      <div class="small text-muted mt-2 mb-2">
+        Đặt lại phép đo chưa hoàn thành hoặc loại bản ghi nhập sai. Bản ghi đã loại
+        vẫn được giữ trong lịch sử, không xóa dữ liệu đo.
+      </div>
+      {% for p in research_pairs if p.active %}
+      <div class="border rounded p-2 mb-2 small">
+        <div class="fw-semibold">
+          {{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}
+          – {{ p.course.name if p.course else p.course_name_snapshot }}
+          – {{ dict(pair_kinds).get(normalize_pair_kind(p.task_kind), p.task_kind) }}
+          ({{ p.qr_count }} QR; {{ p.created_at.strftime('%d/%m/%Y') if p.created_at else '' }})
+        </div>
+        <div class="d-flex flex-wrap gap-3 align-items-end mt-2">
+          {% if p.measurement_started_at and not p.measurement_verified %}
+          <form method="post" action="{{ url_for('research_measurement_admin_reset', pair_id=p.id) }}#cap-do-chi-tiet">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input name="reason" class="form-control form-control-sm mb-1" minlength="5"
+                   maxlength="250" placeholder="Lý do đặt lại lượt đo" required>
+            <button class="btn btn-outline-secondary btn-sm">Đặt lại phép đo</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('research_pair_void', pair_id=p.id) }}#cap-do-chi-tiet"
+                onsubmit="return confirm('Loại bản ghi khỏi thống kê? Lịch sử vẫn được giữ.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input name="void_reason" class="form-control form-control-sm mb-1"
+                   minlength="5" maxlength="500" placeholder="Lý do loại bản ghi" required>
+            <button class="btn btn-outline-danger btn-sm">Loại khỏi thống kê</button>
+          </form>
+        </div>
+      </div>
+      {% else %}
+        <div class="text-muted small mt-2">Không có bản ghi đang hoạt động cần điều chỉnh.</div>
+      {% endfor %}
+    </details>
+    <p class="small text-muted mt-3">
+      Hiển thị 120 lượt đo gần nhất; kết quả tổng hợp dựa trên toàn bộ cặp đo hợp lệ.
+      Nhật ký kỹ thuật cũ (tối đa 200 lượt gần nhất) gồm
+      {{ webapp_runs|length }} lượt Web App và {{ manual_runs|length }} lượt thủ công;
+      không trộn các lượt kỹ thuật này với dữ liệu đối chứng chính thức.
+    </p>
   </div>
 </div>
 
