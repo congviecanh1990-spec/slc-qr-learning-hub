@@ -415,6 +415,27 @@
 <script>
 const bulkCourseSelector=document.getElementById('playlistBulkCourse');
 const bulkDownload=document.getElementById('playlistBulkDownloadQr');
+const bulkForm=document.getElementById('playlistBulkActions');
+const bulkCourseStorageKey='slc-bulk-course-v1:'+JSON.stringify([
+  bulkForm?.dataset.userId || '',
+  bulkForm?.querySelector('[name="p_q"]')?.value || '',
+  bulkForm?.querySelector('[name="p_assignment"]')?.value || ''
+]);
+function rememberBulkCourse(){
+  try {
+    if(bulkCourseSelector?.value) sessionStorage.setItem(bulkCourseStorageKey,bulkCourseSelector.value);
+    else sessionStorage.removeItem(bulkCourseStorageKey);
+  } catch (_) {}
+}
+function restoreBulkCourse(){
+  // Giữ môn đã chọn khi chuyển giữa các trang cùng bộ lọc.
+  try {
+    const remembered=sessionStorage.getItem(bulkCourseStorageKey);
+    if(remembered && bulkCourseSelector?.querySelector(`option[value="${Number(remembered)}"]`)){
+      bulkCourseSelector.value=String(Number(remembered));
+    }
+  } catch (_) {}
+}
 function updateBulkQrDownload(){
   const option=bulkCourseSelector?.selectedOptions[0];
   const url=Number(option?.dataset.qrCount || 0)>0 ? option?.dataset.qrDownload : null;
@@ -423,19 +444,24 @@ function updateBulkQrDownload(){
   else{bulkDownload.href='#';bulkDownload.classList.add('disabled');bulkDownload.setAttribute('aria-disabled','true');}
 }
 // One-use URL marker after bulk POST. Remove before the next refresh/navigation.
+restoreBulkCourse();
 const bulkRedirectUrl = new URL(window.location.href);
 const pendingBulkCourse = bulkRedirectUrl.searchParams.get('bulk_course_id');
 if (pendingBulkCourse !== null) {
   if (bulkCourseSelector?.querySelector(`option[value="${Number(pendingBulkCourse)}"]`)) {
     bulkCourseSelector.value = String(Number(pendingBulkCourse));
   }
+  rememberBulkCourse();
   bulkRedirectUrl.searchParams.delete('bulk_course_id');
   window.history.replaceState(window.history.state, '', bulkRedirectUrl.pathname + bulkRedirectUrl.search + bulkRedirectUrl.hash);
 }
-bulkCourseSelector?.addEventListener('change', updateBulkQrDownload);
+bulkCourseSelector?.addEventListener('change',()=>{ rememberBulkCourse(); updateBulkQrDownload(); });
 updateBulkQrDownload();
 function resetBulkCourseAfterDownload(){
-  if (bulkCourseSelector) bulkCourseSelector.value = '';
+  if (bulkCourseSelector) {
+    bulkCourseSelector.value = '';
+    bulkCourseSelector.dispatchEvent(new Event('change'));
+  }
   updateBulkQrDownload();
 }
 // Native downloads have no reliable browser 'completed' event. Reset once
