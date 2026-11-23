@@ -35,7 +35,9 @@ def test_group_uses_video_coverage_and_verified_only():
         return SimpleNamespace(task_kind=kind,video_count=v,playlist_count=pl,
           playlist_video_count=plv,qr_count=v+pl,manual_seconds=mt,
           webapp_seconds=wt,manual_operations=mo,webapp_operations=wo,
-          active=active,measurement_verified=verified)
+          active=active,measurement_verified=verified,
+          measurement_save_method="directory_picker",
+          measurement_saved_at="2026-11-23T00:00:00Z")
     rows=[row("QR_TUNG_VIDEO_PLAYLIST",3,5,50,530,53,100,15),
           row("QR_VIDEO_HANG_LOAT",15,0,0,150,30,60,10),
           row("QR_VIDEO_RIENG",5,0,0,50,5,10,2,False),
@@ -50,6 +52,11 @@ def test_group_uses_video_coverage_and_verified_only():
     assert a["QR_TUNG_VIDEO_PLAYLIST"]["qr_count"]==8
     assert a["QR_VIDEO_HANG_LOAT"]["manual_per_video"]==10.0
     assert tot["paired_count"]==2 and tot["video_coverage"]==68
+    old=SimpleNamespace(**vars(rows[0]))
+    old.measurement_save_method=None
+    newer=SimpleNamespace(**vars(rows[0]))
+    newer.measurement_save_method="manual_confirmed"
+    assert pair_metrics([old,newer])[1]["paired_count"]==0
     blank,total=pair_metrics(rows[2:])
     assert blank==[] and total["time_reduction"] is None
 
