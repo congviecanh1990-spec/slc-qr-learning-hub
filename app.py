@@ -32,10 +32,14 @@ from config import Config
 from models import (
     db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ClassGroup,
     SchoolClass, Student, ClassEnrollment, CourseClass, Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
-    HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
+    HubSubscription, HubEvent, ErrorLog, ExperimentRun, ResearchComparisonPair, FunctionalTestRun,
     ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, CourseClassTransfer, YouTubeSyncJob, utcnow
 )
 from security import encrypt_json, decrypt_json
+from research_comparison import (
+    RESEARCH_PAIR_KINDS, RESEARCH_PAIR_KIND_NAMES, validate_pair_form,
+    validate_webapp_observation, pair_metrics,
+)
 from services.error_reporting import login_failure_reason, safe_error_diagnostic
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
@@ -4721,7 +4725,21 @@ def register_routes(app):
         if request.method == "POST":
             form_type = request.form.get("form_type")
             try:
-                if form_type == "manual_experiment":
+                if form_type == "pair_create":
+                    values = validate_pair_form(request.form)
+                    lecturer = db.session.get(User, values["lecturer_id"])
+                    course = db.session.get(Course, values["course_id"])
+                    if not lecturer or not course or not course.active:
+                        raise ValueError("Giảng viên hoặc môn học/mô đun không tồn tại hay đã ngừng sử dụng.")
+                    assigned = CourseClass.query.filter_by(
+                        course_id=course.id, assigned_lecturer_id=lecturer.id, active=True).first()
+                    if course.owner_id != lecturer.id and not assigned:
+                        raise ValueError("Giảng viên không được phân công giảng dạy môn học/mô đun đã chọn.")
+                    if ResearchComparisonPair.query.filter_by(pair_code=values["pair_code"]).first():
+                        raise ValueError("Mã lượt đo đã tồn tại. Vui lòng nhập mã khác.")
+                    db.session.add(ResearchComparisonPair(**values, observer_id=user.id))
+                    flash("Đã lưu cặp đo theo giảng viên và khối lượng; chỉ tính thống kê khi có đủ hai phép đo.", "success")
+                elif form_type == "manual_experiment":
                     task_key = (request.form.get("task_key") or "").strip()
                     operations_count = int(request.form.get("operations_count") or 0)
                     elapsed_seconds = float(request.form.get("elapsed_seconds") or 0)
@@ -4760,6 +4778,15 @@ def register_routes(app):
 
         # Chỉ so sánh theo danh mục nhiệm vụ chuẩn. Nhờ vậy mã đối chứng thủ công
         # luôn trùng chính xác với mã Web App tự ghi và không phát sinh mã nhập sai.
+        # Chỉ lấy số liệu so sánh từ cặp đo thủ công/Web App cùng khối lượng.
+        # Không dùng thời gian backend của các ExperimentRun cũ để kết luận nghiệm thu.
+        all_research_pairs = ResearchComparisonPair.query.order_by(
+            ResearchComparisonPair.created_at.desc(), ResearchComparisonPair.id.desc()).all()
+        paired_groups, paired_totals = pair_metrics(all_research_pairs)
+        research_pairs = all_research_pairs[:120]
+        lecturers_for_research = User.query.order_by(User.name, User.email).all()
+        courses_for_research = Course.query.filter_by(active=True).order_by(Course.name).all()
+
         comparison_rows = []
         task_catalog = []
         for task in RESEARCH_COMPARISON_TASKS:
@@ -4815,7 +4842,51 @@ def register_routes(app):
             webapp_runs=webapp_runs, manual_runs=manual_runs,
             comparison_rows=comparison_rows, task_catalog=task_catalog,
             survey_links=survey_links,
+            research_pairs=research_pairs, paired_groups=paired_groups, paired_totals=paired_totals,
+            pair_kinds=RESEARCH_PAIR_KINDS, lecturers_for_research=lecturers_for_research,
+            courses_for_research=courses_for_research,
         )
+
+    @app.post("/research/comparison/<int:pair_id>/webapp")
+    @login_required
+    def research_pair_webapp_result(pair_id):
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        pair = db.session.get(ResearchComparisonPair, pair_id) or abort(404)
+        if not pair.active:
+            abort(404)
+        try:
+            operations, seconds = validate_webapp_observation(request.form)
+            pair.webapp_operations = operations
+            pair.webapp_seconds = seconds
+            pair.updated_at = utcnow()
+            db.session.commit()
+            flash(f"Đã bổ sung kết quả Web App cho lượt đo {pair.pair_code}.", "success")
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+        return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+
+    @app.post("/research/comparison/<int:pair_id>/void")
+    @login_required
+    def research_pair_void(pair_id):
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        pair = db.session.get(ResearchComparisonPair, pair_id) or abort(404)
+        if not pair.active:
+            return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+        reason = (request.form.get("void_reason") or "").strip()
+        if len(reason) < 5:
+            flash("Cần ghi lý do loại khỏi báo cáo (ít nhất 5 ký tự).", "warning")
+            return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+        pair.active = False
+        pair.void_reason = reason[:500]
+        pair.updated_at = utcnow()
+        db.session.commit()
+        flash(f"Đã loại lượt đo {pair.pair_code} khỏi các phép tính; bản ghi vẫn được giữ.", "success")
+        return redirect(url_for("research_page") + "#cap-do-chi-tiet")
 
     @app.get("/admin/organization")
     @login_required
@@ -5514,13 +5585,12 @@ def acceptance_metrics(user):
     manual = exp_q.filter(ExperimentRun.mode == "manual", ExperimentRun.success.is_(True), ExperimentRun.task_key.in_(comparison_keys)).all()
     webapp = exp_q.filter(ExperimentRun.mode == "webapp", ExperimentRun.success.is_(True), ExperimentRun.task_key.in_(comparison_keys)).all()
     # Chỉ so sánh các nhiệm vụ có dữ liệu ở CẢ hai phía để tránh trộn các công việc khác nhau.
-    matched_keys = {x.task_key for x in manual} & {x.task_key for x in webapp}
-    manual_matched = [x for x in manual if x.task_key in matched_keys]
-    webapp_matched = [x for x in webapp if x.task_key in matched_keys]
-    manual_ops = sum(x.operations_count for x in manual_matched) / len(manual_matched) if manual_matched else None
-    app_ops = sum(x.operations_count for x in webapp_matched) / len(webapp_matched) if webapp_matched else None
-    manual_time = sum(x.elapsed_seconds for x in manual_matched) / len(manual_matched) if manual_matched else None
-    app_time = sum(x.elapsed_seconds for x in webapp_matched) / len(webapp_matched) if webapp_matched else None
+    # Không trộn nhóm ghi sự kiện backend cũ vào so sánh thủ công - Web App.
+    # Chỉ tính các lượt ghép cặp cùng giảng viên/học phần/loại QR/khối lượng.
+    paired_query = ResearchComparisonPair.query.filter_by(active=True)
+    if user.role != "admin":
+        paired_query = paired_query.filter_by(lecturer_id=user.id)
+    _, paired_totals = pair_metrics(paired_query.all())
 
     qr_perf_q = QrCode.query.filter(QrCode.processing_seconds.isnot(None))
     if user.role != "admin":
@@ -5529,8 +5599,8 @@ def acceptance_metrics(user):
     processing_values = qr_perf or [x.system_processing_seconds for x in webapp if x.system_processing_seconds is not None]
     avg_processing = sum(processing_values) / len(processing_values) if processing_values else None
 
-    reduction_ops = round(100 * (manual_ops - app_ops) / manual_ops, 1) if manual_ops and app_ops is not None else None
-    reduction_time = round(100 * (manual_time - app_time) / manual_time, 1) if manual_time and app_time is not None else None
+    reduction_ops = paired_totals["ops_reduction"]
+    reduction_time = paired_totals["time_reduction"]
 
     # Khảo sát được thu bằng Google Forms và thống kê trong Google Sheets để tránh nhập tay từng phiếu.
     # Web App chỉ liên kết tới nguồn khảo sát; hai chỉ tiêu hài lòng được đánh giá từ Sheets khi nghiệm thu.
