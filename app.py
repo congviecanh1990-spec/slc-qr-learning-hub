@@ -838,6 +838,8 @@ def create_app():
                 step = "ensure_schema_upgrades"
                 print("[SLC STARTUP] ensure_schema_upgrades", flush=True)
                 ensure_schema_upgrades()
+                step = "ensure_research_comparison_schema"
+                ensure_research_comparison_schema()
                 step = "migrate_legacy_classes"
                 print("[SLC STARTUP] migrate_legacy_classes", flush=True)
                 migrate_legacy_classes()
@@ -3119,9 +3121,9 @@ def register_routes(app):
                 continue
             # GV mới vẫn sử dụng QR cũ từ kênh GV trước; không tự tạo QR mới
             # cho nguồn YouTube chưa được GV mới kết nối.
-            existing = (db.session.get(QrCode, link.qr_id) if link.qr_id else
-                        active_qr_for_course_video(course.id, video.id, user.id))
-            if not video_accessible_to_lecturer(video, user) and not (existing and existing.active):
+            existing_qr = (db.session.get(QrCode, link.qr_id) if link.qr_id else
+                           active_qr_for_course_video(course.id, video.id, user.id))
+            if not video_accessible_to_lecturer(video, user) and not (existing_qr and existing_qr.active):
                 skipped += 1
                 continue
             qr, was_created = create_qr_for_course_video(course, video, user, link)
@@ -4915,7 +4917,8 @@ def register_routes(app):
             comparison_rows=comparison_rows, task_catalog=task_catalog,
             survey_links=survey_links,
             research_pairs=research_pairs, paired_groups=paired_groups, paired_totals=paired_totals,
-            pair_kinds=RESEARCH_PAIR_KINDS, lecturers_for_research=lecturers_for_research,
+            pair_kinds=RESEARCH_PAIR_KINDS, normalize_pair_kind=normalize_kind,
+            lecturers_for_research=lecturers_for_research,
             courses_for_research=courses_for_research,
         )
 
