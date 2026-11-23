@@ -2407,7 +2407,7 @@ def register_routes(app):
         # Lựa chọn ở ô tiêu đề áp dụng cho TOÀN BỘ các trang.
         # all: mọi playlist đúng bộ lọc, trừ danh sách bỏ tích.
         # none: bỏ tất cả, chỉ xử lý danh sách tích lại (có thể ở trang khác).
-        selection_mode = request.form.get("playlist_selection_mode", "all")
+        selection_mode = request.form.get("playlist_selection_mode", "none")
         if selection_mode not in {"all", "none"}:
             abort(400)
         list_name = ("excluded_playlist_ids" if selection_mode == "all"
@@ -2463,7 +2463,7 @@ def register_routes(app):
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
         redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
-        selection_mode = request.form.get("playlist_selection_mode", "all")
+        selection_mode = request.form.get("playlist_selection_mode", "none")
         if selection_mode not in {"all", "none"}:
             abort(400)
         list_name = ("excluded_playlist_ids" if selection_mode == "all"
@@ -3259,7 +3259,10 @@ def register_routes(app):
             replacement_playlists=replacement_playlists,
             selected_course=selected_course, selected_course_id=selected_course_id,
             total_qrs=len(all_qrs),
-            all_time_qrs=QrCode.query.filter(managed_qr_scope(user.id)).count(),
+            # Các QR đã ngừng sử dụng vẫn được giữ trong PostgreSQL để tra cứu lịch sử,
+            # nhưng không được tính vào tổng QR hiện có trên giao diện.
+            inactive_qr_count=QrCode.query.filter(
+                managed_qr_scope(user.id), QrCode.active.is_(False)).count(),
             filtered_qr_count=len(qrs),
             playlist_qr_count=sum(1 for q in all_qrs if q.is_playlist),
             video_qr_count=sum(1 for q in all_qrs if not q.is_playlist),
