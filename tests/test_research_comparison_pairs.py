@@ -114,3 +114,63 @@ def test_new_table_sqlite_preserves_legacy_experiments():
         assert ExperimentRun.query.count()==1
         groups,totals=pair_metrics(ResearchComparisonPair.query.all())
         assert groups[0]["qr_count"]==15 and totals["paired_count"]==1
+
+
+def test_research_admin_workflow_end_to_end(tmp_path, monkeypatch):
+    """GET/POST thật qua Flask: nhập thủ công, hoàn thiện Web App, loại lượt sai."""
+    db_url="sqlite:///"+str(tmp_path/"research-workflow.sqlite3")
+    monkeypatch.setenv("DATABASE_URL",db_url)
+    monkeypatch.setenv("AUTO_CREATE_DB","0")
+    monkeypatch.setenv("SECRET_KEY","ci-only-secret")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID","")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET","")
+    import app as webapp
+    from models import db, User, Course, ResearchComparisonPair
+    application=webapp.create_app()
+    application.config.update(
+        TESTING=True, WTF_CSRF_ENABLED=False, SESSION_COOKIE_SECURE=False
+    )
+    with application.app_context():
+        db.create_all()
+        admin=User(email="admin-r@example.test",name="Admin",role="admin")
+        teacher=User(email="teacher-r@example.test",name="GV thực nghiệm",role="lecturer")
+        db.session.add_all([admin,teacher]);db.session.flush()
+        course=Course(owner_id=teacher.id,name="Lập trình Python",code="HP001")
+        db.session.add(course);db.session.commit()
+        admin_id,teacher_id,course_id=admin.id,teacher.id,course.id
+    with application.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"]=admin_id
+        response=client.get("/research")
+        assert response.status_code==200
+        assert b"pair_create" in response.data
+        form=dict(BASE,form_type="pair_create",lecturer_id=str(teacher_id),
+                  course_id=str(course_id),webapp_operations="",webapp_seconds="")
+        result=client.post("/research",data=form,follow_redirects=False)
+        assert result.status_code==302
+        with application.app_context():
+            pair=ResearchComparisonPair.query.filter_by(pair_code="TN01-VIDEO").one()
+            pair_id=pair.id
+            assert pair.webapp_seconds is None
+        response=client.get("/research")
+        assert response.status_code==200
+        assert "Chờ bổ sung Web App".encode() in response.data
+        result=client.post(f"/research/comparison/{pair_id}/webapp",
+            data=dict(webapp_operations="12",webapp_seconds="50.5"),
+            follow_redirects=False)
+        assert result.status_code==302
+        with application.app_context():
+            pair=db.session.get(ResearchComparisonPair,pair_id)
+            assert pair.is_paired and pair.webapp_seconds==50.5
+        response=client.get("/research")
+        assert response.status_code==200
+        assert "Đủ cặp đo".encode() in response.data
+        result=client.post(f"/research/comparison/{pair_id}/void",
+            data={"void_reason":"Thao tác không hợp lệ"},follow_redirects=False)
+        assert result.status_code==302
+        with application.app_context():
+            pair=db.session.get(ResearchComparisonPair,pair_id)
+            assert pair.active is False and pair.void_reason
+        response=client.get("/research")
+        assert response.status_code==200
+        assert "Chưa đủ cặp đo".encode() in response.data or "Chưa có cặp đo".encode() in response.data
