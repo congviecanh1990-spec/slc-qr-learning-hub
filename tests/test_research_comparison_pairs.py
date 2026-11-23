@@ -102,8 +102,9 @@ def test_new_table_sqlite_preserves_legacy_experiments():
         db.session.add(lecturer);db.session.flush()
         course=Course(owner_id=lecturer.id,name="Học phần",code="HP1")
         db.session.add(course);db.session.flush()
-        p=ResearchComparisonPair(**validate_pair_form(BASE),
-             lecturer_id=lecturer.id,course_id=course.id,
+        values=validate_pair_form(BASE)
+        values.update(lecturer_id=lecturer.id,course_id=course.id)
+        p=ResearchComparisonPair(**values,
              lecturer_name_snapshot="Giảng viên",course_name_snapshot="Học phần")
         db.session.add(p)
         db.session.add(ExperimentRun(owner_id=lecturer.id,task_key="TAO_QR_RIENG",
