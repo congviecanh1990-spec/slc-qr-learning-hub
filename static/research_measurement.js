@@ -49,7 +49,11 @@
   function setModeVisibility(){
     const bulk=selectedMode()==='QR_VIDEO_HANG_LOAT';
     if(bulkForm){bulkForm.hidden=!bulk;bulkForm.style.display=bulk?'':'none';}
-    document.querySelectorAll('.video-qr-actions,.playlist-qr-actions').forEach(f=>f.hidden=bulk);
+    document.querySelectorAll('.video-qr-actions,.playlist-qr-actions').forEach(el=>{
+      el.hidden=bulk;
+      if(bulk)el.style.setProperty('display','none','important');
+      else el.style.removeProperty('display');
+    });
     // Các nút gán học liệu, lọc, phân trang vẫn giữ nguyên.
     if(bulkCourse)bulkCourse.value=course?.value||'';
     if(bulkCount)bulkCount.textContent='Đã chọn '+chosenVideos.size+' video ở các trang.';
