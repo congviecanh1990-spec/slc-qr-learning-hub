@@ -212,6 +212,12 @@
                 <div class="small">Giảm thời gian: {{ '%.1f'|format(100 * (p.manual_seconds - p.webapp_seconds) / p.manual_seconds) }}%</div>
               {% else %}
                 <div class="text-warning-emphasis fw-semibold mb-1">{{ 'Đang đo' if p.measurement_started_at else 'Chờ giảng viên bắt đầu đo' }}</div>
+                {% if p.measurement_started_at %}
+                <div class="small text-muted">Đã tự ghi {{ p.measurement_operations or 0 }} thao tác.</div>
+                <div class="small text-muted">QR video đơn: {{ p.measurement_single_videos or 0 }}/{{ p.video_count }};
+                  QR playlist đơn: {{ p.measurement_single_playlists or 0 }}/{{ p.playlist_count }};
+                  QR video hàng loạt: {{ p.measurement_bulk_videos or 0 }}.</div>
+                {% endif %}
                 <div class="small text-muted">Web App sẽ tự điền kết quả khi giảng viên hoàn tất đủ mã QR.</div>
               {% endif %}
               {% if p.active and p.measurement_started_at and not p.measurement_verified %}
