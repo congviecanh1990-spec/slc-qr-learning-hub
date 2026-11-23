@@ -500,9 +500,11 @@ class ResearchComparisonPair(db.Model):
     __tablename__ = "research_comparison_pairs"
     id = db.Column(db.Integer, primary_key=True)
     pair_code = db.Column(db.String(64), unique=True, nullable=False, index=True)
-    lecturer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
-    course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="RESTRICT"), nullable=False, index=True)
+    lecturer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="SET NULL"), nullable=True, index=True)
     observer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    lecturer_name_snapshot = db.Column(db.String(255), nullable=False, default="")
+    course_name_snapshot = db.Column(db.String(255), nullable=False, default="")
     task_kind = db.Column(db.String(32), nullable=False, index=True)
     video_count = db.Column(db.Integer, nullable=False, default=0)
     playlist_count = db.Column(db.Integer, nullable=False, default=0)
