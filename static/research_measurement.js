@@ -48,7 +48,7 @@
   }
   function setModeVisibility(){
     const bulk=selectedMode()==='QR_VIDEO_HANG_LOAT';
-    if(bulkForm)bulkForm.hidden=!bulk;
+    if(bulkForm){bulkForm.hidden=!bulk;bulkForm.style.display=bulk?'':'none';}
     document.querySelectorAll('.video-qr-actions,.playlist-qr-actions').forEach(f=>f.hidden=bulk);
     // Các nút gán học liệu, lọc, phân trang vẫn giữ nguyên.
     if(bulkCourse)bulkCourse.value=course?.value||'';
@@ -138,10 +138,11 @@
       :'Người dùng xác nhận đã tải/giải nén và lưu đúng thư mục; không tự xác minh thao tác Windows.';
     info('Đã kết thúc đo: '+result.qr_count+' QR; '+result.elapsed_seconds+
       ' giây; '+result.operations+' thao tác Web App. '+label);
+    const previousKey=fileKey();
     active=null;interactionsOn=false;
     if(saveArea)saveArea.hidden=true;
     fallbackFiles=null;
-    try{sessionStorage.removeItem(fileKey());}catch(_){}
+    try{sessionStorage.removeItem(previousKey);}catch(_){}
   }
   async function saveDirect(){
     if(!active)return;
