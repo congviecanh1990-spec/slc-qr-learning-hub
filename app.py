@@ -37,6 +37,7 @@ from models import (
 )
 from security import encrypt_json, decrypt_json
 from analytics_excel import make_analytics_workbook
+from lecturer_usage import lecturer_usage_rows
 from research_comparison import (
     RESEARCH_PAIR_KINDS, RESEARCH_PAIR_KIND_NAMES, validate_pair_form,
     normalize_kind, pair_metrics, video_coverage,
@@ -4100,7 +4101,7 @@ def register_routes(app):
         """
         user = current_user()
         export_section = (request.args.get("export_xlsx") or "").strip()
-        if export_section not in {"", "system", "scans", "videos"}:
+        if export_section not in {"", "system", "lecturers", "scans", "videos"}:
             abort(400)
         course_q = Course.query.filter(Course.active.is_(True))
         qr_q = QrCode.query.filter(QrCode.active.is_(True), QrCode.course_id.isnot(None))
@@ -4201,11 +4202,11 @@ def register_routes(app):
         tests_pass = test_query.filter(FunctionalTestRun.passed.is_(True)).count()
         tests_fail = tests_total - tests_pass
         test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
-        test_pages = max(1, (tests_total + 9) // 10)
+        test_pages = max(1, (tests_total + 4) // 5)
         test_page = min(test_page, test_pages)
         test_sorted = test_query.order_by(FunctionalTestRun.created_at.desc(), FunctionalTestRun.id.desc())
         tests = (test_sorted.all() if export_section == "system" else
-                 test_sorted.offset((test_page - 1) * 10).limit(10).all())
+                 test_sorted.offset((test_page - 1) * 5).limit(5).all())
         test_page_numbers = list(range(max(1, test_page-2), min(test_pages, test_page+2)+1))
         test_feature_options = [row[0] for row in db.session.query(FunctionalTestRun.case_name)
                                 .filter(FunctionalTestRun.source == "automatic", FunctionalTestRun.participant_code.is_(None),
@@ -4415,6 +4416,10 @@ def register_routes(app):
         sv_args = {k:v for k,v in all_args.items() if not k.startswith("sys_")}
         sys_nav = {**all_args, **test_filter_args}
         sv_nav = dict(all_args)
+        # Thống kê GV luôn dựa trên phân công hiện hành, không lấy 5 dòng nhật ký.
+        # Chỉ truy vấn khi render phần thống kê hoặc xuất riêng danh sách GV.
+        lecturer_rows = (lecturer_usage_rows(user, current_app.config["COMPLETION_THRESHOLD"], utcnow().date())
+                         if export_section in {"", "lecturers"} else [])
         if export_section:
             # Tạo Excel tại máy chủ, tuyệt đối không phụ thuộc 10 dòng đang hiển thị.
             # Mọi truy vấn ở trên đều đã áp dụng bộ lọc và giới hạn quyền người dùng.
@@ -4428,6 +4433,15 @@ def register_routes(app):
                 ]
                 title, filename = "1. Thống kê hoạt động của hệ thống", "Thong_ke_hoat_dong_he_thong.xlsx"
                 filters = f"Thời gian: {test_period}; Chức năng: {test_feature or 'Tất cả'}; Kết quả: {test_result}"
+            elif export_section == "lecturers":
+                headers = ["STT", "Giảng viên", "Email", "Số MH/MĐ", "Mã QR đã tạo",
+                           "Số lớp", "Tổng sĩ số", "SV đã quét QR", "SV quét thành công",
+                           "SV hoàn thành xem video"]
+                records = [(i, r["lecturer"], r["email"], r["courses"], r["qr"],
+                            r["classes"], r["roster"], r["scanned"], r["successful"],
+                            r["finished"]) for i, r in enumerate(lecturer_rows, 1)]
+                title, filename = "1B. Thống kê khai thác theo giảng viên", "Thong_ke_theo_giang_vien.xlsx"
+                filters = "Phân công giảng dạy hiện hành; toàn bộ thời gian"
             elif export_section == "scans":
                 headers = ["STT", "Tên SV (Mã)", "Lớp", "MH/MĐ", "Học liệu / mã QR đã quét",
                            "Số lượt quét", "Quét thành công", "Quét không thành công"]
@@ -4466,7 +4480,7 @@ def register_routes(app):
             test_feature_options=test_feature_options, test_result=test_result,
             system_actors=system_actors, sys_actor_id=sys_actor_id,
             test_search=test_search, test_from=test_from, test_to=test_to,
-            test_filter_args=test_filter_args)
+            test_filter_args=test_filter_args, lecturer_rows=lecturer_rows)
 
     @app.get("/exports/scans.csv")
     @login_required
