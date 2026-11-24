@@ -44,9 +44,11 @@ def lecturer_usage_rows(user, threshold: float, today: date):
         course_ids[lecturer_id].add(course.id)
         class_ids[lecturer_id].add(school_class.id)
 
-    # Môn học chưa phân lớp vẫn được thống kê là môn GV phụ trách.
+    # Môn chưa gán lớp vẫn thuộc GV chủ môn. Nếu toàn bộ lớp được
+    # bàn giao cho người khác thì không tính là môn đang dạy của chủ cũ.
+    courses_with_classes = {link.course_id for link, _ in links}
     for course in courses:
-        if course.owner_id in ids:
+        if course.owner_id in ids and course.id not in courses_with_classes:
             course_ids[course.owner_id].add(course.id)
 
     class_id_pool = set().union(*class_ids.values()) if class_ids else set()
@@ -84,10 +86,11 @@ def lecturer_usage_rows(user, threshold: float, today: date):
             for code in class_roster[class_id]:
                 student_scopes[lecturer_id][code].add((cid, class_id))
 
-    # QR đã tạo tính theo người tạo mã, không nhập nhằng với giảng viên nhận bàn giao môn.
+    # QR đã tạo tính theo người tạo mã, kể cả mã hiện đã ngừng hoạt động;
+    # không nhập nhằng với giảng viên nhận bàn giao môn.
     qr_counts = defaultdict(int)
     for lecturer_id, qr_count in (db.session.query(QrCode.owner_id, db.func.count(QrCode.id))
-                                  .filter(QrCode.owner_id.in_(ids), QrCode.active.is_(True))
+                                  .filter(QrCode.owner_id.in_(ids))
                                   .group_by(QrCode.owner_id).all()):
         qr_counts[lecturer_id] = qr_count
 
