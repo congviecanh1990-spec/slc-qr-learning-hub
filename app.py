@@ -10,7 +10,7 @@ import secrets
 import unicodedata
 import zipfile
 import time
-from datetime import timedelta, datetime, date
+from datetime import timedelta, datetime, date, timezone
 from functools import wraps
 from urllib.parse import urlparse, parse_qsl, urlencode
 
@@ -20,7 +20,7 @@ from PIL import Image
 from qrcode.constants import ERROR_CORRECT_H
 from authlib.integrations.flask_client import OAuth
 from flask import (
-    Flask, Response, abort, current_app, flash, jsonify, redirect,
+    Flask, Response, abort, current_app, flash, jsonify, redirect, has_request_context,
     render_template, request, send_file, session, url_for
 )
 from flask_wtf.csrf import CSRFProtect
@@ -32,10 +32,14 @@ from config import Config
 from models import (
     db, User, OAuthAccount, YouTubeChannel, Playlist, Video, PlaylistVideo, Course, CourseVideo, CoursePlaylist, ClassGroup,
     SchoolClass, Student, ClassEnrollment, CourseClass, Participant, QrCode, QrTargetHistory, ScanLog, WatchSession, WatchEvent,
-    HubSubscription, HubEvent, ErrorLog, ExperimentRun, FunctionalTestRun,
+    HubSubscription, HubEvent, ErrorLog, ExperimentRun, ResearchComparisonPair, FunctionalTestRun,
     ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, CourseClassTransfer, YouTubeSyncJob, utcnow
 )
 from security import encrypt_json, decrypt_json
+from research_comparison import (
+    RESEARCH_PAIR_KINDS, RESEARCH_PAIR_KIND_NAMES, validate_pair_form,
+    normalize_kind, pair_metrics, video_coverage,
+)
 from services.error_reporting import login_failure_reason, safe_error_diagnostic
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
@@ -834,6 +838,8 @@ def create_app():
                 step = "ensure_schema_upgrades"
                 print("[SLC STARTUP] ensure_schema_upgrades", flush=True)
                 ensure_schema_upgrades()
+                step = "ensure_research_comparison_schema"
+                ensure_research_comparison_schema()
                 step = "migrate_legacy_classes"
                 print("[SLC STARTUP] migrate_legacy_classes", flush=True)
                 migrate_legacy_classes()
@@ -1007,6 +1013,111 @@ def record_webapp_experiment(owner_id, task_key, elapsed_seconds, operations_cou
         success=bool(success),
         note=(note or "")[:4000],
     ))
+
+
+def ensure_research_comparison_schema():
+    """Nâng cấp gia tăng bảng đối chứng, không đổi dữ liệu cũ trên Neon."""
+    connection = db.session.connection()
+    table = ResearchComparisonPair.__tablename__
+    if not inspect(connection).has_table(table):
+        ResearchComparisonPair.__table__.create(bind=connection, checkfirst=True)
+        db.session.commit()
+        return
+    columns = {col["name"] for col in inspect(connection).get_columns(table)}
+    additions = {
+        "lecturer_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
+        "course_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
+        "measurement_started_at": "TIMESTAMP WITH TIME ZONE",
+        "measurement_finished_at": "TIMESTAMP WITH TIME ZONE",
+        "measurement_operations": "INTEGER NOT NULL DEFAULT 0",
+        "measurement_single_videos": "INTEGER NOT NULL DEFAULT 0",
+        "measurement_single_playlists": "INTEGER NOT NULL DEFAULT 0",
+        "measurement_bulk_videos": "INTEGER NOT NULL DEFAULT 0",
+        "measurement_verified": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "measurement_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
+        "measurement_save_method": "VARCHAR(32)",
+        "measurement_saved_at": "TIMESTAMP WITH TIME ZONE",
+    }
+    missing = [name for name in additions if name not in columns]
+    if missing:
+        for name in missing:
+            dtype = additions[name]
+            if db.engine.dialect.name == "sqlite" and dtype == "TIMESTAMP WITH TIME ZONE":
+                dtype = "DATETIME"
+            db.session.execute(text(
+                f"ALTER TABLE research_comparison_pairs ADD COLUMN {name} {dtype}"))
+        db.session.commit()
+        current_app.logger.info("Research comparison columns added: %s", ", ".join(missing))
+
+
+def active_research_measurement(user_id=None):
+    """Chỉ nhận phiên đo đã được chính tài khoản giảng viên khởi động."""
+    if not has_request_context():
+        return None
+    pair_id = session.get("research_measurement_id")
+    if not pair_id:
+        return None
+    user_id = user_id or session.get("user_id")
+    pair = db.session.get(ResearchComparisonPair, pair_id)
+    if not pair or not pair.active or pair.lecturer_id != user_id or (
+        not pair.measurement_started_at or pair.measurement_finished_at):
+        return None
+    return pair
+
+
+def research_created_qr_ids(pair):
+    try:
+        found = json.loads(pair.measurement_qr_ids or "[]")
+        return [int(x) for x in found if isinstance(x, int) and x > 0] if isinstance(found, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
+    """Chỉ ghi QR mới, đúng chức năng đã chọn ở Kho học liệu và đúng học phần."""
+    if not has_request_context() or not session.get("research_measurement_id"):
+        return
+    pair = active_research_measurement(lecturer_id)
+    if not pair or pair.course_id != course_id or not qr_id:
+        return
+    endpoint = request.endpoint
+    task = normalize_kind(pair.task_kind)
+    single_video = kind == "video" and endpoint == "create_video_qr_from_library"
+    single_playlist = kind == "playlist" and endpoint == "create_playlist_qr_from_library"
+    bulk_video = kind == "video" and endpoint == "bulk_create_selected_video_qrs"
+    if not ((task == "QR_TUNG_VIDEO_PLAYLIST" and (single_video or single_playlist)) or
+            (task == "QR_VIDEO_HANG_LOAT" and bulk_video)):
+        return
+    known = research_created_qr_ids(pair)
+    if qr_id in known or len(known) >= pair.qr_count:
+        return
+    known.append(qr_id)
+    pair.measurement_qr_ids = json.dumps(known)
+    if single_video:
+        pair.measurement_single_videos += 1
+    elif single_playlist:
+        pair.measurement_single_playlists += 1
+    else:
+        pair.measurement_bulk_videos += 1
+
+
+def research_measurement_complete_qrs(pair):
+    """Đủ mã QR theo nhiệm vụ và không tính mã bị xoá."""
+    if not pair or not pair.active or not pair.measurement_started_at:
+        return False
+    qr_ids = research_created_qr_ids(pair)
+    if len(qr_ids) != pair.qr_count:
+        return False
+    qrs = QrCode.query.filter(QrCode.id.in_(qr_ids), QrCode.active.is_(True),
+                              QrCode.course_id == pair.course_id).all()
+    if len(qrs) != len(qr_ids):
+        return False
+    if normalize_kind(pair.task_kind) == "QR_VIDEO_HANG_LOAT":
+        return pair.measurement_bulk_videos == pair.video_count and all(not q.is_playlist for q in qrs)
+    return (pair.measurement_single_videos == pair.video_count and
+            pair.measurement_single_playlists == pair.playlist_count and
+            sum(not q.is_playlist for q in qrs) == pair.video_count and
+            sum(q.is_playlist for q in qrs) == pair.playlist_count)
 
 
 def research_setting(key, default=""):
@@ -1204,6 +1315,75 @@ def visible_playlist_query(user: User):
     return q
 
 
+def filtered_library_video_query(user, search="", status="", assignment="", playlist_id=None):
+    """Một truy vấn chung cho danh sách video VÀ các lệnh chọn mọi trang.
+
+    Luôn giới hạn theo tài khoản giảng viên, kể cả khi trình duyệt gửi ID khác.
+    """
+    q = visible_video_query(user)
+    if status == "private":
+        q = q.filter(Video.privacy_status == "private")
+    elif status == "noembed":
+        q = q.filter(Video.embeddable.is_(False))
+    elif status == "unavailable":
+        q = q.filter(Video.is_available.is_(False))
+    elif status == "usable":
+        q = q.filter(Video.is_available.is_(True), Video.privacy_status != "private",
+                     Video.embeddable.isnot(False))
+    if search:
+        q = q.filter(Video.title.ilike(f"%{search[:150]}%"))
+    if playlist_id:
+        permitted = visible_playlist_query(user).filter(Playlist.id == playlist_id).first()
+        if not permitted:
+            return q.filter(Video.id == -1)
+        ids = db.session.query(PlaylistVideo.video_id).filter(
+            PlaylistVideo.playlist_id == playlist_id)
+        q = q.filter(Video.id.in_(ids))
+    owned = db.session.query(Course.id).filter(Course.owner_id == user.id, Course.active.is_(True))
+    assigned = db.session.query(CourseVideo.video_id).filter(CourseVideo.course_id.in_(owned))
+    if assignment == "unassigned":
+        q = q.filter(~Video.id.in_(assigned))
+    elif assignment == "assigned":
+        q = q.filter(Video.id.in_(assigned))
+    return q
+
+
+def selected_filtered_library_video_ids(user, form, max_selected=10000):
+    """Lấy video đã tích trên tất cả trang; máy chủ luôn xác minh lại bộ lọc và quyền.
+
+    mode=all: mọi video thuộc bộ lọc, trừ ID bỏ tích.
+    mode=none: chỉ video được tích riêng, kể cả ở các trang khác.
+    """
+    search = (form.get("q") or "").strip()[:150]
+    status = (form.get("status") or "").strip()
+    assignment = (form.get("assignment") or "").strip()
+    raw_playlist_id = (form.get("playlist_id") or "").strip()
+    if status not in {"", "usable", "private", "noembed", "unavailable"} or (
+        assignment not in {"", "assigned", "unassigned"}):
+        abort(400)
+    if raw_playlist_id and (not raw_playlist_id.isascii() or not raw_playlist_id.isdigit() or int(raw_playlist_id) <= 0):
+        abort(400)
+    playlist_id = int(raw_playlist_id) if raw_playlist_id else None
+    mode = (form.get("video_selection_mode") or "none").strip()
+    if mode not in {"all", "none"}:
+        abort(400)
+    list_name = "excluded_video_ids" if mode == "all" else "selected_video_ids"
+    raw_ids = form.getlist(list_name)
+    # Giữ tương thích với các biểu mẫu/video cũ chưa bật JS chọn xuyên trang.
+    if mode == "none" and "video_selection_mode" not in form:
+        raw_ids = form.getlist("video_ids")
+    if (len(raw_ids) > 10000 or
+        any(not str(x).isascii() or not str(x).isdigit() or int(x) <= 0 for x in raw_ids)):
+        abort(400)
+    overrides = {int(x) for x in raw_ids}
+    candidates = filtered_library_video_query(user, search, status, assignment, playlist_id).with_entities(Video.id).all()
+    chosen = [row[0] for row in candidates if
+              ((row[0] not in overrides) if mode == "all" else (row[0] in overrides))]
+    if len(chosen) > max_selected:
+        abort(413, description="Số video được chọn vượt giới hạn cho một lượt xử lý.")
+    return chosen
+
+
 def videos_library_return(anchor: str, raw_query: str = "") -> str:
     """Redirect only within the video library, retaining approved filter parameters.
 
@@ -1325,6 +1505,7 @@ def create_qr_for_course_playlist(course: Course, playlist: Playlist, user: User
         link.qr_id = qr.id
     db.session.flush()
     qr.processing_seconds = round(time.perf_counter() - t0, 4)
+    record_research_qr_creation(course.id, user.id, "playlist", qr.id)
     return qr, True
 
 
@@ -1468,6 +1649,7 @@ def create_qr_for_course_video(course: Course, video: Video, user: User, link: C
         link.qr_id = qr.id
     db.session.flush()
     qr.processing_seconds = round(time.perf_counter() - t0, 4)
+    record_research_qr_creation(course.id, user.id, "video", qr.id)
     return qr, True
 
 
@@ -2235,40 +2417,13 @@ def register_routes(app):
         user = current_user()
 
         # --- Bộ lọc video ---
-        q = visible_video_query(user)
         status = request.args.get("status", "").strip()
         assignment = request.args.get("assignment", "").strip()
-        search = request.args.get("q", "").strip()
+        search = request.args.get("q", "").strip()[:150]
         playlist_filter_id = request.args.get("playlist_id", type=int)
-
-        if status == "private":
-            q = q.filter(Video.privacy_status == "private")
-        elif status == "noembed":
-            q = q.filter(Video.embeddable.is_(False))
-        elif status == "unavailable":
-            q = q.filter(Video.is_available.is_(False))
-        elif status == "usable":
-            q = q.filter(Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False))
-        if search:
-            q = q.filter(Video.title.ilike(f"%{search}%"))
-
-        # Danh sách playlist của chính giảng viên để lọc video và gán môn học/ mô đun.
+        # Danh sách, số trang và xử lý hàng loạt PHẢI dùng cùng bộ lọc.
+        q = filtered_library_video_query(user, search, status, assignment, playlist_filter_id)
         available_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
-        allowed_playlist_ids = {p.id for p in available_playlists}
-        if playlist_filter_id:
-            if playlist_filter_id in allowed_playlist_ids:
-                playlist_video_ids = db.session.query(PlaylistVideo.video_id).filter(PlaylistVideo.playlist_id == playlist_filter_id)
-                q = q.filter(Video.id.in_(playlist_video_ids))
-            else:
-                # Không cho dùng ID playlist ngoài phạm vi tài khoản để lọc dữ liệu.
-                q = q.filter(Video.id == -1)
-
-        owned_course_ids = db.session.query(Course.id).filter(Course.owner_id == user.id, Course.active.is_(True))
-        assigned_video_ids = db.session.query(CourseVideo.video_id).filter(CourseVideo.course_id.in_(owned_course_ids))
-        if assignment == "unassigned":
-            q = q.filter(~Video.id.in_(assigned_video_ids))
-        elif assignment == "assigned":
-            q = q.filter(Video.id.in_(assigned_video_ids))
         video_total = q.count()
         video_pages = max(1, (video_total + 4) // 5)
         video_page = min(max(1, request.args.get("v_page", 1, type=int)), video_pages)
@@ -2290,8 +2445,22 @@ def register_routes(app):
             db.session.query(QrCode.course_id, func.count(QrCode.id)).filter(
                 managed_qr_scope(user.id), QrCode.active.is_(True), QrCode.course_id.isnot(None)
             ).group_by(QrCode.course_id).all()}
+        # Nút "Bỏ lọc" chỉ đưa danh sách tương ứng về mặc định;
+        # không xoá bộ lọc/phân trang đang dùng của danh sách còn lại.
+        current_filter_args = {
+            key: value for key, value in request.args.items()
+            if key in {"q", "status", "assignment", "playlist_id", "v_page",
+                       "p_q", "p_assignment", "p_page"} and value
+        }
+        playlist_reset_url = url_for(
+            "videos_page", **{key: value for key, value in current_filter_args.items()
+                              if key not in {"p_q", "p_assignment", "p_page"}}) + "#playlists"
+        video_reset_url = url_for(
+            "videos_page", **{key: value for key, value in current_filter_args.items()
+                              if key not in {"q", "status", "assignment", "playlist_id", "v_page"}}) + "#videos"
         response = current_app.make_response(render_template(
             "videos.html",
+            playlist_reset_url=playlist_reset_url, video_reset_url=video_reset_url,
             videos=videos,
             status=status,
             assignment=assignment,
@@ -2322,14 +2491,13 @@ def register_routes(app):
     def assign_videos_to_course():
         user = current_user()
         course_id = request.form.get("course_id", type=int)
-        video_ids = request.form.getlist("video_ids")
         course = db.session.get(Course, course_id) if course_id else None
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
-        if not video_ids:
-            flash("Vui lòng chọn ít nhất một video để gán vào môn học/ mô đun.", "warning")
-            return redirect(url_for("videos_page"))
-        allowed_ids = {v.id for v in visible_video_query(user).filter(Video.id.in_([int(x) for x in video_ids if str(x).isdigit()])).all()}
+        allowed_ids = selected_filtered_library_video_ids(user, request.form)
+        if not allowed_ids:
+            flash("Vui lòng tích chọn video trong bộ lọc trước khi gán môn học/mô đun.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
         t0 = time.perf_counter()
         created = 0
         skipped = 0
@@ -2404,7 +2572,25 @@ def register_routes(app):
         if playlist_assignment not in {"", "assigned", "unassigned"}:
             abort(400)
         redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
-        candidates = filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()
+        # Lựa chọn ở ô tiêu đề áp dụng cho TOÀN BỘ các trang.
+        # all: mọi playlist đúng bộ lọc, trừ danh sách bỏ tích.
+        # none: bỏ tất cả, chỉ xử lý danh sách tích lại (có thể ở trang khác).
+        selection_mode = request.form.get("playlist_selection_mode", "none")
+        if selection_mode not in {"all", "none"}:
+            abort(400)
+        list_name = ("excluded_playlist_ids" if selection_mode == "all"
+                     else "selected_playlist_ids")
+        raw_ids = request.form.getlist(list_name) if hasattr(request.form, "getlist") else []
+        if len(raw_ids) > 2000 or any(not str(value).isascii() or not str(value).isdigit() or int(value) <= 0 for value in raw_ids):
+            abort(400)
+        override_ids = {int(value) for value in raw_ids}
+        all_candidates = filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()
+        candidates = [playlist for playlist in all_candidates
+                      if ((playlist.id not in override_ids) if selection_mode == "all"
+                          else (playlist.id in override_ids))]
+        if not candidates:
+            flash("Không có playlist nào được chọn để gán cho môn học/mô đun.", "warning")
+            return redirect(redirect_to)
         created = already = skipped = 0
         started = time.perf_counter()
         for playlist in candidates:
@@ -2422,10 +2608,11 @@ def register_routes(app):
         else:
             auto_added = auto_removed = 0
         record_functional_test(
-            "ASSIGN_PLAYLIST_FILTERED_BULK", "Gán tất cả playlist theo bộ lọc", bool(created or already),
+            "ASSIGN_PLAYLIST_FILTERED_BULK", "Gán playlist đã chọn theo bộ lọc", bool(created or already),
             owner_id=user.id,
             note=(f"Môn: {course.name}; bộ lọc: {playlist_search!r}/{playlist_assignment or 'tất cả'}; "
-                  f"khớp {len(candidates)}; gán mới/khôi phục {created}; đã gán {already}; "
+                  f"khớp {len(all_candidates)}; được chọn {len(candidates)}; bỏ chọn {len(all_candidates)-len(candidates)}; "
+                  f"gán mới/khôi phục {created}; đã gán {already}; "
                   f"không khả dụng {skipped}; tự thêm video {auto_added}; tự bỏ video {auto_removed}."),
         )
         db.session.commit()
@@ -2444,7 +2631,31 @@ def register_routes(app):
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
         redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
-        links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
+        selection_mode = request.form.get("playlist_selection_mode", "none")
+        if selection_mode not in {"all", "none"}:
+            abort(400)
+        list_name = ("excluded_playlist_ids" if selection_mode == "all"
+                     else "selected_playlist_ids")
+        raw_ids = request.form.getlist(list_name) if hasattr(request.form, "getlist") else []
+        if len(raw_ids) > 2000 or any(not str(value).isascii() or not str(value).isdigit() or int(value) <= 0 for value in raw_ids):
+            abort(400)
+        override_ids = {int(value) for value in raw_ids}
+        # Tạo QR chỉ cho playlist thuộc đúng kết quả lọc mà người dùng đang chọn;
+        # không tự tạo QR cho playlist khác của cùng môn nằm ngoài từ khóa.
+        playlist_search = request.form.get("p_q", "").strip()[:150]
+        playlist_assignment = request.form.get("p_assignment", "").strip()
+        if playlist_assignment not in {"", "assigned", "unassigned"}:
+            abort(400)
+        filtered_ids = {playlist.id for playlist in
+                        filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()}
+        all_links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
+        links = [link for link in all_links
+                 if link.playlist_id in filtered_ids and
+                 ((link.playlist_id not in override_ids) if selection_mode == "all"
+                  else (link.playlist_id in override_ids))]
+        if not links:
+            flash("Không có playlist nào được chọn và đã gán môn để tạo mã QR.", "warning")
+            return redirect(redirect_to)
         playlist_ids = [link.playlist_id for link in links]
         playable_ids = set()
         if playlist_ids:
@@ -2480,9 +2691,11 @@ def register_routes(app):
         elapsed = time.perf_counter() - started
         passed = bool(created or existing)
         record_functional_test(
-            "QR_PLAYLIST_FILTERED_BULK", "Tạo QR cho mọi playlist đã gán môn", passed,
+            "QR_PLAYLIST_FILTERED_BULK", "Tạo QR cho playlist đã chọn và đã gán môn", passed,
             owner_id=user.id,
-            note=f"Môn: {course.name}; tổng playlist đã gán {len(links)}; QR mới {created}; đã có {existing}; bỏ qua {skipped}.",
+            note=f"Môn: {course.name}; bộ lọc {playlist_search!r}/{playlist_assignment or 'tất cả'}; "
+                 f"tổng playlist đã gán {len(all_links)}; trong phạm vi và được chọn {len(links)}; "
+                 f"bỏ chọn {len(all_links)-len(links)}; QR mới {created}; đã có {existing}; bỏ qua {skipped}.",
         )
         record_webapp_experiment(
             user.id, "TAO_QR_HANG_LOAT", elapsed, operations_count=1, success=passed,
@@ -2984,6 +3197,47 @@ def register_routes(app):
         )
         return redirect(url_for("courses_page"))
 
+    @app.post("/videos/qr/bulk-selected")
+    @login_required
+    def bulk_create_selected_video_qrs():
+        """Tạo QR đúng cho các video được chọn trong Kho học liệu, không tạo cho toàn môn."""
+        user = current_user()
+        course_id = request.form.get("course_id", type=int)
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        # Lấy đúng mọi video đã chọn trong bộ lọc, không phụ thuộc phân trang.
+        video_ids = selected_filtered_library_video_ids(user, request.form)
+        if not video_ids:
+            flash("Chưa chọn video trong bộ lọc để tạo mã QR hàng loạt.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+        if len(video_ids) > 500:
+            flash("Một lần tạo QR tối đa 500 video. Hãy lọc/chọn tối đa 500 video trước khi tạo.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+        videos = {v.id: v for v in visible_video_query(user).filter(Video.id.in_(video_ids)).all()}
+        if len(videos) != len(video_ids):
+            abort(403)
+        created = existing = skipped = 0
+        for video_id in video_ids:
+            video = videos[video_id]
+            if not video_is_usable(video) or not video_accessible_to_lecturer(video, user):
+                skipped += 1
+                continue
+            link, _ = ensure_course_video_link(course, video, user, manual=True)
+            _, was_created = create_qr_for_course_video(course, video, user, link)
+            if was_created:
+                created += 1
+            else:
+                existing += 1
+        record_functional_test(
+            "QR_BULK_SELECTED", "Tạo mã QR video đã chọn từ Kho học liệu",
+            bool(created or existing), owner_id=user.id,
+            note=f"MH/MĐ: {course.name}; chọn {len(video_ids)}; mới {created}; đã có {existing}; bỏ qua {skipped}.")
+        db.session.commit()
+        flash(f"Đã tạo {created} mã QR video mới; {existing} đã có mã; {skipped} chưa đủ điều kiện.",
+              "success" if created else "warning")
+        return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+
     @app.post("/courses/<int:course_id>/qr/bulk")
     @login_required
     def create_course_qrs_bulk(course_id):
@@ -3004,9 +3258,9 @@ def register_routes(app):
                 continue
             # GV mới vẫn sử dụng QR cũ từ kênh GV trước; không tự tạo QR mới
             # cho nguồn YouTube chưa được GV mới kết nối.
-            existing = (db.session.get(QrCode, link.qr_id) if link.qr_id else
-                        active_qr_for_course_video(course.id, video.id, user.id))
-            if not video_accessible_to_lecturer(video, user) and not (existing and existing.active):
+            existing_qr = (db.session.get(QrCode, link.qr_id) if link.qr_id else
+                           active_qr_for_course_video(course.id, video.id, user.id))
+            if not video_accessible_to_lecturer(video, user) and not (existing_qr and existing_qr.active):
                 skipped += 1
                 continue
             qr, was_created = create_qr_for_course_video(course, video, user, link)
@@ -3224,7 +3478,10 @@ def register_routes(app):
             replacement_playlists=replacement_playlists,
             selected_course=selected_course, selected_course_id=selected_course_id,
             total_qrs=len(all_qrs),
-            all_time_qrs=QrCode.query.filter(managed_qr_scope(user.id)).count(),
+            # Các QR đã ngừng sử dụng vẫn được giữ trong PostgreSQL để tra cứu lịch sử,
+            # nhưng không được tính vào tổng QR hiện có trên giao diện.
+            inactive_qr_count=QrCode.query.filter(
+                managed_qr_scope(user.id), QrCode.active.is_(False)).count(),
             filtered_qr_count=len(qrs),
             playlist_qr_count=sum(1 for q in all_qrs if q.is_playlist),
             video_qr_count=sum(1 for q in all_qrs if not q.is_playlist),
@@ -4670,10 +4927,30 @@ def register_routes(app):
             flash("Bạn không có quyền truy cập chức năng này. Chức năng chỉ dành cho Quản trị viên.", "warning")
             return redirect(url_for("index"))
 
+        ensure_research_comparison_schema()
+
         if request.method == "POST":
             form_type = request.form.get("form_type")
             try:
-                if form_type == "manual_experiment":
+                if form_type == "pair_create":
+                    values = validate_pair_form(request.form)
+                    lecturer = db.session.get(User, values["lecturer_id"])
+                    course = db.session.get(Course, values["course_id"])
+                    if not lecturer or not course or not course.active:
+                        raise ValueError("Giảng viên hoặc môn học/mô đun không tồn tại hay đã ngừng sử dụng.")
+                    assigned = CourseClass.query.filter_by(
+                        course_id=course.id, assigned_lecturer_id=lecturer.id, active=True).first()
+                    if course.owner_id != lecturer.id and not assigned:
+                        raise ValueError("Giảng viên không được phân công giảng dạy môn học/mô đun đã chọn.")
+                    if course.owner_id != lecturer.id:
+                        raise ValueError("Chỉ đo tạo QR cho học phần mà giảng viên đang sở hữu và có quyền tạo QR.")
+                    generated_code = "TN" + secrets.token_hex(8).upper()
+                    db.session.add(ResearchComparisonPair(
+                        **values, pair_code=generated_code, observer_id=user.id,
+                        lecturer_name_snapshot=(lecturer.name or lecturer.email or "")[:255],
+                        course_name_snapshot=(course.name or "")[:255]))
+                    flash(f"Đã tạo lượt đo {generated_code}. Giảng viên chọn 'Đo Web App' để bắt đầu; hệ thống tự ghi thời gian và thao tác.", "success")
+                elif form_type == "manual_experiment":
                     task_key = (request.form.get("task_key") or "").strip()
                     operations_count = int(request.form.get("operations_count") or 0)
                     elapsed_seconds = float(request.form.get("elapsed_seconds") or 0)
@@ -4712,6 +4989,15 @@ def register_routes(app):
 
         # Chỉ so sánh theo danh mục nhiệm vụ chuẩn. Nhờ vậy mã đối chứng thủ công
         # luôn trùng chính xác với mã Web App tự ghi và không phát sinh mã nhập sai.
+        # Chỉ lấy số liệu so sánh từ cặp đo thủ công/Web App cùng khối lượng.
+        # Không dùng thời gian backend của các ExperimentRun cũ để kết luận nghiệm thu.
+        all_research_pairs = ResearchComparisonPair.query.order_by(
+            ResearchComparisonPair.created_at.desc(), ResearchComparisonPair.id.desc()).all()
+        paired_groups, paired_totals = pair_metrics(all_research_pairs)
+        research_pairs = all_research_pairs[:120]
+        lecturers_for_research = User.query.order_by(User.name, User.email).all()
+        courses_for_research = Course.query.filter_by(active=True).order_by(Course.name).all()
+
         comparison_rows = []
         task_catalog = []
         for task in RESEARCH_COMPARISON_TASKS:
@@ -4767,7 +5053,252 @@ def register_routes(app):
             webapp_runs=webapp_runs, manual_runs=manual_runs,
             comparison_rows=comparison_rows, task_catalog=task_catalog,
             survey_links=survey_links,
+            research_pairs=research_pairs, paired_groups=paired_groups, paired_totals=paired_totals,
+            pair_kinds=RESEARCH_PAIR_KINDS, normalize_pair_kind=normalize_kind,
+            lecturers_for_research=lecturers_for_research,
+            courses_for_research=courses_for_research,
         )
+
+    @app.get("/research/measurement")
+    @login_required
+    def research_measurement_page():
+        # Địa chỉ cũ chuyển vào Kho học liệu; không còn giao diện đo riêng.
+        return redirect(url_for("videos_page") + "#thuc-nghiem-qr")
+
+    def research_auto_status_payload(pair):
+        if not pair:
+            return {"active": False}
+        complete = research_measurement_complete_qrs(pair)
+        return {
+            "active": True, "id": pair.id, "code": pair.pair_code,
+            "nonce": session.get("research_measurement_nonce", ""),
+            "course_id": pair.course_id, "kind": normalize_kind(pair.task_kind),
+            "expected": pair.qr_count, "created": len(research_created_qr_ids(pair)),
+            "ready_to_save": complete, "operations": pair.measurement_operations,
+            "video_count": pair.video_count, "playlist_count": pair.playlist_count,
+        }
+
+    @app.get("/research/auto/status")
+    @login_required
+    def research_auto_status():
+        user = current_user()
+        if user.role == "admin":
+            return jsonify({"active": False})
+        ensure_research_comparison_schema()
+        return jsonify(research_auto_status_payload(active_research_measurement(user.id)))
+
+    @app.post("/research/auto/start")
+    @login_required
+    def research_auto_start():
+        """Kích hoạt lúc GV chọn chức năng+môn ở Kho học liệu, không có trang đo."""
+        user = current_user()
+        if user.role == "admin":
+            return jsonify({"active": False, "message": "Chủ nhiệm chỉ nhập kết quả thủ công."})
+        ensure_research_comparison_schema()
+        course_id = request.form.get("course_id", type=int)
+        kind = (request.form.get("task_kind") or "").strip()
+        if kind not in RESEARCH_PAIR_KIND_NAMES:
+            abort(400)
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or course.owner_id != user.id:
+            abort(403)
+        active_pair = active_research_measurement(user.id)
+        if active_pair:
+            if active_pair.course_id != course_id or normalize_kind(active_pair.task_kind) != kind:
+                return jsonify({"active": False,
+                                "message": "Có lượt đo khác đang thực hiện. Hãy lưu đủ QR của lượt đó trước."}), 409
+            return jsonify(research_auto_status_payload(active_pair))
+        ongoing = ResearchComparisonPair.query.filter(
+            ResearchComparisonPair.lecturer_id == user.id,
+            ResearchComparisonPair.active.is_(True),
+            ResearchComparisonPair.measurement_started_at.isnot(None),
+            ResearchComparisonPair.measurement_finished_at.is_(None)
+        ).order_by(ResearchComparisonPair.created_at).first()
+        if ongoing:
+            if ongoing.course_id != course_id or normalize_kind(ongoing.task_kind) != kind:
+                return jsonify({"active": False,
+                                "message": "Đang có lượt đo khác chưa kết thúc. Liên hệ quản trị viên."}), 409
+            # Tiếp tục đo đã khởi động nếu trình duyệt bị đóng/trở lại phiên đăng nhập.
+            pair = ongoing
+        else:
+            pair = ResearchComparisonPair.query.filter(
+                ResearchComparisonPair.lecturer_id == user.id,
+                ResearchComparisonPair.course_id == course_id,
+                ResearchComparisonPair.active.is_(True),
+                ResearchComparisonPair.measurement_started_at.is_(None),
+                ResearchComparisonPair.measurement_verified.is_(False),
+                ResearchComparisonPair.task_kind == kind
+            ).order_by(ResearchComparisonPair.created_at, ResearchComparisonPair.id).first()
+            if not pair:
+                return jsonify({"active": False,
+                    "message": "Chưa có lượt đối chứng tương ứng do quản trị viên lập. Bạn vẫn có thể tạo QR bình thường."})
+            pair.measurement_started_at = utcnow()
+            pair.measurement_finished_at = None
+            pair.measurement_saved_at = None
+            pair.measurement_save_method = None
+            pair.measurement_operations = 0
+            pair.measurement_single_videos = 0
+            pair.measurement_single_playlists = 0
+            pair.measurement_bulk_videos = 0
+            pair.measurement_qr_ids = "[]"
+            pair.measurement_verified = False
+            db.session.commit()
+        session["research_measurement_id"] = pair.id
+        session["research_measurement_nonce"] = secrets.token_hex(12)
+        return jsonify(research_auto_status_payload(pair))
+
+    @app.post("/research/measurement/progress")
+    @login_required
+    def research_measurement_progress():
+        user = current_user()
+        pair = active_research_measurement(user.id)
+        if not pair:
+            return jsonify({"ok": False, "reason": "not_active"}), 409
+        value = request.form.get("operations_count", type=int)
+        if value is None or value < 0 or value > 100000:
+            abort(400)
+        pair.measurement_operations = max(pair.measurement_operations or 0, value)
+        pair.updated_at = utcnow()
+        db.session.commit()
+        return jsonify({"ok": True, "operations": pair.measurement_operations})
+
+    @app.get("/research/auto/files")
+    @login_required
+    def research_auto_files():
+        pair = active_research_measurement(current_user().id)
+        if not pair or not research_measurement_complete_qrs(pair):
+            return jsonify({"ok": False, "reason": "incomplete"}), 409
+        ids = research_created_qr_ids(pair)
+        qrs = {qr.id:qr for qr in QrCode.query.filter(QrCode.id.in_(ids)).all()}
+        return jsonify({"ok":True,"pair_id":pair.id,
+                        "files":[{"id":i,"name":qr_download_name(qrs[i]),
+                                  "url":url_for("qr_png", qr_id=i)} for i in ids]})
+
+    @app.get("/research/auto/zip")
+    @login_required
+    def research_auto_zip():
+        pair = active_research_measurement(current_user().id)
+        if not pair or not research_measurement_complete_qrs(pair):
+            abort(409)
+        ids = research_created_qr_ids(pair)
+        qrs = {qr.id:qr for qr in QrCode.query.filter(QrCode.id.in_(ids)).all()}
+        memory = io.BytesIO()
+        names = set()
+        with zipfile.ZipFile(memory, "w", zipfile.ZIP_DEFLATED) as archive:
+            for i in ids:
+                qr = qrs[i]
+                data = io.BytesIO()
+                generate_branded_qr(qr).save(data, format="PNG")
+                filename = qr_download_name(qr)
+                if filename in names:
+                    stem, ext = os.path.splitext(filename)
+                    filename = f"{stem}_{qr.slug}{ext}"
+                names.add(filename)
+                archive.writestr(filename, data.getvalue())
+        memory.seek(0)
+        return send_file(memory, mimetype="application/zip",
+                         as_attachment=True, download_name=f"QR_thuc_nghiem_{pair.pair_code}.zip")
+
+    @app.post("/research/auto/complete")
+    @login_required
+    def research_auto_complete():
+        """Hoàn tất CHỈ SAU lưu; fallback cần GV xác nhận đã giải nén đúng thư mục."""
+        pair = active_research_measurement(current_user().id)
+        if not pair or not research_measurement_complete_qrs(pair):
+            return jsonify({"ok":False,"message":"Chưa đủ mã QR mới thuộc đúng học phần và nhiệm vụ."}), 409
+        method = (request.form.get("save_method") or "").strip()
+        if method not in {"directory_picker", "manual_confirmed"}:
+            abort(400)
+        if method == "manual_confirmed" and request.form.get("user_confirmed") != "yes":
+            return jsonify({"ok":False,"message":"Cần xác nhận đã tải và lưu đủ tệp QR."}), 400
+        raw_ids = request.form.get("saved_qr_ids", "")
+        try:
+            saved_ids = json.loads(raw_ids)
+        except (TypeError, ValueError):
+            abort(400)
+        created_ids = research_created_qr_ids(pair)
+        if not isinstance(saved_ids, list) or len(saved_ids) != len(created_ids) or (
+            set(saved_ids) != set(created_ids)):
+            return jsonify({"ok":False,"message":"Danh sách QR đã lưu không khớp mã QR được tạo mới."}), 400
+        reported_ops = request.form.get("operations_count", type=int)
+        if reported_ops is None or reported_ops < 1 or reported_ops > 100000:
+            return jsonify({"ok":False,"message":"Chưa có số thao tác được ghi."}), 400
+        finished_at = utcnow()
+        started_at = pair.measurement_started_at
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        elapsed = (finished_at - started_at).total_seconds()
+        if elapsed <= 0 or elapsed > 864000:
+            return jsonify({"ok":False,"message":"Thời gian đo vượt giới hạn; cần quản trị viên kiểm tra."}), 409
+        pair.measurement_operations = max(pair.measurement_operations or 0, reported_ops)
+        pair.webapp_operations = pair.measurement_operations
+        pair.webapp_seconds = round(elapsed, 2)
+        pair.measurement_finished_at = finished_at
+        pair.measurement_saved_at = finished_at
+        pair.measurement_save_method = method
+        # Chỉ lượt lưu PNG trực tiếp qua API trình duyệt mới được tính
+        # là đã xác minh. ZIP tự xác nhận giữ lại để kiểm tra, KHÔNG trộn
+        # vào các tỷ lệ giảm thời gian/thao tác của báo cáo khoa học.
+        pair.measurement_verified = method == "directory_picker"
+        pair.updated_at = finished_at
+        db.session.commit()
+        session.pop("research_measurement_id", None)
+        session.pop("research_measurement_nonce", None)
+        return jsonify({"ok":True,"elapsed_seconds":pair.webapp_seconds,
+                        "operations":pair.webapp_operations,"qr_count":pair.qr_count,
+                        "save_method":method})
+
+    @app.post("/research/comparison/<int:pair_id>/reset")
+    @login_required
+    def research_measurement_admin_reset(pair_id):
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        pair = db.session.get(ResearchComparisonPair, pair_id) or abort(404)
+        if not pair.active or pair.measurement_verified:
+            flash("Chỉ đặt lại được lượt đo chưa hoàn thành.", "warning")
+            return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+        reason = (request.form.get("reason") or "").strip()
+        if len(reason) < 5:
+            flash("Vui lòng ghi lý do đặt lại (từ 5 ký tự).", "warning")
+            return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+        pair.measurement_started_at = None
+        pair.measurement_finished_at = None
+        pair.measurement_operations = 0
+        pair.measurement_single_videos = 0
+        pair.measurement_single_playlists = 0
+        pair.measurement_bulk_videos = 0
+        pair.measurement_verified = False
+        pair.measurement_qr_ids = "[]"
+        pair.measurement_save_method = None
+        pair.measurement_saved_at = None
+        pair.webapp_operations = None
+        pair.webapp_seconds = None
+        pair.note = ((pair.note or "") + f" | Đặt lại lượt đo: {reason}")[-2000:]
+        pair.updated_at = utcnow()
+        db.session.commit()
+        flash("Đã đặt lại phiên đo. Dữ liệu thủ công vẫn giữ nguyên.", "success")
+        return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+
+    @app.post("/research/comparison/<int:pair_id>/void")
+    @login_required
+    def research_pair_void(pair_id):
+        user = current_user()
+        if user.role != "admin":
+            abort(403)
+        pair = db.session.get(ResearchComparisonPair, pair_id) or abort(404)
+        if not pair.active:
+            return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+        reason = (request.form.get("void_reason") or "").strip()
+        if len(reason) < 5:
+            flash("Cần ghi lý do loại khỏi báo cáo (ít nhất 5 ký tự).", "warning")
+            return redirect(url_for("research_page") + "#cap-do-chi-tiet")
+        pair.active = False
+        pair.void_reason = reason[:500]
+        pair.updated_at = utcnow()
+        db.session.commit()
+        flash(f"Đã loại lượt đo {pair.pair_code} khỏi các phép tính; bản ghi vẫn được giữ.", "success")
+        return redirect(url_for("research_page") + "#cap-do-chi-tiet")
 
     @app.get("/admin/organization")
     @login_required
@@ -5466,13 +5997,12 @@ def acceptance_metrics(user):
     manual = exp_q.filter(ExperimentRun.mode == "manual", ExperimentRun.success.is_(True), ExperimentRun.task_key.in_(comparison_keys)).all()
     webapp = exp_q.filter(ExperimentRun.mode == "webapp", ExperimentRun.success.is_(True), ExperimentRun.task_key.in_(comparison_keys)).all()
     # Chỉ so sánh các nhiệm vụ có dữ liệu ở CẢ hai phía để tránh trộn các công việc khác nhau.
-    matched_keys = {x.task_key for x in manual} & {x.task_key for x in webapp}
-    manual_matched = [x for x in manual if x.task_key in matched_keys]
-    webapp_matched = [x for x in webapp if x.task_key in matched_keys]
-    manual_ops = sum(x.operations_count for x in manual_matched) / len(manual_matched) if manual_matched else None
-    app_ops = sum(x.operations_count for x in webapp_matched) / len(webapp_matched) if webapp_matched else None
-    manual_time = sum(x.elapsed_seconds for x in manual_matched) / len(manual_matched) if manual_matched else None
-    app_time = sum(x.elapsed_seconds for x in webapp_matched) / len(webapp_matched) if webapp_matched else None
+    # Không trộn nhóm ghi sự kiện backend cũ vào so sánh thủ công - Web App.
+    # Chỉ tính các lượt ghép cặp cùng giảng viên/học phần/loại QR/khối lượng.
+    paired_query = ResearchComparisonPair.query.filter_by(active=True)
+    if user.role != "admin":
+        paired_query = paired_query.filter_by(lecturer_id=user.id)
+    _, paired_totals = pair_metrics(paired_query.all())
 
     qr_perf_q = QrCode.query.filter(QrCode.processing_seconds.isnot(None))
     if user.role != "admin":
@@ -5481,8 +6011,8 @@ def acceptance_metrics(user):
     processing_values = qr_perf or [x.system_processing_seconds for x in webapp if x.system_processing_seconds is not None]
     avg_processing = sum(processing_values) / len(processing_values) if processing_values else None
 
-    reduction_ops = round(100 * (manual_ops - app_ops) / manual_ops, 1) if manual_ops and app_ops is not None else None
-    reduction_time = round(100 * (manual_time - app_time) / manual_time, 1) if manual_time and app_time is not None else None
+    reduction_ops = paired_totals["ops_reduction"]
+    reduction_time = paired_totals["time_reduction"]
 
     # Khảo sát được thu bằng Google Forms và thống kê trong Google Sheets để tránh nhập tay từng phiếu.
     # Web App chỉ liên kết tới nguồn khảo sát; hai chỉ tiêu hài lòng được đánh giá từ Sheets khi nghiệm thu.

@@ -110,10 +110,10 @@ video_ui=(ROOT/'templates/videos.html').read_text()
 qr_ui=(ROOT/'templates/qr.html').read_text()
 profile_ui=(ROOT/'templates/profile_setup.html').read_text()
 course_ui=(ROOT/'templates/courses.html').read_text()
-assert 'Gán MH cho tất cả playlist' in video_ui
+assert 'Gán MH cho playlist đã chọn' in video_ui
 assert 'Tải QR đã tạo' in video_ui
 assert 'playlistBulkDownloadQr' in video_ui
-assert 'Tổng mã QR đã tạo' in qr_ui and 'QR playlist' in qr_ui and 'QR video' in qr_ui
+assert 'Tổng mã QR hiện có' in qr_ui and 'QR đã xóa/ngừng sử dụng' in qr_ui and 'QR playlist' in qr_ui and 'QR video' in qr_ui
 assert 'qr-save-picker' in video_ui and 'qr-save-picker' in qr_ui
 assert 'showSaveFilePicker' in (ROOT/'static/qr_save_picker.js').read_text()
 assert 'Khoa QL bộ môn' in course_ui

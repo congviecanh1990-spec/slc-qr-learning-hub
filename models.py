@@ -489,6 +489,58 @@ class ExperimentRun(db.Model):
     owner = db.relationship("User")
 
 
+
+
+class ResearchComparisonPair(db.Model):
+    """Cặp đo thủ công/Web App theo cùng GV, học phần, loại QR và khối lượng.
+
+    Tách khỏi experiment_runs cũ (chỉ chứa thời gian xử lý backend) để không
+    suy diễn kết quả thực nghiệm từ những phép đo không tương đương.
+    """
+    __tablename__ = "research_comparison_pairs"
+    id = db.Column(db.Integer, primary_key=True)
+    pair_code = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    lecturer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id", ondelete="SET NULL"), nullable=True, index=True)
+    observer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    lecturer_name_snapshot = db.Column(db.String(255), nullable=False, default="")
+    course_name_snapshot = db.Column(db.String(255), nullable=False, default="")
+    task_kind = db.Column(db.String(32), nullable=False, index=True)
+    video_count = db.Column(db.Integer, nullable=False, default=0)
+    playlist_count = db.Column(db.Integer, nullable=False, default=0)
+    playlist_video_count = db.Column(db.Integer, nullable=False, default=0)
+    qr_count = db.Column(db.Integer, nullable=False)
+    manual_operations = db.Column(db.Integer, nullable=False)
+    manual_seconds = db.Column(db.Float, nullable=False)
+    # Để NULL cho đến khi cùng GV hoàn thành phép đo Web App trên cùng bộ học liệu.
+    webapp_operations = db.Column(db.Integer, nullable=True)
+    webapp_seconds = db.Column(db.Float, nullable=True)
+    # Ghi nhận tự động khi GV bấm bắt đầu/kết thúc; không cho người nhập tay.
+    measurement_started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    measurement_finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    measurement_operations = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    measurement_single_videos = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    measurement_single_playlists = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    measurement_bulk_videos = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    measurement_verified = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    measurement_qr_ids = db.Column(db.Text, nullable=False, default="[]", server_default="[]")
+    measurement_save_method = db.Column(db.String(32), nullable=True)
+    measurement_saved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    note = db.Column(db.Text, nullable=True)
+    active = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    void_reason = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    lecturer = db.relationship("User", foreign_keys=[lecturer_id])
+    course = db.relationship("Course", foreign_keys=[course_id])
+    observer = db.relationship("User", foreign_keys=[observer_id])
+
+    @property
+    def is_paired(self):
+        return (self.active and self.measurement_verified and
+                self.webapp_operations is not None and self.webapp_seconds is not None)
+
+
 class FunctionalTestRun(db.Model):
     __tablename__ = "functional_test_runs"
     id = db.Column(db.Integer, primary_key=True)
