@@ -187,3 +187,107 @@ def test_scan_from_teacher_owned_qr_without_course_is_not_lost(configured_app):
         assert stats["roster"] == 1
         assert stats["scanned"] == 1
         assert stats["successful"] == 1
+
+
+def test_lecturer_delete_two_step_confirmation_and_keep_classes(configured_app):
+    """Không xác nhận => không xóa; chọn giữ lớp => không xóa roster, nhưng xóa QR/lỗi."""
+    from datetime import timedelta
+    from models import (db, User, Course, SchoolClass, CourseClass, Student,
+                        ClassEnrollment, QrCode, ErrorLog, ScanLog)
+    app, keys, _ = configured_app
+    with app.app_context():
+        admin = User(email="delete-admin@test.local", role="admin", name="Quản trị", profile_completed=True)
+        db.session.add(admin);db.session.flush()
+        gv = db.session.get(User, keys["teacher"])
+        course = db.session.get(Course, keys["course"])
+        cl = SchoolClass(code="DELETE-KEEP", name="Lớp cần giữ",
+                         homeroom_teacher_id=gv.id, active=True)
+        db.session.add(cl);db.session.flush()
+        db.session.add(CourseClass(course_id=course.id, school_class_id=cl.id, active=True))
+        student = Student(student_code="DELETE-SV1", full_name="SV cần giữ")
+        db.session.add(student);db.session.flush()
+        db.session.add(ClassEnrollment(student_id=student.id, school_class_id=cl.id,
+                                       started_on=date.today()-timedelta(days=2)))
+        qr = QrCode(owner_id=gv.id, course_id=course.id, slug="delete-keep-qr",
+                    title="Học liệu sắp xóa", active=True)
+        db.session.add(qr);db.session.flush()
+        db.session.add(ScanLog(participant_code=student.student_code, role="SV",
+                               class_code=cl.code, course_id=course.id,
+                               qr_id=qr.id, success=True))
+        db.session.add(ErrorLog(module="test", message="Lỗi thuộc giảng viên",
+                                actor_user_id=gv.id, actor_email=gv.email))
+        db.session.commit()
+        aid, uid, cid, sid, qid = admin.id, gv.id, cl.id, student.id, qr.id
+    with app.test_client() as client:
+        with client.session_transaction() as ss: ss["user_id"] = aid
+        page = client.get("/admin/lecturers")
+        assert page.status_code == 200
+        html = page.get_data(as_text=True)
+        assert "Không – Giữ danh sách lớp" in html and "Có – Xóa lớp không dùng chung" in html
+        assert 'name="confirm_email"' not in html and "prompt(" not in html
+        route = f"/admin/lecturers/{uid}/delete"
+        assert client.post(route, data={}).status_code == 302
+        with app.app_context():
+            assert db.session.get(User, uid) is not None
+        assert client.post(route, data={"confirm_delete":"yes"}).status_code == 302
+        with app.app_context():
+            assert db.session.get(User, uid) is not None
+        response = client.post(route, data={
+            "confirm_delete":"yes", "delete_classes":"no"})
+        assert response.status_code == 302
+        with app.app_context():
+            assert db.session.get(User, uid) is None
+            assert db.session.get(QrCode, qid) is None
+            assert db.session.get(SchoolClass, cid) is not None
+            assert db.session.get(SchoolClass, cid).homeroom_teacher_id is None
+            assert db.session.get(Student, sid) is not None
+            assert ClassEnrollment.query.filter_by(school_class_id=cid, student_id=sid).count() == 1
+            assert ErrorLog.query.filter_by(actor_email="video-selection-teacher@test.local").count() == 0
+
+
+def test_lecturer_delete_classes_preserves_shared_and_removes_exclusive(configured_app):
+    """Chọn xóa lớp: chỉ lớp riêng bị xóa; lớp GVCN khác dạy vẫn còn."""
+    from datetime import timedelta
+    from models import (db, User, Course, SchoolClass, CourseClass, Student,
+                        ClassEnrollment)
+    app, keys, _ = configured_app
+    with app.app_context():
+        admin = User(email="delete-admin2@test.local", role="admin", name="Quản trị", profile_completed=True)
+        db.session.add(admin);db.session.flush()
+        gv = db.session.get(User, keys["teacher"])
+        other = db.session.get(User, keys["other"])
+        course = db.session.get(Course, keys["course"])
+        other_course = Course(owner_id=other.id, name="Môn của người khác",
+                              code="SHARED-OTHER", active=True)
+        db.session.add(other_course);db.session.flush()
+        exclusive = SchoolClass(code="DELETE-ONLY", name="Lớp chỉ GV này dạy",
+                                homeroom_teacher_id=gv.id, active=True)
+        shared = SchoolClass(code="DELETE-SHARED", name="Lớp dùng chung",
+                             homeroom_teacher_id=gv.id, active=True)
+        db.session.add_all([exclusive, shared]);db.session.flush()
+        db.session.add_all([
+            CourseClass(course_id=course.id, school_class_id=exclusive.id, active=True),
+            CourseClass(course_id=course.id, school_class_id=shared.id, active=True),
+            CourseClass(course_id=other_course.id, school_class_id=shared.id, active=True),
+        ])
+        student1=Student(student_code="DELETE-SV-ONLY", full_name="SV lớp riêng")
+        student2=Student(student_code="DELETE-SV-SHARED", full_name="SV lớp chung")
+        db.session.add_all([student1,student2]);db.session.flush()
+        for student, cls in [(student1,exclusive),(student2,shared)]:
+            db.session.add(ClassEnrollment(student_id=student.id,school_class_id=cls.id,
+                started_on=date.today()-timedelta(days=3)))
+        db.session.commit()
+        aid, uid = admin.id, gv.id
+        exclusive_id, shared_id, own_student, shared_student = exclusive.id, shared.id, student1.id, student2.id
+    with app.test_client() as client:
+        with client.session_transaction() as ss: ss["user_id"]=aid
+        response=client.post(f"/admin/lecturers/{uid}/delete",
+                             data={"confirm_delete":"yes", "delete_classes":"yes"})
+        assert response.status_code == 302
+        with app.app_context():
+            assert db.session.get(User,uid) is None
+            assert db.session.get(SchoolClass,exclusive_id) is None
+            assert db.session.get(Student,own_student) is None
+            assert db.session.get(SchoolClass,shared_id) is not None
+            assert db.session.get(Student,shared_student) is not None
+            assert CourseClass.query.filter_by(course_id=other_course.id,school_class_id=shared_id).count() == 1
