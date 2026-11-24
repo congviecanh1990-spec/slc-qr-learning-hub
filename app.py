@@ -2445,8 +2445,22 @@ def register_routes(app):
             db.session.query(QrCode.course_id, func.count(QrCode.id)).filter(
                 managed_qr_scope(user.id), QrCode.active.is_(True), QrCode.course_id.isnot(None)
             ).group_by(QrCode.course_id).all()}
+        # Nút "Bỏ lọc" chỉ đưa danh sách tương ứng về mặc định;
+        # không xoá bộ lọc/phân trang đang dùng của danh sách còn lại.
+        current_filter_args = {
+            key: value for key, value in request.args.items()
+            if key in {"q", "status", "assignment", "playlist_id", "v_page",
+                       "p_q", "p_assignment", "p_page"} and value
+        }
+        playlist_reset_url = url_for(
+            "videos_page", **{key: value for key, value in current_filter_args.items()
+                              if key not in {"p_q", "p_assignment", "p_page"}}) + "#playlists"
+        video_reset_url = url_for(
+            "videos_page", **{key: value for key, value in current_filter_args.items()
+                              if key not in {"q", "status", "assignment", "playlist_id", "v_page"}}) + "#videos"
         response = current_app.make_response(render_template(
             "videos.html",
+            playlist_reset_url=playlist_reset_url, video_reset_url=video_reset_url,
             videos=videos,
             status=status,
             assignment=assignment,
