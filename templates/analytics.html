@@ -26,7 +26,7 @@
 {% endmacro %}
 
 <section id="hoat-dong-he-thong" class="card shadow-sm mb-4" style="scroll-margin-top: 145px;">
-  <div class="card-header fw-bold">1. Thống kê hoạt động của hệ thống</div>
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"><span class="fw-bold">1. Thống kê hoạt động của hệ thống</span><a class="btn btn-outline-success btn-sm" href="{{ url_for('analytics', **dict(request.args.to_dict(flat=True), export_xlsx='system')) }}"><i class="bi bi-file-earmark-excel"></i> Tải Excel hoạt động hệ thống</a></div>
   <div class="card-body">
     <p class="small text-muted">Các hoạt động của giảng viên và quản trị viên. Lượt quét QR và xem video của sinh viên được trình bày riêng tại mục 2.</p>
     <div class="row g-3 mb-3">
@@ -81,10 +81,6 @@
 <section id="khai-thac-sinh-vien" class="card shadow-sm mb-3" style="scroll-margin-top: 145px;">
   <div class="card-header fw-bold">2. Thống kê khai thác học liệu của sinh viên</div>
   <div class="card-body">
-    <div class="d-flex justify-content-end flex-wrap gap-2 mb-3">
-      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_scans') }}">Xuất lượt quét (CSV)</a>
-      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('export_watch') }}">Xuất quá trình xem (CSV)</a>
-    </div>
     <form method="get" action="{{ url_for('analytics') }}#khai-thac-sinh-vien" class="row g-2 align-items-end border rounded p-3 bg-light mb-3">
       {% for k, v in sys_args.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
       <div class="col-md-4 col-xl-2"><label class="form-label fw-semibold">Môn học/Mô đun</label>
@@ -111,7 +107,10 @@
       <div class="col-md-auto d-flex gap-2 flex-wrap align-items-end"><button class="btn btn-primary btn-sm">Lọc kết quả</button>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analytics', **sys_args) }}#khai-thac-sinh-vien">Xóa lọc</a></div>
     </form>
-    <h3 class="h6 fw-bold mt-2 mb-3">A. Thống kê lượt quét mã QR</h3>
+    <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mt-2 mb-3">
+      <h3 class="h6 fw-bold mb-0">A. Thống kê lượt quét mã QR</h3>
+      <a class="btn btn-outline-success btn-sm" href="{{ url_for('analytics', **dict(request.args.to_dict(flat=True), export_xlsx='scans')) }}">Tải Excel lượt quét QR</a>
+    </div>
     <div class="row g-3 mb-3" aria-label="Tổng hợp lượt quét QR thực tế của sinh viên">
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tổng lượt quét</div><div class="display-6 fw-bold">{{ student_metrics.total }}</div></div></div>
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Quét thành công</div><div class="display-6 fw-bold text-success">{{ student_metrics.successful }}</div></div></div>
@@ -129,7 +128,10 @@
     {{ pagination(qr_page, qr_pages, qr_page_numbers, sv_nav, 'qr_page', 'qr-chi-tiet') }}
 
     <hr class="my-4">
-    <h3 class="h6 fw-bold mb-3">B. Thống kê hoạt động khai thác video</h3>
+    <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-3">
+      <h3 class="h6 fw-bold mb-0">B. Thống kê hoạt động khai thác video</h3>
+      <a class="btn btn-outline-success btn-sm" href="{{ url_for('analytics', **dict(request.args.to_dict(flat=True), export_xlsx='videos')) }}">Tải Excel khai thác video</a>
+    </div>
     <div class="row g-3 mb-3" aria-label="Tổng hợp tình trạng khai thác video">
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Tổng video</div><div class="display-6 fw-bold">{{ video_metrics.total }}</div></div></div>
       <div class="col-sm-6 col-xl-3"><div class="border rounded p-3 h-100"><div class="fw-semibold fs-5">Video đã xem</div><div class="display-6 fw-bold text-primary">{{ video_metrics.viewed }}</div></div></div>
