@@ -88,6 +88,7 @@
             <th>Giảng viên</th>
             <th class="text-center">Môn học/MĐ</th>
             <th class="text-center">Mã QR đã tạo</th>
+            <th class="text-center">Số video</th>
             <th class="text-center">Số lớp</th>
             <th class="text-center">Tổng sĩ số</th>
             <th class="text-center">SV đã quét QR</th>
@@ -102,6 +103,7 @@
             <td><div class="fw-semibold">{{ r.lecturer }}</div><span class="text-muted small">{{ r.email }}</span></td>
             <td class="text-center">{{ r.courses }}</td>
             <td class="text-center">{{ r.qr }}</td>
+            <td class="text-center">{{ r.videos }}</td>
             <td class="text-center">{{ r.classes }}</td>
             <td class="text-center">{{ r.roster }}</td>
             <td class="text-center">{{ r.scanned }}</td>
@@ -109,7 +111,7 @@
             <td class="text-center">{{ r.finished }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="9" class="text-center text-muted py-3">Chưa có giảng viên phù hợp.</td></tr>
+          <tr><td colspan="10" class="text-center text-muted py-3">Chưa có giảng viên phù hợp.</td></tr>
           {% endfor %}
         </tbody>
       </table>
