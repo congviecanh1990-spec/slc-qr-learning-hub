@@ -41,7 +41,9 @@ jobs:
       - name: Video selection across all filtered pages
         run: python -m pytest -q -v tests/test_video_selection_across_pages.py
       - name: Check browser operation-counter JavaScript syntax
-        run: node --check static/research_measurement.js
+        run: |
+          node --check static/research_measurement.js
+          node --check static/video_selection.js
       - name: Regression bulk playlist tests
         run: |
           python tests/test_v4329_bulk_playlist_actions.py
