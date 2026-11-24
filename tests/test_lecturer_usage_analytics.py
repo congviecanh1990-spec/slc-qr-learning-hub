@@ -151,3 +151,39 @@ def test_admin_who_also_teaches_appears_in_lecturer_statistics(configured_app):
         displayed = [row[1] for row in wb.active.iter_rows(min_row=5, values_only=True)]
         assert "Quản trị kiêm GV" in displayed
         wb.close()
+
+
+
+def test_scan_from_teacher_owned_qr_without_course_is_not_lost(configured_app):
+    """QR cũ thiếu liên kết môn vẫn ghi nhận khi do chính GV tạo và quét trong lớp đang dạy."""
+    from models import db, User, Course, SchoolClass, CourseClass, Student, ClassEnrollment, QrCode, ScanLog
+    from lecturer_usage import lecturer_usage_rows
+    app, keys, _ = configured_app
+    today = date.today()
+    with app.app_context():
+        teacher = db.session.get(User, keys["teacher"])
+        course = db.session.get(Course, keys["course"])
+        school_class = SchoolClass(code="LEGACY-L01", name="Lớp quét mã QR cũ")
+        db.session.add(school_class)
+        db.session.flush()
+        db.session.add(CourseClass(course_id=course.id,
+                                   school_class_id=school_class.id, active=True))
+        student = Student(student_code="LEGACY-ST01", full_name="Sinh viên QR cũ")
+        db.session.add(student)
+        db.session.flush()
+        db.session.add(ClassEnrollment(student_id=student.id,
+                                       school_class_id=school_class.id,
+                                       started_on=today-timedelta(days=1)))
+        old_qr = QrCode(owner_id=teacher.id, course_id=None,
+                        slug="qr-legacy-without-course", title="Mã QR cũ")
+        db.session.add(old_qr)
+        db.session.flush()
+        db.session.add(ScanLog(
+            role="SV", participant_code=student.student_code,
+            class_code=school_class.code, course_id=None,
+            qr_id=old_qr.id, success=True))
+        db.session.commit()
+        stats = lecturer_usage_rows(teacher, 0.95, today)[0]
+        assert stats["roster"] == 1
+        assert stats["scanned"] == 1
+        assert stats["successful"] == 1
