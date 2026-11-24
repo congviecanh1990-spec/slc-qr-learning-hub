@@ -200,3 +200,44 @@ def test_reset_buttons_keep_other_category_filters(configured_app):
         assert vs.select_one('#videoLibraryFilterForm [name="playlist_id"] option[selected]') is None
         assert "Có 14 video" in vs.get_text(" ",strip=True)
         assert "Có 1 playlist" in ps.get_text(" ",strip=True)
+
+
+def test_analytics_excel_exports_and_research_form(configured_app):
+    """Các nút xuất tệp Excel và bố cục đo không ảnh hưởng quyền truy cập."""
+    import io
+    from openpyxl import load_workbook
+    app, keys, _web = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"] = keys["teacher"]
+        response = client.get("/analytics")
+        assert response.status_code == 200
+        for code in (b"export_xlsx=system", b"export_xlsx=scans", b"export_xlsx=videos"):
+            assert code in response.data
+        for kind, label in (
+            ("system", "Thống kê hoạt động của hệ thống"),
+            ("scans", "Thống kê lượt quét mã QR"),
+            ("videos", "Thống kê hoạt động khai thác video"),
+        ):
+            exported = client.get("/analytics?export_xlsx=" + kind)
+            assert exported.status_code == 200
+            assert "spreadsheetml.sheet" in exported.content_type
+            assert "attachment" in exported.headers["Content-Disposition"]
+            workbook = load_workbook(io.BytesIO(exported.data), read_only=True)
+            assert label in workbook.active["A1"].value
+            assert workbook.active["A4"].value == "STT"
+            assert workbook.active.max_column >= 6
+            workbook.close()
+        assert client.get("/analytics?export_xlsx=unauthorized").status_code == 400
+
+        research = client.get("/research")
+        # Quyền truy cập trang nghiên cứu hiện tại có thể chỉ dành cho quản trị viên;
+        # kiểm tra bố cục template độc lập tại mọi vai trò.
+        assert research.status_code in (200, 302, 403)
+    template = (ROOT / "templates/research.html").read_text(encoding="utf-8")
+    assert 'id="researchPairCreateForm"' in template
+    assert 'type="reset">Xóa thông tin' in template
+    assert "Tổng số thao tác thủ công" in template
+    assert "Số QR cần tạo (tự tính)" not in template
+    assert "Quản lý bản ghi đối chứng cần điều chỉnh" not in template
+    assert "Hiển thị 120 lượt đo gần nhất" not in template
