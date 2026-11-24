@@ -17,7 +17,9 @@ from models import (
 def lecturer_usage_rows(user, threshold: float, today: date):
     """Lọc quyền trước mọi phép tổng hợp; không cộng trùng người học hoặc lớp."""
     is_admin = user.role == "admin"
-    lecturers = (User.query.filter(User.role == "lecturer")
+    # Quản trị viên cũng có thể trực tiếp giảng dạy; không loại họ khỏi báo cáo.
+    # Tài khoản đăng nhập là GV chỉ được xem dòng của chính mình.
+    lecturers = (User.query.filter(User.role.in_(("lecturer", "admin")))
                  if is_admin else User.query.filter(User.id == user.id))
     people = lecturers.order_by(User.name, User.email).all()
     if not people:
