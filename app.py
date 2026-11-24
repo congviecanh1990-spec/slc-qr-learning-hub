@@ -1315,6 +1315,75 @@ def visible_playlist_query(user: User):
     return q
 
 
+def filtered_library_video_query(user, search="", status="", assignment="", playlist_id=None):
+    """Một truy vấn chung cho danh sách video VÀ các lệnh chọn mọi trang.
+
+    Luôn giới hạn theo tài khoản giảng viên, kể cả khi trình duyệt gửi ID khác.
+    """
+    q = visible_video_query(user)
+    if status == "private":
+        q = q.filter(Video.privacy_status == "private")
+    elif status == "noembed":
+        q = q.filter(Video.embeddable.is_(False))
+    elif status == "unavailable":
+        q = q.filter(Video.is_available.is_(False))
+    elif status == "usable":
+        q = q.filter(Video.is_available.is_(True), Video.privacy_status != "private",
+                     Video.embeddable.isnot(False))
+    if search:
+        q = q.filter(Video.title.ilike(f"%{search[:150]}%"))
+    if playlist_id:
+        permitted = visible_playlist_query(user).filter(Playlist.id == playlist_id).first()
+        if not permitted:
+            return q.filter(Video.id == -1)
+        ids = db.session.query(PlaylistVideo.video_id).filter(
+            PlaylistVideo.playlist_id == playlist_id)
+        q = q.filter(Video.id.in_(ids))
+    owned = db.session.query(Course.id).filter(Course.owner_id == user.id, Course.active.is_(True))
+    assigned = db.session.query(CourseVideo.video_id).filter(CourseVideo.course_id.in_(owned))
+    if assignment == "unassigned":
+        q = q.filter(~Video.id.in_(assigned))
+    elif assignment == "assigned":
+        q = q.filter(Video.id.in_(assigned))
+    return q
+
+
+def selected_filtered_library_video_ids(user, form, max_selected=10000):
+    """Lấy video đã tích trên tất cả trang; máy chủ luôn xác minh lại bộ lọc và quyền.
+
+    mode=all: mọi video thuộc bộ lọc, trừ ID bỏ tích.
+    mode=none: chỉ video được tích riêng, kể cả ở các trang khác.
+    """
+    search = (form.get("q") or "").strip()[:150]
+    status = (form.get("status") or "").strip()
+    assignment = (form.get("assignment") or "").strip()
+    raw_playlist_id = (form.get("playlist_id") or "").strip()
+    if status not in {"", "usable", "private", "noembed", "unavailable"} or (
+        assignment not in {"", "assigned", "unassigned"}):
+        abort(400)
+    if raw_playlist_id and (not raw_playlist_id.isascii() or not raw_playlist_id.isdigit() or int(raw_playlist_id) <= 0):
+        abort(400)
+    playlist_id = int(raw_playlist_id) if raw_playlist_id else None
+    mode = (form.get("video_selection_mode") or "none").strip()
+    if mode not in {"all", "none"}:
+        abort(400)
+    list_name = "excluded_video_ids" if mode == "all" else "selected_video_ids"
+    raw_ids = form.getlist(list_name)
+    # Giữ tương thích với các biểu mẫu/video cũ chưa bật JS chọn xuyên trang.
+    if mode == "none" and "video_selection_mode" not in form:
+        raw_ids = form.getlist("video_ids")
+    if (len(raw_ids) > 10000 or
+        any(not str(x).isascii() or not str(x).isdigit() or int(x) <= 0 for x in raw_ids)):
+        abort(400)
+    overrides = {int(x) for x in raw_ids}
+    candidates = filtered_library_video_query(user, search, status, assignment, playlist_id).with_entities(Video.id).all()
+    chosen = [row[0] for row in candidates if
+              ((row[0] not in overrides) if mode == "all" else (row[0] in overrides))]
+    if len(chosen) > max_selected:
+        abort(413, description="Số video được chọn vượt giới hạn cho một lượt xử lý.")
+    return chosen
+
+
 def videos_library_return(anchor: str, raw_query: str = "") -> str:
     """Redirect only within the video library, retaining approved filter parameters.
 
@@ -2348,40 +2417,13 @@ def register_routes(app):
         user = current_user()
 
         # --- Bộ lọc video ---
-        q = visible_video_query(user)
         status = request.args.get("status", "").strip()
         assignment = request.args.get("assignment", "").strip()
-        search = request.args.get("q", "").strip()
+        search = request.args.get("q", "").strip()[:150]
         playlist_filter_id = request.args.get("playlist_id", type=int)
-
-        if status == "private":
-            q = q.filter(Video.privacy_status == "private")
-        elif status == "noembed":
-            q = q.filter(Video.embeddable.is_(False))
-        elif status == "unavailable":
-            q = q.filter(Video.is_available.is_(False))
-        elif status == "usable":
-            q = q.filter(Video.is_available.is_(True), Video.privacy_status != "private", Video.embeddable.isnot(False))
-        if search:
-            q = q.filter(Video.title.ilike(f"%{search}%"))
-
-        # Danh sách playlist của chính giảng viên để lọc video và gán môn học/ mô đun.
+        # Danh sách, số trang và xử lý hàng loạt PHẢI dùng cùng bộ lọc.
+        q = filtered_library_video_query(user, search, status, assignment, playlist_filter_id)
         available_playlists = visible_playlist_query(user).order_by(Playlist.title).all()
-        allowed_playlist_ids = {p.id for p in available_playlists}
-        if playlist_filter_id:
-            if playlist_filter_id in allowed_playlist_ids:
-                playlist_video_ids = db.session.query(PlaylistVideo.video_id).filter(PlaylistVideo.playlist_id == playlist_filter_id)
-                q = q.filter(Video.id.in_(playlist_video_ids))
-            else:
-                # Không cho dùng ID playlist ngoài phạm vi tài khoản để lọc dữ liệu.
-                q = q.filter(Video.id == -1)
-
-        owned_course_ids = db.session.query(Course.id).filter(Course.owner_id == user.id, Course.active.is_(True))
-        assigned_video_ids = db.session.query(CourseVideo.video_id).filter(CourseVideo.course_id.in_(owned_course_ids))
-        if assignment == "unassigned":
-            q = q.filter(~Video.id.in_(assigned_video_ids))
-        elif assignment == "assigned":
-            q = q.filter(Video.id.in_(assigned_video_ids))
         video_total = q.count()
         video_pages = max(1, (video_total + 4) // 5)
         video_page = min(max(1, request.args.get("v_page", 1, type=int)), video_pages)
@@ -2435,14 +2477,13 @@ def register_routes(app):
     def assign_videos_to_course():
         user = current_user()
         course_id = request.form.get("course_id", type=int)
-        video_ids = request.form.getlist("video_ids")
         course = db.session.get(Course, course_id) if course_id else None
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
-        if not video_ids:
-            flash("Vui lòng chọn ít nhất một video để gán vào môn học/ mô đun.", "warning")
-            return redirect(url_for("videos_page"))
-        allowed_ids = {v.id for v in visible_video_query(user).filter(Video.id.in_([int(x) for x in video_ids if str(x).isdigit()])).all()}
+        allowed_ids = selected_filtered_library_video_ids(user, request.form)
+        if not allowed_ids:
+            flash("Vui lòng tích chọn video trong bộ lọc trước khi gán môn học/mô đun.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
         t0 = time.perf_counter()
         created = 0
         skipped = 0
@@ -3151,13 +3192,14 @@ def register_routes(app):
         course = db.session.get(Course, course_id) if course_id else None
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
-        raw = request.form.getlist("video_ids")
-        if not raw or len(raw) > 500 or any(not str(v).isascii() or not str(v).isdigit() for v in raw):
-            flash("Hãy chọn từ 1 đến 500 video hợp lệ để tạo mã QR hàng loạt.", "warning")
-            return redirect(url_for("videos_page") + "#videos")
-        video_ids = list(dict.fromkeys(int(v) for v in raw))
-        if not all(v > 0 for v in video_ids):
-            abort(400)
+        # Lấy đúng mọi video đã chọn trong bộ lọc, không phụ thuộc phân trang.
+        video_ids = selected_filtered_library_video_ids(user, request.form)
+        if not video_ids:
+            flash("Chưa chọn video trong bộ lọc để tạo mã QR hàng loạt.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+        if len(video_ids) > 500:
+            flash("Một lần tạo QR tối đa 500 video. Hãy lọc/chọn tối đa 500 video trước khi tạo.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
         videos = {v.id: v for v in visible_video_query(user).filter(Video.id.in_(video_ids)).all()}
         if len(videos) != len(video_ids):
             abort(403)
