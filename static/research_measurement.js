@@ -23,7 +23,7 @@
   const bulkCount=document.getElementById('researchBulkCount');
   const STATE_KEY='slc-research-ui-v2:'+String(panel?.dataset.userId||'');
   let active=null,operations=0,lastSent=-1,pendingStartOperations=0;
-  let chosenVideos=new Set(),fallbackFiles=null,interactionsOn=false;
+  let fallbackFiles=null,interactionsOn=false;
   const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';
   const selectedMode=()=>modeInputs.find(i=>i.checked)?.value||'QR_TUNG_VIDEO_PLAYLIST';
   const fileKey=()=> 'slc-research-ops:'+active?.id+':'+active?.nonce;
@@ -34,7 +34,7 @@
   function persistUi(){
     if(!panel)return;
     try{sessionStorage.setItem(STATE_KEY,JSON.stringify({
-      mode:selectedMode(),course:course?.value||'',videos:[...chosenVideos]
+      mode:selectedMode(),course:course?.value||''
     }));}catch(_){}
   }
   function restoreUi(){
@@ -43,7 +43,6 @@
       const state=JSON.parse(sessionStorage.getItem(STATE_KEY)||'{}');
       if(state.mode)modeInputs.forEach(i=>i.checked=i.value===state.mode);
       if(state.course&&course?.querySelector('option[value="'+Number(state.course)+'"]'))course.value=String(Number(state.course));
-      if(Array.isArray(state.videos))chosenVideos=new Set(state.videos.filter(x=>Number.isSafeInteger(x)&&x>0));
     }catch(_){}
   }
   function setModeVisibility(){
@@ -56,10 +55,9 @@
     });
     // Các nút gán học liệu, lọc, phân trang vẫn giữ nguyên.
     if(bulkCourse)bulkCourse.value=course?.value||'';
-    if(bulkCount)bulkCount.textContent='Đã chọn '+chosenVideos.size+' video ở các trang.';
-    for(const check of document.querySelectorAll('.video-check')){
-      check.checked=chosenVideos.has(Number(check.value))||(!bulk&&check.checked);
-    }
+    // Bộ chọn chung của Kho học liệu duy trì lựa chọn trên MỌI trang,
+    // không dùng tập ID trang hiện tại để ghi đè những mục được chọn.
+    window.syncVideoBulkSelection?.();
   }
   function countOperation(){
     if(!active||!interactionsOn||!document.querySelector('main'))return;
@@ -257,31 +255,15 @@
       if(!active)pendingStartOperations++;
       setModeVisibility();startSelectedMeasurement();
     }
-    if(target.matches('.video-check')){
-      const id=Number(target.value);
-      if(Number.isSafeInteger(id)&&id>0){
-        if(target.checked)chosenVideos.add(id);else chosenVideos.delete(id);
-        persistUi();setModeVisibility();
-      }
-    }
-    if(target.id==='selectAllVideos'){
-      document.querySelectorAll('.video-check').forEach(x=>{
-        const id=Number(x.value);
-        if(x.checked)chosenVideos.add(id);else chosenVideos.delete(id);
-      });
-      persistUi();setModeVisibility();
-    }
   });
   if(bulkForm)bulkForm.addEventListener('submit',event=>{
     if(!course?.value){event.preventDefault();info('Hãy chọn môn học/mô đun trước khi tạo QR.',true);return;}
-    if(!chosenVideos.size){event.preventDefault();info('Chưa tích chọn video để tạo QR hàng loạt.',true);return;}
-    bulkForm.querySelectorAll('[data-research-video-id]').forEach(x=>x.remove());
-    bulkCourse.value=course.value;
-    for(const id of chosenVideos){
-      const hidden=document.createElement('input');
-      hidden.type='hidden';hidden.name='video_ids';hidden.value=String(id);
-      hidden.dataset.researchVideoId='1';bulkForm.appendChild(hidden);
+    if(!window.videoBulkSelection?.hasAny()){
+      event.preventDefault();
+      info('Chưa tích chọn video từ bộ lọc để tạo QR hàng loạt.',true);
+      return;
     }
+    bulkCourse.value=course.value;
     countOperation();persistUi();
   });
   document.addEventListener('submit',event=>{
