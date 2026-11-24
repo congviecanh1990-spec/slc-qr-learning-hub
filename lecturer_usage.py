@@ -91,10 +91,24 @@ def lecturer_usage_rows(user, threshold: float, today: date):
     # QR đã tạo tính theo người tạo mã, kể cả mã hiện đã ngừng hoạt động;
     # không nhập nhằng với giảng viên nhận bàn giao môn.
     qr_counts = defaultdict(int)
-    for lecturer_id, qr_count in (db.session.query(QrCode.owner_id, db.func.count(QrCode.id))
-                                  .filter(QrCode.owner_id.in_(ids))
-                                  .group_by(QrCode.owner_id).all()):
-        qr_counts[lecturer_id] = qr_count
+    # Mỗi QR video lẻ = 1 video; mỗi QR playlist = số video trong playlist.
+    # Cộng theo TỪNG mã QR: cùng video có trong hai playlist vẫn tính hai lần,
+    # vì đây là số video học liệu được bao phủ bởi các mã QR đã tạo.
+    # Sử dụng thành viên playlist đang đồng bộ tại thời điểm lập báo cáo.
+    playlist_sizes = {
+        playlist_id: count for playlist_id, count in
+        db.session.query(PlaylistVideo.playlist_id, db.func.count(db.distinct(PlaylistVideo.video_id)))
+        .group_by(PlaylistVideo.playlist_id).all()
+    }
+    video_counts = defaultdict(int)
+    owned_qrs = (db.session.query(QrCode.owner_id, QrCode.target_type, QrCode.playlist_id)
+                 .filter(QrCode.owner_id.in_(ids)).all())
+    for owner_id, target_type, playlist_id in owned_qrs:
+        qr_counts[owner_id] += 1
+        if (target_type or "video") == "playlist" or playlist_id is not None:
+            video_counts[owner_id] += playlist_sizes.get(playlist_id, 0)
+        else:
+            video_counts[owner_id] += 1
 
     relevant_courses = {c for items in scope.values() for c, _ in items}
     # Quét QR phải gắn được với hoạt động của chính GV: QR do họ tạo
@@ -179,6 +193,7 @@ def lecturer_usage_rows(user, threshold: float, today: date):
             "email": person.email,
             "courses": len(course_ids[uid]),
             "qr": qr_counts[uid],
+            "videos": video_counts[uid],
             "classes": len(class_ids[uid]),
             "roster": len(roster[uid]),
             "scanned": len(scanned[uid]),
