@@ -47,6 +47,10 @@ def configured_app(tmp_path,monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET","")
     import app as web
     from models import db,User,YouTubeChannel,Playlist,PlaylistVideo,Video,Course
+    # Config đọc DATABASE_URL ở thời điểm import đầu tiên: mỗi test
+    # cần URL riêng để không ghi đè dữ liệu của test trước đó.
+    monkeypatch.setattr(web.Config, "SQLALCHEMY_DATABASE_URI",
+                        "sqlite:///"+str(tmp_path/"filtered_video.sqlite3"))
     app=web.create_app()
     app.config.update(TESTING=True,WTF_CSRF_ENABLED=False,SESSION_COOKIE_SECURE=False)
     with app.app_context():
