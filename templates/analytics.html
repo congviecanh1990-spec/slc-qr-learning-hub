@@ -82,7 +82,7 @@
          href="{{ url_for('analytics', **dict(request.args.to_dict(flat=True), export_xlsx='lecturers')) }}">Tải Excel theo giảng viên</a>
     </div>
     <p class="small text-muted mb-2">
-      Số môn và lớp theo phân công hiện hành (kể cả bàn giao lớp); QR là số mã đang hoạt động do giảng viên tạo.
+      Số môn và lớp theo phân công hiện hành (kể cả bàn giao lớp); QR là tổng số mã đã tạo (kể cả mã ngừng hoạt động), theo người tạo gốc.
       Sĩ số và các nhóm đã quét được đếm theo <strong>sinh viên duy nhất</strong> trong lớp được giao, không cộng trùng khi học nhiều môn hoặc quét nhiều lần.
       Hoàn thành xem video là sinh viên đã xem đủ <strong>tất cả video học liệu được gán</strong> cho các học phần đang học với giảng viên,
       đạt ngưỡng hoàn thành của hệ thống; chưa giao video không tính là hoàn thành.
