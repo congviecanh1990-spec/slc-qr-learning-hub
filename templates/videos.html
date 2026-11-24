@@ -110,7 +110,11 @@
           <option value="assigned" {{ 'selected' if playlist_assignment=='assigned' else '' }}>Đã gán môn học/ mô đun</option>
         </select>
       </div>
-      <div class="col-lg-2"><button class="btn btn-outline-primary w-100">Lọc playlist</button></div>
+      <div class="col-lg-2 d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-outline-primary flex-grow-1">Lọc playlist</button>
+        <a class="btn btn-outline-secondary flex-grow-1" id="resetPlaylistFilters"
+           data-library-filter-reset="playlist" href="{{ playlist_reset_url }}">Bỏ lọc</a>
+      </div>
     </div>
   </form>
 
@@ -209,7 +213,11 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-xl-2"><button class="btn btn-outline-primary w-100">Lọc video</button></div>
+      <div class="col-xl-2 d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-outline-primary flex-grow-1">Lọc video</button>
+        <a class="btn btn-outline-secondary flex-grow-1" id="resetVideoFilters"
+           data-library-filter-reset="video" href="{{ video_reset_url }}">Bỏ lọc</a>
+      </div>
     </div>
   </form>
 
@@ -686,5 +694,6 @@ document.querySelectorAll('.playlist-course-form').forEach(form=>{
 
 </script>
 <script src="{{ url_for('static', filename='video_selection.js') }}" defer></script>
+<script src="{{ url_for('static', filename='library_filter_reset.js') }}" defer></script>
 <script src="{{ url_for('static', filename='qr_save_picker.js') }}" defer></script>
 {% endblock %}
