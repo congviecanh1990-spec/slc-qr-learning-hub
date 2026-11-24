@@ -44,9 +44,11 @@ def test_lecturer_scope_deduplicates_students_and_counts_completion(configured_a
                                    class_code=cl.code, course_id=course.id,
                                    qr_id=qr.id, success=success))
         for i, video_id in enumerate(keys["video_ids"][:2]):
+            # Video thứ hai được xem qua một QR/phiên khác:
+            # quy tắc mục B vẫn công nhận thành tích SV–video trên toàn hệ thống.
             db.session.add(WatchSession(
                 session_key="test-gv-watch-"+str(i), participant_code="SV-1001",
-                role="SV", class_code=cl.code, course_id=course.id,
+                role="SV", class_code=cl.code, course_id=(course.id if i == 0 else None),
                 qr_id=qr.id, video_id=video_id,
                 duration_seconds=100, estimated_watch_seconds=100))
         db.session.commit()
