@@ -4434,10 +4434,10 @@ def register_routes(app):
                 title, filename = "1. Thống kê hoạt động của hệ thống", "Thong_ke_hoat_dong_he_thong.xlsx"
                 filters = f"Thời gian: {test_period}; Chức năng: {test_feature or 'Tất cả'}; Kết quả: {test_result}"
             elif export_section == "lecturers":
-                headers = ["STT", "Giảng viên", "Email", "Số MH/MĐ", "Mã QR đã tạo",
+                headers = ["STT", "Giảng viên", "Email", "Số MH/MĐ", "Mã QR đã tạo", "Số video",
                            "Số lớp", "Tổng sĩ số", "SV đã quét QR", "SV quét thành công",
                            "SV hoàn thành xem video"]
-                records = [(i, r["lecturer"], r["email"], r["courses"], r["qr"],
+                records = [(i, r["lecturer"], r["email"], r["courses"], r["qr"], r["videos"],
                             r["classes"], r["roster"], r["scanned"], r["successful"],
                             r["finished"]) for i, r in enumerate(lecturer_rows, 1)]
                 title, filename = "1B. Thống kê khai thác theo giảng viên", "Thong_ke_theo_giang_vien.xlsx"

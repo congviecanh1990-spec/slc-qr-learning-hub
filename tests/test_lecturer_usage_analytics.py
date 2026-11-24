@@ -106,7 +106,7 @@ def test_analytics_system_has_5_rows_and_lecturers_excel(configured_app):
         assert exported.status_code == 200
         wb = load_workbook(io.BytesIO(exported.data), read_only=True)
         assert "Thống kê khai thác theo giảng viên" in wb.active["A1"].value
-        assert wb.active.max_column == 10
+        assert wb.active.max_column == 11
         wb.close()
 
 
@@ -291,3 +291,46 @@ def test_lecturer_delete_classes_preserves_shared_and_removes_exclusive(configur
             assert db.session.get(SchoolClass,shared_id) is not None
             assert db.session.get(Student,shared_student) is not None
             assert CourseClass.query.filter_by(course_id=other_course.id,school_class_id=shared_id).count() == 1
+
+
+def test_lecturer_video_count_sum_playlist_contents_by_qr(configured_app):
+    """Ba playlist 5, 3, 10 video = 18; cộng thêm QR video lẻ nếu có."""
+    from models import db, User, QrCode, Playlist, PlaylistVideo, YouTubeChannel, Video
+    from lecturer_usage import lecturer_usage_rows
+    app, keys, _ = configured_app
+    with app.app_context():
+        lecturer = db.session.get(User, keys["teacher"])
+        # Dùng kênh và video có sẵn từ fixture, chỉ tạo thêm video khi thiếu.
+        channel = YouTubeChannel.query.filter_by(user_id=lecturer.id).first()
+        if channel is None:
+            channel = YouTubeChannel(user_id=lecturer.id, channel_id="teacher-playlist-test")
+            db.session.add(channel); db.session.flush()
+        vids = Video.query.filter_by(channel_id=channel.id).limit(18).all()
+        for i in range(len(vids), 18):
+            video = Video(channel_id=channel.id, youtube_video_id=f"statsvideo{i:02d}", title=f"Video {i}")
+            db.session.add(video)
+            vids.append(video)
+        db.session.flush()
+        playlist_ids = []
+        for index, amount in enumerate([5, 3, 10]):
+            pl = Playlist(channel_id=channel.id,
+                          youtube_playlist_id=f"stats-pl-{index}",
+                          title=f"Playlist {index}")
+            db.session.add(pl); db.session.flush()
+            playlist_ids.append(pl.id)
+            for vid in vids[:amount]:
+                db.session.add(PlaylistVideo(playlist_id=pl.id, video_id=vid.id))
+            db.session.add(QrCode(owner_id=lecturer.id,
+                                  target_type="playlist", playlist_id=pl.id,
+                                  slug=f"stats-qr-playlist-{index}", title=f"QR playlist {index}"))
+        db.session.commit()
+        own = lecturer_usage_rows(lecturer, 0.95, date.today())[0]
+        # Fixture có thể đã có QR/video; đo phần tăng thêm theo QR.
+        assert own["videos"] >= 18
+        assert own["videos"] >= own["qr"] - 3 + 18
+        # Thêm QR video lẻ: chỉ số tăng chính xác 1.
+        previous = own["videos"]
+        db.session.add(QrCode(owner_id=lecturer.id,
+                              target_type="video", slug="stats-video-extra", title="QR video lẻ"))
+        db.session.commit()
+        assert lecturer_usage_rows(lecturer, 0.95, date.today())[0]["videos"] == previous + 1
