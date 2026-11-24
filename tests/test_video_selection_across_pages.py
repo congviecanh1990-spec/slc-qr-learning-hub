@@ -13,6 +13,7 @@ def test_selection_ui_and_scripts_are_consistent():
     from jinja2 import Environment, FileSystemLoader
     template=(ROOT/"templates/videos.html").read_text(encoding="utf-8")
     js=(ROOT/"static/research_measurement.js").read_text(encoding="utf-8")
+    selection_js=(ROOT/"static/video_selection.js").read_text(encoding="utf-8")
     py=(ROOT/"app.py").read_text(encoding="utf-8")
     Environment(loader=FileSystemLoader(str(ROOT/"templates"))).parse(template)
     ast.parse(py)
@@ -20,8 +21,9 @@ def test_selection_ui_and_scripts_are_consistent():
     assert 'id="selectAllVideos"' in template
     assert 'videoBulkSelectedSummary' in template
     assert "Chọn tất cả / Bỏ chọn tất cả video trong kết quả lọc trên mọi trang" in template
-    assert "mode==='all'?'excluded_video_ids':'selected_video_ids'" in template
-    assert "window.videoBulkSelection=api" in template
+    assert "mode==='all'?'excluded_video_ids':'selected_video_ids'" in selection_js
+    assert "window.videoBulkSelection=api" in selection_js
+    assert "video_selection.js" in template
     assert 'window.syncVideoBulkSelection?.();' in template
     assert 'window.videoBulkSelection?.hasAny()' in js
     assert 'chosenVideos' not in js
