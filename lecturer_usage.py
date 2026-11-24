@@ -121,22 +121,21 @@ def lecturer_usage_rows(user, threshold: float, today: date):
                 if success:
                     successful[uid].add(code)
 
-    # Chỉ xem đủ khi đạt ngưỡng thời lượng thống nhất của hệ thống.
-    watched = defaultdict(set)  # (mã SV, môn, video) đã hoàn thành
-    if relevant_courses:
-        watched_rows = (db.session.query(WatchSession.participant_code,
-                                         WatchSession.class_code,
-                                         WatchSession.course_id,
-                                         WatchSession.video_id)
-                        .filter(WatchSession.role == "SV",
-                                WatchSession.course_id.in_(relevant_courses),
-                                WatchSession.video_id.isnot(None),
-                                WatchSession.duration_seconds > 0,
-                                WatchSession.estimated_watch_seconds > 0,
-                                WatchSession.estimated_watch_seconds >= WatchSession.duration_seconds * threshold)
-                        .distinct().all())
-        for code, class_code, cid, vid in watched_rows:
-            watched[(cid, class_code)].add((code, vid))
+    # Cùng quy tắc với bảng B: thành tích xem của SV theo video,
+    # không mất kết quả khi cùng video được học từ QR/học phần khác.
+    # Mỗi phiên đủ ngưỡng hiện hành mới được công nhận, không tin cờ completed cũ.
+    relevant_videos = set().union(*video_requirements.values()) if video_requirements else set()
+    completed_video_pairs = set()
+    if relevant_videos:
+        completed_video_pairs = set(
+            db.session.query(WatchSession.participant_code, WatchSession.video_id)
+            .filter(WatchSession.role == "SV",
+                    WatchSession.video_id.in_(relevant_videos),
+                    WatchSession.duration_seconds > 0,
+                    WatchSession.estimated_watch_seconds > 0,
+                    WatchSession.estimated_watch_seconds >= WatchSession.duration_seconds * threshold)
+            .distinct().all()
+        )
 
     results = []
     for person in people:
@@ -147,7 +146,7 @@ def lecturer_usage_rows(user, threshold: float, today: date):
             if not assigned_scopes:
                 continue
             if all(video_requirements.get(cid) and all(
-                (code, vid) in watched.get((cid, codes_by_class.get(class_id)), set())
+                (code, vid) in completed_video_pairs
                 for vid in video_requirements[cid]
             ) for cid, class_id in assigned_scopes):
                 finished += 1
