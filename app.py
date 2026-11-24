@@ -5459,9 +5459,15 @@ def register_routes(app):
         if lecturer.role != "lecturer":
             flash("Không thể xóa tài khoản Quản trị viên.", "warning")
             return redirect(url_for("lecturers_page"))
-        if (request.form.get("confirm_email") or "").strip().casefold() != lecturer.email.casefold():
-            flash("Chưa xác nhận đúng email của giảng viên cần xóa; chưa có dữ liệu nào bị xóa.", "warning")
+        # Hai bước xác nhận trong giao diện: không dùng prompt() của trình duyệt.
+        if (request.form.get("confirm_delete") or "") != "yes":
+            flash("Chưa xác nhận xóa giảng viên; dữ liệu không thay đổi.", "warning")
             return redirect(url_for("lecturers_page"))
+        delete_classes_choice = request.form.get("delete_classes")
+        if delete_classes_choice not in {"yes", "no"}:
+            flash("Cần chọn giữ hoặc xóa lớp; dữ liệu không thay đổi.", "warning")
+            return redirect(url_for("lecturers_page"))
+        delete_classes = delete_classes_choice == "yes"
         has_delegated_classes = (CourseClass.query.join(Course, CourseClass.course_id == Course.id)
             .filter(Course.owner_id == lecturer.id, Course.active.is_(True),
                     CourseClass.active.is_(True),
@@ -5518,13 +5524,17 @@ def register_routes(app):
             return redirect(url_for("lecturers_page"))
         try:
             display, email = lecturer.name or lecturer.email, lecturer.email
-            summary = delete_lecturer_business_data(lecturer)
+            summary = delete_lecturer_business_data(lecturer, delete_classes=delete_classes)
             # Xóa dữ liệu xác thực/công việc và mọi dấu vết gắn định danh người dùng.
             YouTubeSyncJob.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
             OAuthAccount.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
             ConnectedGoogleAccount.query.filter_by(user_id=lecturer.id).delete(synchronize_session=False)
             SurveyResult.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
             ExperimentRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
+            # Xóa cặp đối chứng thuộc GV; giữ số đo của người khác nếu chỉ là quan sát viên.
+            ResearchComparisonPair.query.filter_by(lecturer_id=lecturer.id).delete(synchronize_session=False)
+            ResearchComparisonPair.query.filter_by(observer_id=lecturer.id).update(
+                {ResearchComparisonPair.observer_id: None}, synchronize_session=False)
             FunctionalTestRun.query.filter_by(owner_id=lecturer.id).delete(synchronize_session=False)
             ErrorLog.query.filter(or_(ErrorLog.actor_user_id == lecturer.id,
                                       func.lower(ErrorLog.actor_email) == email.casefold())).delete(synchronize_session=False)
@@ -5561,9 +5571,12 @@ def register_routes(app):
             # Không chạy ORM cascade từ một User đã từng load relations trong phiên.
             User.query.filter_by(id=lecturer.id).delete(synchronize_session=False)
             db.session.commit()
+            class_message = (f"đã xóa {summary['classes']} lớp độc lập"
+                             if delete_classes else "đã giữ nguyên danh sách lớp và sinh viên")
             flash(f"Đã xóa giảng viên {display} ({email}): {summary['courses']} môn học, "
-                  f"{summary['qrs']} mã QR, {summary['classes']} lớp không còn người dạy; "
-                  "lịch sử liên quan đã loại khỏi thống kê. Các lớp còn giảng viên khác vẫn được giữ.", "success")
+                  f"{summary['qrs']} mã QR; {class_message}. "
+                  "Dữ liệu riêng, thống kê và nhật ký lỗi đã được dọn; "
+                  "lớp và học liệu dùng chung với giảng viên khác được bảo vệ.", "success")
         except Exception:
             db.session.rollback()
             current_app.logger.exception("Không thể xóa giảng viên %s", lecturer_id)
@@ -5571,8 +5584,8 @@ def register_routes(app):
                   "Vui lòng kiểm tra liên kết dữ liệu hoặc nhật ký Render.", "danger")
         return redirect(url_for("lecturers_page"))
 
-    def delete_lecturer_business_data(lecturer: User):
-        """Xóa chính xác dữ liệu của GV, bảo vệ roster và QR của GV khác."""
+    def delete_lecturer_business_data(lecturer: User, *, delete_classes: bool = False):
+        """Xóa dữ liệu riêng GV, bảo toàn lớp nếu chọn Không; chỉ xóa lớp độc lập nếu Có."""
         uid = lecturer.id
         course_ids = [r[0] for r in db.session.query(Course.id).filter(Course.owner_id == uid).all()]
         # QR đã bàn giao sang môn của người khác phải thuộc chủ môn mới và không bị xóa.
@@ -5617,6 +5630,9 @@ def register_routes(app):
                 {CoursePlaylist.qr_id: None}, synchronize_session=False)
             QrCode.query.filter(QrCode.id.in_(qr_ids)).delete(synchronize_session=False)
         if course_ids:
+            # Số đo đối chứng theo môn đã xóa không còn hợp lệ.
+            ResearchComparisonPair.query.filter(
+                ResearchComparisonPair.course_id.in_(course_ids)).delete(synchronize_session=False)
             owned_links = [row[0] for row in db.session.query(CourseClass.id).filter(CourseClass.course_id.in_(course_ids)).all()]
             if owned_links:
                 CourseClassTransfer.query.filter(CourseClassTransfer.course_class_id.in_(owned_links)).delete(synchronize_session=False)
@@ -5646,6 +5662,9 @@ def register_routes(app):
             if still_taught or school_class.homeroom_teacher_id:
                 continue
             removed_classes.append((class_id, school_class.code))
+        if not delete_classes:
+            # Giữ nguyên danh mục lớp + danh sách sinh viên khi chọn không xóa lớp.
+            removed_classes = []
         if removed_classes:
             ids = [r[0] for r in removed_classes]
             class_codes = [r[1] for r in removed_classes]
