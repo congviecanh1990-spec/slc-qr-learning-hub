@@ -29,6 +29,13 @@ def test_selection_ui_and_scripts_are_consistent():
     assert 'chosenVideos' not in js
     assert 'filtered_library_video_query' in py
     assert 'selected_filtered_library_video_ids(user, request.form)' in py
+    assert 'id="resetPlaylistFilters"' in template
+    assert 'id="resetVideoFilters"' in template
+    assert 'library_filter_reset.js' in template
+    reset_js=(ROOT/"static/library_filter_reset.js").read_text(encoding="utf-8")
+    assert 'slc-playlist-selection-v4:' in reset_js
+    assert 'slc-video-selection-v1:' in reset_js
+    assert 'String(scope[0])===String(userId)' in reset_js
 
 
 @pytest.fixture
@@ -136,3 +143,56 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
             qrs=QrCode.query.filter_by(course_id=k["course"],active=True).all()
             assert len(qrs)==2
             assert all(q.owner_id==k["teacher"] for q in qrs)
+
+
+
+def test_reset_buttons_keep_other_category_filters(configured_app):
+    """Bỏ lọc từng danh mục, reset phân trang/chọn xuyên trang, không ảnh hưởng danh mục kia."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import urlsplit, parse_qs
+    app, keys, _ = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+        path=(
+            "/videos?q=B%C3%A0i+h%E1%BB%8Dc&status=usable"
+            "&assignment=unassigned&playlist_id="+str(keys["playlist"])
+            +"&v_page=2&p_q=Ch%E1%BB%A7&p_assignment=assigned&p_page=2"
+        )
+        response=client.get(path)
+        assert response.status_code==200
+        soup=BeautifulSoup(response.data,"html.parser")
+        p=soup.select_one("#resetPlaylistFilters")
+        v=soup.select_one("#resetVideoFilters")
+        assert p is not None and v is not None
+        assert p.get("data-library-filter-reset")=="playlist"
+        assert v.get("data-library-filter-reset")=="video"
+        playlist_url,video_url=p["href"],v["href"]
+        qp=parse_qs(urlsplit(playlist_url).query)
+        qv=parse_qs(urlsplit(video_url).query)
+        assert urlsplit(playlist_url).fragment=="playlists"
+        assert urlsplit(video_url).fragment=="videos"
+        assert all(key not in qp for key in ("p_q","p_assignment","p_page"))
+        assert qp["q"]==["Bài học"] and qp["status"]==["usable"]
+        assert qp["assignment"]==["unassigned"]
+        assert qp["playlist_id"]==[str(keys["playlist"])]
+        assert qp["v_page"]==["2"]
+        assert all(key not in qv for key in (
+            "q","status","assignment","playlist_id","v_page"))
+        assert qv["p_q"]==["Chủ"] and qv["p_assignment"]==["assigned"]
+        assert qv["p_page"]==["2"]
+
+        # Server sẽ hiển thị filter mặc định và tất cả học liệu tương ứng.
+        ppage=client.get(playlist_url)
+        vpage=client.get(video_url)
+        assert ppage.status_code==200 and vpage.status_code==200
+        ps=BeautifulSoup(ppage.data,"html.parser")
+        vs=BeautifulSoup(vpage.data,"html.parser")
+        assert ps.select_one('#playlistLibraryFilterForm [name="p_q"]').get("value")==""
+        assert ps.select_one('#playlistLibraryFilterForm [name="p_assignment"] option[selected]') is None
+        assert vs.select_one('#videoLibraryFilterForm [name="q"]').get("value")==""
+        assert vs.select_one('#videoLibraryFilterForm [name="status"] option[selected]') is None
+        assert vs.select_one('#videoLibraryFilterForm [name="assignment"] option[selected]') is None
+        assert vs.select_one('#videoLibraryFilterForm [name="playlist_id"] option[selected]') is None
+        assert "Có 14 video" in vs.get_text(" ",strip=True)
+        assert "Có 1 playlist" in ps.get_text(" ",strip=True)
