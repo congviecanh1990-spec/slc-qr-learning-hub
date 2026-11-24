@@ -175,7 +175,7 @@
     <span class="text-muted small">Có {{ video_total|default(videos|length) }} video · Trang {{ video_page|default(1) }}/{{ video_pages|default(1) }} · 5 dòng/trang</span>
   </div>
 
-  <form class="card card-body shadow-sm mb-3" method="get" action="{{ url_for('videos_page') }}#videos">
+  <form id="videoLibraryFilterForm" class="card card-body shadow-sm mb-3" method="get" action="{{ url_for('videos_page') }}#videos">
     {% for key in ['p_q','p_assignment','p_page'] %}{% if (library_args|default({})).get(key) %}<input type="hidden" name="{{ key }}" value="{{ (library_args|default({}))[key] }}">{% endif %}{% endfor %}
     <div class="row g-2 align-items-end">
       <div class="col-xl-3 col-lg-6">
@@ -217,6 +217,11 @@
         id="videoBulkQrForm" class="card card-body shadow-sm mb-3" hidden>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="course_id" value="" id="videoBulkQrCourse">
+    <input type="hidden" name="return_query" value="{{ library_return_query }}">
+    <input type="hidden" name="q" value="{{ search }}">
+    <input type="hidden" name="status" value="{{ status }}">
+    <input type="hidden" name="assignment" value="{{ assignment }}">
+    <input type="hidden" name="playlist_id" value="{{ playlist_filter_id or '' }}">
     <div class="d-flex flex-wrap align-items-center gap-2">
       <button class="btn btn-primary" type="submit">Tạo QR hàng loạt cho video đã chọn</button>
       <span class="small text-muted" id="researchBulkCount">
@@ -225,9 +230,14 @@
     </div>
   </form>
 
-  <form method="post" action="{{ url_for('assign_videos_to_course') }}" id="assignVideoForm">
+  <form method="post" action="{{ url_for('assign_videos_to_course') }}"
+        id="assignVideoForm" data-user-id="{{ me.id }}" data-video-total="{{ video_total }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
+    <input type="hidden" name="return_query" value="{{ library_return_query }}">
+    <input type="hidden" name="q" value="{{ search }}">
+    <input type="hidden" name="status" value="{{ status }}">
+    <input type="hidden" name="assignment" value="{{ assignment }}">
+    <input type="hidden" name="playlist_id" value="{{ playlist_filter_id or '' }}">
     <div class="card shadow-sm mb-3">
       <div class="card-body d-flex flex-wrap gap-2 align-items-end">
         <div class="flex-grow-1">
@@ -238,15 +248,19 @@
           </select>
         </div>
         <button class="btn btn-primary" {{ 'disabled' if not courses else '' }}>Gán video đã chọn vào môn học/ mô đun</button>
-        <span class="text-muted small" id="selectedVideoCount">Đã chọn: 0 video</span>
+        <span class="text-muted small" id="selectedVideoCount">Chưa chọn video nào.</span>
       </div>
     </div>
+    <div class="small fw-semibold text-primary mt-1 mb-2" id="videoBulkSelectedSummary" aria-live="polite">Chưa chọn video nào.</div>
+    <div class="small text-muted mb-1">Ô tích ở tiêu đề chọn hoặc bỏ chọn <strong>toàn bộ video trong kết quả lọc trên mọi trang</strong>, không chỉ 5 dòng đang xem.</div>
   </form>
 
     <div class="table-responsive">
       <table class="table table-hover align-middle bg-white">
         <thead><tr>
-          <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllVideos" title="Chọn tất cả video đang hiển thị"></th>
+          <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllVideos" {{ 'checked' if search else '' }}
+             aria-label="Chọn tất cả hoặc bỏ chọn tất cả video trong kết quả lọc trên mọi trang"
+             title="Chọn tất cả / Bỏ chọn tất cả video trong kết quả lọc trên mọi trang"></th>
           <th>Video học liệu</th><th>Kênh YouTube</th><th>Playlist</th><th>Môn học/ mô đun đã gán</th><th>Khả năng phát</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
         </tr></thead>
         <tbody>
@@ -354,6 +368,7 @@
       if (!newRow || !row || newRow.id !== row.id) throw new Error('Không xác minh được playlist vừa lưu.');
       row.replaceWith(newRow);
        window.syncPlaylistBulkSelection?.();
+        window.syncVideoBulkSelection?.();
       // Chỉ giữ dòng tạm thời để tạo QR ngay. Khi bấm Lọc playlist,
       // máy chủ sẽ xét lại bộ lọc trên dữ liệu đã lưu và loại playlist đã gán.
       const newForm = newRow.querySelector('.playlist-course-form');
@@ -456,6 +471,7 @@
         row.replaceWith(newRow);
         window.dispatchEvent(new CustomEvent('qr-library-row-updated'));
        window.syncPlaylistBulkSelection?.();
+        window.syncVideoBulkSelection?.();
         const picker=newRow.querySelector('.playlist-course-form');
         if(picker)picker.querySelectorAll('.playlist-course-check').forEach(c=>c.addEventListener('change',()=>updateCoursePicker(picker)));
         setupQrActions(newRow);
@@ -650,16 +666,6 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
 })();
 </script>
 <script>
-function bindSelectAll(masterId, itemSelector, countId, suffix){
-  const master=document.getElementById(masterId);
-  const items=[...document.querySelectorAll(itemSelector)];
-  const count=document.getElementById(countId);
-  function update(){ if(count){count.textContent='Đã chọn: '+items.filter(x=>x.checked).length+' '+suffix;} }
-  if(master){master.addEventListener('change',()=>{items.forEach(x=>x.checked=master.checked);update();});}
-  items.forEach(x=>x.addEventListener('change',update));
-  update();
-}
-
 function updateCoursePicker(form){
   const checks=[...form.querySelectorAll('.playlist-course-check')];
   const selected=checks.filter(x=>x.checked);
@@ -677,7 +683,125 @@ document.querySelectorAll('.playlist-course-form').forEach(form=>{
   updateCoursePicker(form);
 });
 
-bindSelectAll('selectAllVideos','.video-check','selectedVideoCount','video');
+// Chọn video xuyên trang như playlist; áp dụng chung cho GÁN MÔN và QR HÀNG LOẠT.
+// Có từ khóa sau khi bấm Lọc video -> mặc định chọn mọi video khớp tất cả trang.
+// Không có từ khóa -> mặc định bỏ chọn. Ô tiêu đề chủ động chọn/bỏ mọi kết quả.
+// all: mọi video khớp trừ những ID đã bỏ tích; none: chỉ ID được tích riêng.
+(function(){
+  'use strict';
+  const form=document.getElementById('assignVideoForm');
+  const filterForm=document.getElementById('videoLibraryFilterForm');
+  const qrForm=document.getElementById('videoBulkQrForm');
+  const master=document.getElementById('selectAllVideos');
+  const summary=document.getElementById('videoBulkSelectedSummary');
+  const count=document.getElementById('selectedVideoCount');
+  const qrCount=document.getElementById('researchBulkCount');
+  if(!form)return;
+  const storagePrefix='slc-video-selection-v1:';
+  const total=Math.max(0,Number(form.dataset.videoTotal)||0);
+  const snapshot={
+    q:(form.querySelector('[name="q"]')?.value||'').trim(),
+    status:form.querySelector('[name="status"]')?.value||'',
+    assignment:form.querySelector('[name="assignment"]')?.value||'',
+    playlist:form.querySelector('[name="playlist_id"]')?.value||''
+  };
+  const defaultMode=filter=>filter.q?'all':'none';
+  const scopeKey=filter=>storagePrefix+JSON.stringify([
+    form.dataset.userId||'',filter.q,filter.status,filter.assignment,filter.playlist
+  ]);
+  const currentKey=scopeKey(snapshot);
+  function read(){
+    try{
+      const value=JSON.parse(sessionStorage.getItem(currentKey)||'null');
+      if(value&&(value.mode==='all'||value.mode==='none')){
+        return {mode:value.mode,ids:new Set(Array.isArray(value.ids)
+          ?value.ids.filter(id=>Number.isSafeInteger(id)&&id>0):[])};
+      }
+    }catch(_){}
+    return {mode:defaultMode(snapshot),ids:new Set()};
+  }
+  let selected=read(),mode=selected.mode,overrides=selected.ids;
+  const contains=id=>mode==='all'?!overrides.has(id):overrides.has(id);
+  const selectedCount=()=>mode==='all'?Math.max(0,total-overrides.size):overrides.size;
+  const persist=()=>{
+    try{sessionStorage.setItem(currentKey,JSON.stringify({mode,ids:[...overrides]}));}catch(_){}
+  };
+  function refresh(){
+    const checks=[...document.querySelectorAll('.video-check')];
+    for(const check of checks)check.checked=contains(Number(check.value));
+    if(master){
+      const n=selectedCount();
+      master.checked=total>0&&n===total;
+      master.indeterminate=n>0&&n<total;
+    }
+    const n=selectedCount();
+    const detail=mode==='all'
+      ?overrides.size?'Đã chọn toàn bộ video khớp bộ lọc, trừ '+overrides.size+' video đã bỏ tích.':
+          'Đã tích chọn TẤT CẢ '+total+' video trong kết quả lọc trên mọi trang.'
+      :overrides.size?'Đã tích riêng '+overrides.size+' video, kể cả ở những trang khác.':
+          'Chưa chọn video nào trong kết quả lọc.';
+    const pageSelected=checks.filter(c=>c.checked).length;
+    if(summary)summary.textContent=detail+' Trang này: '+pageSelected+'/'+checks.length+' được tích.';
+    if(count)count.textContent='Đã chọn: '+n+'/'+total+' video (tất cả trang)';
+    if(qrCount)qrCount.textContent='Đã chọn '+n+'/'+total+' video từ mọi trang để tạo QR hàng loạt.';
+  }
+  document.addEventListener('change',e=>{
+    if(e.target===master){
+      mode=master.checked?'all':'none';
+      overrides=new Set();persist();refresh();
+    }else if(e.target.matches('.video-check')){
+      const id=Number(e.target.value);
+      if(!Number.isSafeInteger(id)||id<=0)return;
+      if(mode==='all'){
+        if(e.target.checked)overrides.delete(id);else overrides.add(id);
+      }else{
+        if(e.target.checked)overrides.add(id);else overrides.delete(id);
+      }
+      persist();refresh();
+    }
+  });
+  filterForm?.addEventListener('submit',()=>{
+    const next={
+      q:(filterForm.querySelector('[name="q"]')?.value||'').trim(),
+      status:filterForm.querySelector('[name="status"]')?.value||'',
+      assignment:filterForm.querySelector('[name="assignment"]')?.value||'',
+      playlist:filterForm.querySelector('[name="playlist_id"]')?.value||''
+    };
+    // Nhấn Lọc video luôn khởi tạo lượt chọn mới như nút Lọc playlist.
+    try{sessionStorage.setItem(scopeKey(next),
+      JSON.stringify({mode:defaultMode(next),ids:[]}));}catch(_){}
+  });
+  function appendSelection(target){
+    target.querySelectorAll('[data-video-selection]').forEach(el=>el.remove());
+    const hidden=(name,value)=>{
+      const el=document.createElement('input');
+      el.type='hidden';el.name=name;el.value=String(value);
+      el.dataset.videoSelection='1';target.append(el);
+    };
+    hidden('video_selection_mode',mode);
+    for(const id of overrides){
+      hidden(mode==='all'?'excluded_video_ids':'selected_video_ids',id);
+    }
+  }
+  const api={
+    selectedCount,refresh,
+    appendSelection,
+    hasAny:()=>selectedCount()>0
+  };
+  window.videoBulkSelection=api;
+  for(const target of [form,qrForm].filter(Boolean)){
+    target.addEventListener('submit',event=>{
+      if(!api.hasAny()){
+        event.preventDefault();
+        if(summary)summary.textContent='Vui lòng tích chọn ít nhất một video trước khi thực hiện.';
+        return;
+      }
+      appendSelection(target);
+    });
+  }
+  window.syncVideoBulkSelection=refresh;
+  refresh();
+})();
 </script>
 <script src="{{ url_for('static', filename='qr_save_picker.js') }}" defer></script>
 {% endblock %}
