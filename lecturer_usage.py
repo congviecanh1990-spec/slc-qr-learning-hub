@@ -98,7 +98,7 @@ def lecturer_usage_rows(user, threshold: float, today: date):
     scans = (db.session.query(ScanLog.participant_code, ScanLog.class_code,
                               ScanLog.course_id, QrCode.course_id, ScanLog.success)
              .join(QrCode, QrCode.id == ScanLog.qr_id)
-             .filter(ScanLog.role == "SV", QrCode.active.is_(True),
+             .filter(ScanLog.role == "SV",
                      or_(ScanLog.course_id.in_(relevant_courses),
                          QrCode.course_id.in_(relevant_courses))).all()
              if relevant_courses else [])
