@@ -51,21 +51,6 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-bold">1. Hiệu quả quy trình – đo đối chứng theo từng cặp</div>
   <div class="card-body">
-    <div class="alert alert-info small">
-      <strong>Đo theo 2 loại nhiệm vụ:</strong> Tạo QR cho từng video hoặc playlist,
-      và tạo QR video hàng loạt. Giây/video = <strong>tổng số giây / tổng số video học liệu</strong>
-      (video lẻ + video trong playlist). Mỗi playlist chỉ tạo 1 QR nhưng có thể bao phủ nhiều video.
-      Quản trị viên nhập kết quả <strong>thủ công</strong>; mã lượt đo tự sinh.
-      Giảng viên chọn chức năng và môn học ngay trong <a href="{{ url_for('videos_page') }}#thuc-nghiem-qr">Kho video học liệu</a>;
-      hệ thống tự khởi động đo và chỉ chốt thời gian khi QR đã được tạo đủ và lưu xong.
-      <strong>Phạm vi đo:</strong> tìm/sao chép liên kết (thủ công), tạo QR, đặt tên tệp,
-      tải và lưu đủ mã vào thư mục đích. Web App tự đặt tên PNG theo tiêu đề YouTube,
-      giảng viên chọn thư mục khi lưu. Quy ước thao tác thống nhất: mỗi lần chọn lệnh,
-      sao chép/dán, đổi tên, lựa chọn thư mục và lưu được tính theo cùng đơn vị;
-      các nhấp bên trong hộp thoại hệ điều hành không được Web App quan sát riêng.
-      Tên tệp QR tự lấy từ tiêu đề YouTube. Nếu trình duyệt không hỗ trợ lưu trực tiếp vào thư mục,
-      phải tải ZIP, giải nén và xác nhận; lượt này được ghi riêng, chưa tính vào tỷ lệ nghiệm thu tự động.
-    </div>
     <h5 class="mb-3">A. Lập lượt đo đối chứng mới</h5>
     <form method="post" id="researchPairCreateForm" class="border rounded p-3 mb-4" action="{{ url_for('research_page') }}#cap-do-chi-tiet">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -127,11 +112,6 @@
     </form>
 
     <h5 class="mb-2">B. Kết quả đối chứng theo từng loại học liệu</h5>
-    <div class="small text-muted mb-2">
-      Chỉ tổng hợp các lượt có cả hai phép đo, cùng giảng viên và cùng khối lượng.
-      Thời gian bình quân/video = tổng thời gian chia tổng số video học liệu bao phủ;
-      chỉ có hai nhóm nhiệm vụ, và chỉ tính lượt Web App đã đo, đối chiếu QR thành công.
-    </div>
     <div class="table-responsive mb-3">
       <table class="table table-bordered table-sm align-middle">
         <thead class="table-light"><tr>
@@ -215,11 +195,6 @@
         {% endfor %}
         </tbody>
       </table>
-      <p class="small text-muted">
-        Dấu “—”: chưa có số đo Web App. Số đo đã ghi nhưng chưa xác minh lưu tệp
-        vẫn được giữ trong nhật ký, chưa cộng vào thống kê nghiệm thu.
-        Bản ghi đã loại được hiển thị nền xám.
-      </p>
     </div>
 
   </div>
