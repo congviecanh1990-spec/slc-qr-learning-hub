@@ -106,3 +106,46 @@ def test_analytics_system_has_5_rows_and_lecturers_excel(configured_app):
         assert "Thống kê khai thác theo giảng viên" in wb.active["A1"].value
         assert wb.active.max_column == 10
         wb.close()
+
+
+
+def test_admin_who_also_teaches_appears_in_lecturer_statistics(configured_app):
+    """Quản trị viên kiêm GV phải có một dòng thống kê đầy đủ, không bị bỏ sót."""
+    from models import db, User, Course, SchoolClass, CourseClass, QrCode
+    from lecturer_usage import lecturer_usage_rows
+    app, keys, _ = configured_app
+    with app.app_context():
+        admin = User(email="admin-teaches@test.local", name="Quản trị kiêm GV",
+                     role="admin", profile_completed=True)
+        db.session.add(admin)
+        db.session.flush()
+        course = Course(owner_id=admin.id, name="Tin học do quản trị dạy",
+                        code="ADMIN-TIN", active=True)
+        school_class = SchoolClass(code="ADMIN-CLASS", name="Lớp quản trị", active=True)
+        db.session.add_all([course, school_class])
+        db.session.flush()
+        db.session.add(CourseClass(course_id=course.id,
+                                   school_class_id=school_class.id, active=True))
+        db.session.add(QrCode(owner_id=admin.id, course_id=course.id,
+                              title="QR quản trị", slug="qr-admin-teaches", active=True))
+        db.session.commit()
+        rows = lecturer_usage_rows(admin, 0.95, date.today())
+        matching = [r for r in rows if r["email"] == admin.email]
+        assert len(matching) == 1
+        assert matching[0]["courses"] == 1
+        assert matching[0]["classes"] == 1
+        assert matching[0]["qr"] == 1
+        # Không loại giảng viên thông thường khi bổ sung quản trị viên.
+        assert any(r["email"] == "video-selection-teacher@test.local" for r in rows)
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user_id"] = admin.id
+        page = client.get("/analytics")
+        assert page.status_code == 200
+        assert "Quản trị kiêm GV" in page.get_data(as_text=True)
+        file = client.get("/analytics?export_xlsx=lecturers")
+        assert file.status_code == 200
+        wb = load_workbook(io.BytesIO(file.data), read_only=True)
+        displayed = [row[1] for row in wb.active.iter_rows(min_row=5, values_only=True)]
+        assert "Quản trị kiêm GV" in displayed
+        wb.close()
