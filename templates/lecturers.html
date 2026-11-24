@@ -59,10 +59,8 @@
           <td>
             <div class="d-flex flex-wrap gap-2">
               {% if u.role == 'lecturer' %}
-                <form method="post" action="{{ url_for('delete_lecturer_account', lecturer_id=u.id) }}" onsubmit="const email=prompt('Xóa giảng viên và toàn bộ môn, QR, thống kê liên quan; lớp/SV chỉ được giữ khi có giảng viên khác sử dụng. Hãy nhập chính xác email để xác nhận: {{ u.email|e }}'); if(email === null || email.trim().toLowerCase() !== {{ u.email|tojson }}.toLowerCase()){return false;} this.querySelector('[name=confirm_email]').value=email; return confirm('Xác nhận cuối cùng: thao tác không thể hoàn tác nếu chưa sao lưu dữ liệu.');">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input type="hidden" name="confirm_email" value=""><button class="btn btn-sm btn-outline-danger">Xóa giảng viên</button>
-                </form>
+                <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                        data-bs-target="#deleteLecturerModal{{ u.id }}">Xóa giảng viên</button>
               {% else %}
                 <button class="btn btn-sm btn-outline-secondary" disabled>Tài khoản được bảo vệ</button>
               {% endif %}
@@ -77,8 +75,71 @@
   </div>
 </div>
 
+
+{# Hộp thoại xác nhận hai bước, không phụ thuộc prompt/confirm bị trình duyệt chặn. #}
+{% for row in rows if row.user.role == 'lecturer' %}
+{% set u = row.user %}
+<div class="modal fade lecturer-delete-modal" id="deleteLecturerModal{{ u.id }}" tabindex="-1"
+     aria-labelledby="deleteLecturerTitle{{ u.id }}" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deleteLecturerTitle{{ u.id }}">Xác nhận xóa giảng viên</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <div class="lecturer-delete-step-one">
+          <p>Bạn có chắc chắn muốn xóa giảng viên <strong>{{ u.name or u.email }}</strong> ({{ u.email }})?</p>
+          <p class="text-danger fw-semibold mb-2">Thao tác này sẽ xóa dữ liệu riêng của giảng viên: môn học, QR, kênh/video nguồn không dùng chung, lịch sử quét/xem, kết quả đo, thống kê, nhật ký lỗi và tài khoản.</p>
+          <p class="small text-muted mb-0">Các lớp, học liệu và mã QR đang liên quan đến giảng viên khác sẽ được bảo vệ. Hãy sao lưu trước khi thực hiện vì thao tác không thể hoàn tác.</p>
+        </div>
+        <div class="lecturer-delete-step-two d-none">
+          <p class="fw-semibold">Bạn có muốn xóa cả danh sách lớp của giảng viên này không?</p>
+          <p class="small text-muted mb-2"><strong>Có:</strong> Xóa các lớp chỉ thuộc giảng viên này cùng danh sách sinh viên chỉ còn thuộc các lớp bị xóa. Lớp có giảng viên khác sử dụng vẫn được giữ.</p>
+          <p class="small text-muted mb-0"><strong>Không:</strong> Xóa toàn bộ dữ liệu riêng của giảng viên nhưng <strong>giữ nguyên lớp và danh sách sinh viên</strong>; lớp sẽ không còn gắn với giảng viên bị xóa.</p>
+        </div>
+      </div>
+      <div class="modal-footer lecturer-delete-step-one">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-danger lecturer-delete-next">Đồng ý, tiếp tục</button>
+      </div>
+      <div class="modal-footer lecturer-delete-step-two d-none">
+        <button type="button" class="btn btn-outline-secondary lecturer-delete-back">Quay lại</button>
+        <form method="post" action="{{ url_for('delete_lecturer_account', lecturer_id=u.id) }}" class="d-flex flex-wrap gap-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="confirm_delete" value="yes">
+          <button type="submit" name="delete_classes" value="no" class="btn btn-primary">Không – Giữ danh sách lớp</button>
+          <button type="submit" name="delete_classes" value="yes" class="btn btn-danger">Có – Xóa lớp không dùng chung</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
 <div class="card mt-4 shadow-sm"><div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-2">
   <div><strong>Danh mục Khoa &amp; Bộ môn</strong><div class="small text-muted">Thống kê, sửa tên, hợp nhất các tên nhập trùng.</div></div>
   <a class="btn btn-outline-primary" href="{{ url_for('organization_catalog_page') }}">Quản lý Khoa &amp; Bộ môn</a>
 </div></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  for (const modal of document.querySelectorAll('.lecturer-delete-modal')) {
+    const step = (number) => {
+      const first = number === 1;
+      for (const node of modal.querySelectorAll('.lecturer-delete-step-one')) {
+        node.classList.toggle('d-none', !first);
+      }
+      for (const node of modal.querySelectorAll('.lecturer-delete-step-two')) {
+        node.classList.toggle('d-none', first);
+      }
+    };
+    modal.querySelector('.lecturer-delete-next')?.addEventListener('click', () => step(2));
+    modal.querySelector('.lecturer-delete-back')?.addEventListener('click', () => step(1));
+    modal.addEventListener('hidden.bs.modal', () => step(1));
+  }
+})();
+</script>
 {% endblock %}
