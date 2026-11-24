@@ -236,7 +236,7 @@ def test_analytics_excel_exports_and_research_form(configured_app):
         assert research.status_code in (200, 302, 403)
     template = (ROOT / "templates/research.html").read_text(encoding="utf-8")
     assert 'id="researchPairCreateForm"' in template
-    assert 'type="reset">Xóa thông tin' in template
+    assert 'id="clearResearchPairForm">Xóa thông tin' in template
     assert "Tổng số thao tác thủ công" in template
     assert "Số QR cần tạo (tự tính)" not in template
     assert "Quản lý bản ghi đối chứng cần điều chỉnh" not in template
