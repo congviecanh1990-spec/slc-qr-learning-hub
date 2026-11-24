@@ -36,6 +36,8 @@ from models import (
     ResearchSetting, SurveyResult, ConnectedGoogleAccount, HomeroomChange, EditHistory, CourseTransfer, CourseClassTransfer, YouTubeSyncJob, utcnow
 )
 from security import encrypt_json, decrypt_json
+from analytics_excel import make_analytics_workbook
+from lecturer_usage import lecturer_usage_rows
 from research_comparison import (
     RESEARCH_PAIR_KINDS, RESEARCH_PAIR_KIND_NAMES, validate_pair_form,
     normalize_kind, pair_metrics, video_coverage,
@@ -4098,6 +4100,9 @@ def register_routes(app):
         gần nhất trước thời điểm bắt đầu phiên của cùng SV, lớp và QR.
         """
         user = current_user()
+        export_section = (request.args.get("export_xlsx") or "").strip()
+        if export_section not in {"", "system", "lecturers", "scans", "videos"}:
+            abort(400)
         course_q = Course.query.filter(Course.active.is_(True))
         qr_q = QrCode.query.filter(QrCode.active.is_(True), QrCode.course_id.isnot(None))
         if user.role != "admin":
@@ -4197,9 +4202,11 @@ def register_routes(app):
         tests_pass = test_query.filter(FunctionalTestRun.passed.is_(True)).count()
         tests_fail = tests_total - tests_pass
         test_rate = round(100 * tests_pass / tests_total, 1) if tests_total else None
-        test_pages = max(1, (tests_total + 9) // 10)
+        test_pages = max(1, (tests_total + 4) // 5)
         test_page = min(test_page, test_pages)
-        tests = test_query.order_by(FunctionalTestRun.created_at.desc(), FunctionalTestRun.id.desc()).offset((test_page - 1) * 10).limit(10).all()
+        test_sorted = test_query.order_by(FunctionalTestRun.created_at.desc(), FunctionalTestRun.id.desc())
+        tests = (test_sorted.all() if export_section == "system" else
+                 test_sorted.offset((test_page - 1) * 5).limit(5).all())
         test_page_numbers = list(range(max(1, test_page-2), min(test_pages, test_page+2)+1))
         test_feature_options = [row[0] for row in db.session.query(FunctionalTestRun.case_name)
                                 .filter(FunctionalTestRun.source == "automatic", FunctionalTestRun.participant_code.is_(None),
@@ -4314,8 +4321,9 @@ def register_routes(app):
         qr_page = max(1, request.args.get("qr_page", 1, type=int))
         qr_pages = max(1, (qr_total + 9) // 10)
         qr_page = min(qr_page, qr_pages)
-        qr_selection = (student_qr_ordered_query(qr_breakdown, db.engine.dialect.name)
-                        .offset((qr_page - 1)*10).limit(10).all())
+        qr_sorted = student_qr_ordered_query(qr_breakdown, db.engine.dialect.name)
+        qr_selection = (qr_sorted.all() if export_section == "scans" else
+                        qr_sorted.offset((qr_page - 1)*10).limit(10).all())
         qr_student_codes = {r[0] for r in qr_selection}
         qr_students = {st.student_code: st.full_name for st in Student.query.filter(
             Student.student_code.in_(qr_student_codes)).all()} if qr_student_codes else {}
@@ -4354,7 +4362,8 @@ def register_routes(app):
             sv_total = len(pending_rows)
             sv_pages = max(1, (sv_total + 9) // 10)
             sv_page = min(sv_page, sv_pages)
-            for r in pending_rows[(sv_page - 1)*10:sv_page*10]:
+            displayed_pending = pending_rows if export_section == "videos" else pending_rows[(sv_page - 1)*10:sv_page*10]
+            for r in displayed_pending:
                 code = r["student"].student_code
                 sv_rows.append({
                     "student": f"{r['student'].full_name} ({student_code_tail(code)})",
@@ -4379,9 +4388,10 @@ def register_routes(app):
             sv_total = sv_query.order_by(None).count()
             sv_pages = max(1, (sv_total + 9) // 10)
             sv_page = min(sv_page, sv_pages)
-            selection = (student_video_ordered_query(
+            video_sorted = student_video_ordered_query(
                 sv_query, db.engine.dialect.name, class_index=7)
-                .offset((sv_page - 1)*10).limit(10).all())
+            selection = (video_sorted.all() if export_section == "videos" else
+                         video_sorted.offset((sv_page - 1)*10).limit(10).all())
             codes = {r[0] for r in selection}
             students = {x.student_code: x.full_name for x in Student.query.filter(
                 Student.student_code.in_(codes)).all()} if codes else {}
@@ -4406,6 +4416,52 @@ def register_routes(app):
         sv_args = {k:v for k,v in all_args.items() if not k.startswith("sys_")}
         sys_nav = {**all_args, **test_filter_args}
         sv_nav = dict(all_args)
+        # Thống kê GV luôn dựa trên phân công hiện hành, không lấy 5 dòng nhật ký.
+        # Chỉ truy vấn khi render phần thống kê hoặc xuất riêng danh sách GV.
+        lecturer_rows = (lecturer_usage_rows(user, current_app.config["COMPLETION_THRESHOLD"], utcnow().date())
+                         if export_section in {"", "lecturers"} else [])
+        if export_section:
+            # Tạo Excel tại máy chủ, tuyệt đối không phụ thuộc 10 dòng đang hiển thị.
+            # Mọi truy vấn ở trên đều đã áp dụng bộ lọc và giới hạn quyền người dùng.
+            if export_section == "system":
+                headers = ["STT", "Thời gian", "Chức năng", "Người thực hiện", "Kết quả", "Minh chứng / Ghi chú"]
+                records = [
+                    (i, r["test"].created_at.strftime("%d/%m/%Y %H:%M:%S") if r["test"].created_at else "",
+                     r["test"].case_name, r["actor"], "Đạt" if r["test"].passed else "Không đạt",
+                     r["evidence"])
+                    for i, r in enumerate(test_rows, 1)
+                ]
+                title, filename = "1. Thống kê hoạt động của hệ thống", "Thong_ke_hoat_dong_he_thong.xlsx"
+                filters = f"Thời gian: {test_period}; Chức năng: {test_feature or 'Tất cả'}; Kết quả: {test_result}"
+            elif export_section == "lecturers":
+                headers = ["STT", "Giảng viên", "Email", "Số MH/MĐ", "Mã QR đã tạo",
+                           "Số lớp", "Tổng sĩ số", "SV đã quét QR", "SV quét thành công",
+                           "SV hoàn thành xem video"]
+                records = [(i, r["lecturer"], r["email"], r["courses"], r["qr"],
+                            r["classes"], r["roster"], r["scanned"], r["successful"],
+                            r["finished"]) for i, r in enumerate(lecturer_rows, 1)]
+                title, filename = "1B. Thống kê khai thác theo giảng viên", "Thong_ke_theo_giang_vien.xlsx"
+                filters = "Phân công giảng dạy hiện hành; toàn bộ thời gian"
+            elif export_section == "scans":
+                headers = ["STT", "Tên SV (Mã)", "Lớp", "MH/MĐ", "Học liệu / mã QR đã quét",
+                           "Số lượt quét", "Quét thành công", "Quét không thành công"]
+                records = [(i, r["student"], r["class_name"], r["course_name"], r["qr_title"],
+                            r["total"], r["successful"], r["unsuccessful"])
+                           for i, r in enumerate(qr_rows, 1)]
+                title, filename = "2A. Thống kê lượt quét mã QR", "Thong_ke_luot_quet_QR.xlsx"
+                filters = f"MH/MĐ: {course_id or 'Tất cả'}; Lớp: {class_code or 'Tất cả'}; Học liệu: {qr_id or 'Tất cả'}; Tình trạng: {status}"
+            else:
+                headers = ["STT", "Tên SV (Mã)", "Lớp", "MH/MĐ", "Tên học liệu số",
+                           "Số lần mở video", "Thời lượng xem", "Trạng thái"]
+                records = [(i, r["student"], r["class_name"], r["course_name"], r["media_name"],
+                            r["open_count"], r["watch_time"], r["watch_status"])
+                           for i, r in enumerate(sv_rows, 1)]
+                title, filename = "2B. Thống kê hoạt động khai thác video", "Thong_ke_khai_thac_video.xlsx"
+                filters = f"MH/MĐ: {course_id or 'Tất cả'}; Lớp: {class_code or 'Tất cả'}; Học liệu: {qr_id or 'Tất cả'}; Tình trạng: {status}"
+            output = make_analytics_workbook(title, headers, records, filters)
+            return send_file(output, as_attachment=True, download_name=filename,
+                             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             max_age=0)
         return render_template("analytics.html",
             course_options=course_options, class_options=class_options,
             qr_options=qr_options, status=status, pending_notice=pending_notice,
@@ -4424,7 +4480,7 @@ def register_routes(app):
             test_feature_options=test_feature_options, test_result=test_result,
             system_actors=system_actors, sys_actor_id=sys_actor_id,
             test_search=test_search, test_from=test_from, test_to=test_to,
-            test_filter_args=test_filter_args)
+            test_filter_args=test_filter_args, lecturer_rows=lecturer_rows)
 
     @app.get("/exports/scans.csv")
     @login_required
