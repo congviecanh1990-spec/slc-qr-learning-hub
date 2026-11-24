@@ -3,7 +3,7 @@ from datetime import date, timedelta
 import io
 
 from openpyxl import load_workbook
-from tests.test_video_selection_across_pages import configured_app
+from test_video_selection_across_pages import configured_app
 
 
 def test_lecturer_scope_deduplicates_students_and_counts_completion(configured_app):
