@@ -3,6 +3,8 @@ import ast
 from pathlib import Path
 
 import pytest
+from werkzeug.datastructures import ImmutableMultiDict
+from werkzeug.exceptions import BadRequest
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -79,25 +81,25 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
         teacher=db.session.get(web.User,k["teacher"])
         q=web.filtered_library_video_query(teacher,"Bài học")
         assert q.count()==13, "Không được hiển thị video từ tài khoản khác"
-        chosen=web.selected_filtered_library_video_ids(teacher,web.ImmutableMultiDict([
+        chosen=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("video_selection_mode","all"),
             ("excluded_video_ids",str(k["video_ids"][8])),
         ]))
         assert len(chosen)==12 and k["video_ids"][8] not in chosen
-        none=web.selected_filtered_library_video_ids(teacher,web.ImmutableMultiDict([
+        none=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("video_selection_mode","none"),
             ("selected_video_ids",str(k["video_ids"][1])),
             ("selected_video_ids",str(k["video_ids"][11])),
             ("selected_video_ids",str(k["outsider"])),
         ]))
         assert set(none)=={k["video_ids"][1],k["video_ids"][11]}
-        in_playlist=web.selected_filtered_library_video_ids(teacher,web.ImmutableMultiDict([
+        in_playlist=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("playlist_id",str(k["playlist"])),
             ("video_selection_mode","all"),
         ]))
         assert len(in_playlist)==4
-        with pytest.raises(web.BadRequest):
-            web.selected_filtered_library_video_ids(teacher,web.ImmutableMultiDict([
+        with pytest.raises(BadRequest):
+            web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
                 ("video_selection_mode","all"),("status","undefined")
             ]))
     with app.test_client() as client:
