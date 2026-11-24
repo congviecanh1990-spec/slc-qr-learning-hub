@@ -97,13 +97,18 @@ def lecturer_usage_rows(user, threshold: float, today: date):
         qr_counts[lecturer_id] = qr_count
 
     relevant_courses = {c for items in scope.values() for c, _ in items}
+    # Quét QR phải gắn được với hoạt động của chính GV: QR do họ tạo
+    # hoặc QR thuộc môn/lớp họ đang trực tiếp giảng dạy.
+    # Dùng ScanLog.id gốc và tập mã SV để một SV quét nhiều lần vẫn tính một em.
     scans = (db.session.query(ScanLog.participant_code, ScanLog.class_code,
-                              ScanLog.course_id, QrCode.course_id, ScanLog.success)
+                              ScanLog.course_id, QrCode.course_id, QrCode.owner_id,
+                              ScanLog.success)
              .join(QrCode, QrCode.id == ScanLog.qr_id)
              .filter(ScanLog.role == "SV",
-                     or_(ScanLog.course_id.in_(relevant_courses),
+                     or_(QrCode.owner_id.in_(ids),
+                         ScanLog.course_id.in_(relevant_courses),
                          QrCode.course_id.in_(relevant_courses))).all()
-             if relevant_courses else [])
+             if ids else [])
 
     scanned = defaultdict(set)
     successful = defaultdict(set)
@@ -113,10 +118,29 @@ def lecturer_usage_rows(user, threshold: float, today: date):
         uid: {(cid, codes_by_class.get(class_id)) for cid, class_id in pairs}
         for uid, pairs in scope.items()
     }
-    for code, class_code, scanned_course, qr_course, success in scans:
+    # Với nhật ký cũ thiếu mã lớp, chỉ quy thuộc khi sinh viên thuộc
+    # DUY NHẤT một lớp phù hợp của chính môn đó; không suy đoán mơ hồ.
+    student_course_classes = defaultdict(lambda: defaultdict(set))
+    for uid, students in student_scopes.items():
+        for code, assigned_scopes in students.items():
+            for cid, class_id in assigned_scopes:
+                student_course_classes[uid][(code, cid)].add(codes_by_class.get(class_id))
+    class_codes_by_user = {
+        uid: {codes_by_class.get(class_id) for class_id in class_ids[uid]}
+        for uid in ids
+    }
+    for code, class_code, scanned_course, qr_course, qr_owner, success in scans:
         cid = scanned_course or qr_course
         for uid in ids:
-            if code in roster[uid] and (cid, class_code) in course_class_codes.get(uid, set()):
+            if code not in roster[uid]:
+                continue
+            inferred_class_code = class_code
+            if not inferred_class_code and cid is not None:
+                possible = student_course_classes[uid].get((code, cid), set())
+                inferred_class_code = next(iter(possible)) if len(possible) == 1 else None
+            matches_course_class = (cid, inferred_class_code) in course_class_codes.get(uid, set())
+            matches_own_qr = (qr_owner == uid and inferred_class_code in class_codes_by_user[uid])
+            if matches_course_class or matches_own_qr:
                 scanned[uid].add(code)
                 if success:
                     successful[uid].add(code)
