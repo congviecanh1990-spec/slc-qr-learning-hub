@@ -3222,7 +3222,7 @@ def register_routes(app):
         db.session.commit()
         flash(f"Đã tạo {created} mã QR video mới; {existing} đã có mã; {skipped} chưa đủ điều kiện.",
               "success" if created else "warning")
-        return redirect(url_for("videos_page") + "#videos")
+        return redirect(videos_library_return("videos", request.form.get("return_query", "")))
 
     @app.post("/courses/<int:course_id>/qr/bulk")
     @login_required
