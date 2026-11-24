@@ -44,6 +44,7 @@ jobs:
         run: |
           node --check static/research_measurement.js
           node --check static/video_selection.js
+          node --check static/library_filter_reset.js
       - name: Regression bulk playlist tests
         run: |
           python tests/test_v4329_bulk_playlist_actions.py
