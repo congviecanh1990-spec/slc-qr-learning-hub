@@ -6189,7 +6189,12 @@ def acceptance_metrics(user):
     scans_success = scan_q.filter(ScanLog.success.is_(True)).count()
     scan_rate = round(100 * scans_success / scans_total, 1) if scans_total else None
 
-    tests_q = FunctionalTestRun.query.filter(FunctionalTestRun.source == "automatic")
+    # Nghiệm thu phải nhất quán với Thống kê khai thác: chỉ loại
+    # các lượt từ chối quyền YouTube có chứng cứ, không đổi kết quả gốc.
+    tests_q = FunctionalTestRun.query.filter(
+        FunctionalTestRun.source == "automatic",
+        ~historical_oauth_denial_clause(FunctionalTestRun),
+    )
     if user.role != "admin":
         tests_q = tests_q.filter(FunctionalTestRun.owner_id == user.id)
     tests_total = tests_q.count()
