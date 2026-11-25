@@ -42,6 +42,8 @@ jobs:
         run: python -m pytest -q -v tests/test_video_selection_across_pages.py
       - name: Lecturer usage analytics and 5-row pagination
         run: python -m pytest -q -v tests/test_lecturer_usage_analytics.py
+      - name: QR measurement classification by actual download style
+        run: python -m pytest -q -v tests/test_qr_auto_classification.py
       - name: Google YouTube consent gate and KPI audit
         run: python -m pytest -q -v tests/test_youtube_permission_gate.py
       - name: Check browser operation-counter JavaScript syntax
