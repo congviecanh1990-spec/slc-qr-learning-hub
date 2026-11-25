@@ -5239,12 +5239,49 @@ def register_routes(app):
                         raise ValueError("Giảng viên không được phân công giảng dạy môn học/mô đun đã chọn.")
                     if course.owner_id != lecturer.id:
                         raise ValueError("Chỉ đo tạo QR cho học phần mà giảng viên đang sở hữu và có quyền tạo QR.")
-                    generated_code = "TN" + secrets.token_hex(8).upper()
-                    db.session.add(ResearchComparisonPair(
-                        **values, pair_code=generated_code, observer_id=user.id,
-                        lecturer_name_snapshot=(lecturer.name or lecturer.email or "")[:255],
-                        course_name_snapshot=(course.name or "")[:255]))
-                    flash(f"Đã tạo lượt đo {generated_code}. Giảng viên chọn 'Đo Web App' để bắt đầu; hệ thống tự ghi thời gian và thao tác.", "success")
+                    # Quản trị viên có thể nhập phần thủ công SAU khi Web App
+                    # đã hoàn tất. Ghép đúng GV, học phần, loại và khối lượng,
+                    # không tạo thêm hàng mới/không ghi đè số đo Web App.
+                    explicit_id = request.form.get("existing_pair_id", type=int)
+                    criteria = (
+                        ResearchComparisonPair.lecturer_id == lecturer.id,
+                        ResearchComparisonPair.course_id == course.id,
+                        ResearchComparisonPair.active.is_(True),
+                        ResearchComparisonPair.task_kind == values["task_kind"],
+                        ResearchComparisonPair.video_count == values["video_count"],
+                        ResearchComparisonPair.playlist_count == values["playlist_count"],
+                        ResearchComparisonPair.playlist_video_count == values["playlist_video_count"],
+                        ResearchComparisonPair.qr_count == values["qr_count"],
+                        ResearchComparisonPair.manual_operations == 0,
+                        ResearchComparisonPair.manual_seconds == 0,
+                        ResearchComparisonPair.measurement_finished_at.isnot(None),
+                    )
+                    candidates = ResearchComparisonPair.query.filter(*criteria).order_by(
+                        ResearchComparisonPair.measurement_finished_at.desc(),
+                        ResearchComparisonPair.id.desc()).all()
+                    existing = None
+                    if explicit_id:
+                        existing = db.session.get(ResearchComparisonPair, explicit_id)
+                        if existing not in candidates:
+                            raise ValueError("Lượt Web App được chọn không phù hợp học phần, loại QR, số lượng hoặc đã nhập thủ công.")
+                    elif len(candidates) == 1:
+                        existing = candidates[0]
+                    elif len(candidates) > 1:
+                        raise ValueError("Có nhiều lượt đo Web App trùng khối lượng. Hãy chọn chính xác lượt cần ghép.")
+                    if existing:
+                        existing.manual_operations = values["manual_operations"]
+                        existing.manual_seconds = values["manual_seconds"]
+                        existing.note = values["note"]
+                        existing.observer_id = user.id
+                        existing.updated_at = utcnow()
+                        flash(f"Đã bổ sung số đo thủ công vào lượt {existing.pair_code}; giữ nguyên số đo Web App đã ghi.", "success")
+                    else:
+                        generated_code = "TN" + secrets.token_hex(8).upper()
+                        db.session.add(ResearchComparisonPair(
+                            **values, pair_code=generated_code, observer_id=user.id,
+                            lecturer_name_snapshot=(lecturer.name or lecturer.email or "")[:255],
+                            course_name_snapshot=(course.name or "")[:255]))
+                        flash(f"Đã lưu kết quả thủ công ({generated_code}); Web App có thể bổ sung phần tự động sau.", "success")
                 elif form_type == "manual_experiment":
                     task_key = (request.form.get("task_key") or "").strip()
                     operations_count = int(request.form.get("operations_count") or 0)
@@ -5290,6 +5327,11 @@ def register_routes(app):
             ResearchComparisonPair.created_at.desc(), ResearchComparisonPair.id.desc()).all()
         paired_groups, paired_totals = pair_metrics(all_research_pairs)
         research_pairs = all_research_pairs[:120]
+        web_only_pairs = [
+            p for p in all_research_pairs if p.active
+            and p.measurement_finished_at is not None
+            and (p.manual_operations or 0) == 0 and (p.manual_seconds or 0) == 0
+        ]
         lecturers_for_research = User.query.order_by(User.name, User.email).all()
         courses_for_research = Course.query.filter_by(active=True).order_by(Course.name).all()
 
@@ -5348,7 +5390,8 @@ def register_routes(app):
             webapp_runs=webapp_runs, manual_runs=manual_runs,
             comparison_rows=comparison_rows, task_catalog=task_catalog,
             survey_links=survey_links,
-            research_pairs=research_pairs, paired_groups=paired_groups, paired_totals=paired_totals,
+            research_pairs=research_pairs, web_only_pairs=web_only_pairs,
+            paired_groups=paired_groups, paired_totals=paired_totals,
             pair_kinds=RESEARCH_PAIR_KINDS, normalize_pair_kind=normalize_kind,
             lecturers_for_research=lecturers_for_research,
             courses_for_research=courses_for_research,
