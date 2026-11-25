@@ -50,7 +50,7 @@ from services.google_permissions import (
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
 from services.websub import subscribe_channel, verify_callback, parse_notification
-from services.one_time_maintenance import cleanup_initial_three_error_logs_once
+from services.one_time_maintenance import cleanup_initial_three_error_logs_once, archive_pre_experiment_error_logs_once
 
 csrf = CSRFProtect()
 oauth = OAuth()
@@ -849,6 +849,12 @@ def create_app():
                 step = "migrate_legacy_classes"
                 print("[SLC STARTUP] migrate_legacy_classes", flush=True)
                 migrate_legacy_classes()
+                # Sao lưu toàn bộ lỗi cũ TRƯỚC bước cleanup v4.3.28.
+                if (os.getenv("RENDER_SERVICE_ID") == "srv-db8a0pgm7kps73dks7jg"
+                        or app.config.get("BASE_URL", "").rstrip("/") == "https://slc-qr-learning-hub.onrender.com"):
+                    step = "archive_pre_experiment_error_logs_once"
+                    archived = archive_pre_experiment_error_logs_once(db.engine)
+                    print(f"[SLC STARTUP] legacy error archive: status={archived['status']}, count={archived.get('archived', 0)}", flush=True)
                 step = "cleanup_initial_three_error_logs_once"
                 print("[SLC STARTUP] one-time cleanup marker check", flush=True)
                 cleanup_initial_three_error_logs_once(db.engine)
@@ -6189,7 +6195,12 @@ def acceptance_metrics(user):
     scans_success = scan_q.filter(ScanLog.success.is_(True)).count()
     scan_rate = round(100 * scans_success / scans_total, 1) if scans_total else None
 
-    tests_q = FunctionalTestRun.query.filter(FunctionalTestRun.source == "automatic")
+    # Nghiệm thu phải nhất quán với Thống kê khai thác: chỉ loại
+    # các lượt từ chối quyền YouTube có chứng cứ, không đổi kết quả gốc.
+    tests_q = FunctionalTestRun.query.filter(
+        FunctionalTestRun.source == "automatic",
+        ~historical_oauth_denial_clause(FunctionalTestRun),
+    )
     if user.role != "admin":
         tests_q = tests_q.filter(FunctionalTestRun.owner_id == user.id)
     tests_total = tests_q.count()
