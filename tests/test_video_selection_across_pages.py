@@ -284,7 +284,7 @@ def test_video_bulk_three_actions_and_download_only_existing_assigned_qrs(config
             files = zip_file.namelist()
             assert len(files) == 2
             assert all(path.endswith(".png") for path in files)
-            assert all(zip_file.read(path).startswith(b"\\x89PNG\\r\\n\\x1a\\n") for path in files)
+            assert all(zip_file.read(path).startswith(bytes([137,80,78,71,13,10,26,10])) for path in files)
         # Nếu chỉ còn chọn 1 video, ZIP cũng chỉ có duy nhất QR tương ứng.
         single = dict(post_data, selected_video_ids=[chosen[0]])
         response = client.post("/videos/qr/download-selected", data=single)
