@@ -16,7 +16,7 @@ def test_lecturer_scope_deduplicates_students_and_counts_completion(configured_a
     today = date.today()
     with app.app_context():
         owner = db.session.get(User, keys["teacher"])
-        another = db.session.get(User, keys["other"])
+        another = User.query.filter_by(email="video-selection-other@test.local").one()
         course = db.session.get(Course, keys["course"])
         cl = SchoolClass(code="T01", name="Lớp T01", active=True)
         db.session.add(cl)
@@ -102,7 +102,9 @@ def test_analytics_system_has_5_rows_and_lecturers_excel(configured_app):
         assert len(section.select("table tbody tr")) == 5  # GV chỉ xem bảng hoạt động hệ thống.
         assert "thong-ke-giang-vien" not in response.get_data(as_text=True)
         assert "export_xlsx=lecturers" not in response.get_data(as_text=True)
-        assert client.get("/analytics?export_xlsx=lecturers").status_code == 403
+        denied = client.get("/analytics?export_xlsx=lecturers")
+        assert denied.status_code == 302  # Web App chuyển hướng khi bị từ chối quyền.
+        assert "spreadsheetml.sheet" not in denied.content_type
 
 
 
@@ -250,7 +252,7 @@ def test_lecturer_delete_classes_preserves_shared_and_removes_exclusive(configur
         admin = User(email="delete-admin2@test.local", role="admin", name="Quản trị", profile_completed=True)
         db.session.add(admin);db.session.flush()
         gv = db.session.get(User, keys["teacher"])
-        other = db.session.get(User, keys["other"])
+        other = User.query.filter_by(email="video-selection-other@test.local").one()
         course = db.session.get(Course, keys["course"])
         other_course = Course(owner_id=other.id, name="Môn của người khác",
                               code="SHARED-OTHER", active=True)
@@ -273,6 +275,7 @@ def test_lecturer_delete_classes_preserves_shared_and_removes_exclusive(configur
                 started_on=date.today()-timedelta(days=3)))
         db.session.commit()
         aid, uid = admin.id, gv.id
+        other_course_id = other_course.id
         exclusive_id, shared_id, own_student, shared_student = exclusive.id, shared.id, student1.id, student2.id
     with app.test_client() as client:
         with client.session_transaction() as ss: ss["user_id"]=aid
@@ -285,7 +288,7 @@ def test_lecturer_delete_classes_preserves_shared_and_removes_exclusive(configur
             assert db.session.get(Student,own_student) is None
             assert db.session.get(SchoolClass,shared_id) is not None
             assert db.session.get(Student,shared_student) is not None
-            assert CourseClass.query.filter_by(course_id=other_course.id,school_class_id=shared_id).count() == 1
+            assert CourseClass.query.filter_by(course_id=other_course_id,school_class_id=shared_id).count() == 1
 
 
 def test_lecturer_video_count_sum_playlist_contents_by_qr(configured_app):

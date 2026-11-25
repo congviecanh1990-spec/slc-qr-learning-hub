@@ -484,7 +484,7 @@ def _sync_channel_catalog(user, credential=None):
 def _new_sync_payload(user):
     extras = ConnectedGoogleAccount.query.filter_by(user_id=user.id).all()
     return {"accounts": [None] + [x.id for x in extras], "tasks": [],
-            "completed_tasks": 0, "failed": [], "videos_found": 0,
+            "completed_tasks": 0, "failed": [], "failed_codes": [], "videos_found": 0,
             "seen_video_ids": [],
             "started_at": utcnow().isoformat()}
 
@@ -515,6 +515,7 @@ def incremental_sync_state(user):
             "failures": len(payload.get("failed", [])),
             # Lý do chỉ tới chủ tài khoản đã đăng nhập; luôn là thông điệp đã phân loại.
             "failure_reasons": payload.get("failed", [])[-5:],
+            "failure_codes": payload.get("failed_codes", []),
             "message": ("Đang cập nhật học liệu theo từng phần. Bạn vẫn có thể sử dụng hệ thống."
                         if job.status == "running" else
                         payload.get("final_message", "Đã kết thúc lượt đồng bộ."))}
@@ -534,6 +535,7 @@ def step_incremental_sync(user):
             reason = _record_sync_failure(user, user.email, "Nhận diện tài khoản YouTube",
                                           YouTubeSyncError("connection", "Tài khoản YouTube bổ sung đã bị ngắt kết nối."))
             payload["failed"].append(str(reason))
+            payload.setdefault("failed_codes", []).append(reason.code)
         else:
             try:
                 payload["tasks"].extend(_sync_channel_catalog(user, credential))
@@ -542,6 +544,7 @@ def step_incremental_sync(user):
                 label = credential.email if credential else user.email
                 friendly = _record_sync_failure(user, label, "Nhận diện kênh YouTube", exc)
                 payload["failed"].append(f"{label}: {friendly}")
+                payload.setdefault("failed_codes", []).append(friendly.code)
     elif payload.get("tasks"):
         task = payload["tasks"].pop(0)
         channel = db.session.get(YouTubeChannel, task["channel_pk"])
@@ -550,8 +553,9 @@ def step_incremental_sync(user):
         account_label = credential.email if credential else user.email
         if not channel or channel.user_id != user.id or (credential and credential.user_id != user.id):
             reason = _record_sync_failure(user, account_label, "Đồng bộ video",
-                                          YouTubeSyncError("permission", "Không còn quyền đồng bộ kênh này."))
+                                          YouTubeSyncError("conflict", "Không xác định được kênh đã giao cho tài khoản này; vui lòng kiểm tra liên kết kênh."))
             payload["failed"].append(f"{account_label}: {reason}")
+            payload.setdefault("failed_codes", []).append(reason.code)
         else:
             playlist = db.session.get(Playlist, task.get("playlist_pk")) if task.get("playlist_pk") else None
             playlist_youtube_id = task.get("uploads") or (playlist.youtube_playlist_id if playlist else None)
@@ -559,6 +563,7 @@ def step_incremental_sync(user):
                 reason = _record_sync_failure(user, account_label, "Đồng bộ danh sách phát",
                                               YouTubeSyncError("not_found", "Danh sách phát không hợp lệ hoặc đã bị xóa."))
                 payload["failed"].append(f"{account_label}: {reason}")
+                payload.setdefault("failed_codes", []).append(reason.code)
             else:
                 try:
                     page, seen = sync_playlist_page(user, channel, playlist_youtube_id,
@@ -579,6 +584,7 @@ def step_incremental_sync(user):
                     db.session.rollback()
                     friendly = _record_sync_failure(user, account_label, "Đồng bộ video trong playlist", exc)
                     payload["failed"].append(f"{account_label}: {friendly}")
+                    payload.setdefault("failed_codes", []).append(friendly.code)
     if not payload["accounts"] and not payload["tasks"]:
         job.status = "done"
         job.finished_at = utcnow()

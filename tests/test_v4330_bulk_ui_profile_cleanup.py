@@ -76,7 +76,7 @@ node=next(n for n in ast.walk(astmod) if isinstance(n,ast.FunctionDef) and n.nam
 clone=ast.FunctionDef(name=node.name,args=node.args,body=node.body,decorator_list=[],returns=node.returns,type_comment=None)
 ns={**{name:getattr(m,name) for name in vars(m) if isinstance(getattr(m,name),type)},'db':m.db,'or_':sa.or_, 'func':sa.func}
 exec(compile(ast.fix_missing_locations(ast.Module(body=[clone],type_ignores=[])),'app.py','exec'),ns)
-result=ns['delete_lecturer_business_data'](u1)
+result=ns['delete_lecturer_business_data'](u1, delete_classes=True)
 assert result=={'courses':1,'qrs':1,'classes':1},result
 assert m.Course.query.filter_by(id=c1id).count()==0
 assert m.QrCode.query.filter_by(id=qid).count()==0
@@ -157,7 +157,7 @@ clone=ast.FunctionDef(name=node.name,args=node.args,body=node.body,decorator_lis
 messages=[]
 from sqlalchemy.orm import aliased
 mock_ns=dict(ns)
-mock_ns.update({'aliased':aliased,'request':types.SimpleNamespace(form={'confirm_email':u3.email}),
+mock_ns.update({'aliased':aliased,'request':types.SimpleNamespace(form={'confirm_delete':'yes', 'delete_classes':'yes'}),
                 'current_user':lambda:admin,'flash':lambda msg,kind:messages.append((msg,kind)),
                 'abort':lambda code:(_ for _ in ()).throw(PermissionError(code)),
                 'url_for':lambda name:'/admin/lecturers','redirect':lambda url:url,
