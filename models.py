@@ -510,8 +510,10 @@ class ResearchComparisonPair(db.Model):
     playlist_count = db.Column(db.Integer, nullable=False, default=0)
     playlist_video_count = db.Column(db.Integer, nullable=False, default=0)
     qr_count = db.Column(db.Integer, nullable=False)
-    manual_operations = db.Column(db.Integer, nullable=False)
-    manual_seconds = db.Column(db.Float, nullable=False)
+    auto_discovered = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    # Kết quả thủ công có thể được bổ sung sau khi Web App đã đo xong.
+    manual_operations = db.Column(db.Integer, nullable=True)
+    manual_seconds = db.Column(db.Float, nullable=True)
     # Để NULL cho đến khi cùng GV hoàn thành phép đo Web App trên cùng bộ học liệu.
     webapp_operations = db.Column(db.Integer, nullable=True)
     webapp_seconds = db.Column(db.Float, nullable=True)
@@ -540,7 +542,9 @@ class ResearchComparisonPair(db.Model):
     @property
     def is_paired(self):
         return (self.active and self.measurement_verified and
-                self.webapp_operations is not None and self.webapp_seconds is not None)
+                self.webapp_operations is not None and self.webapp_seconds is not None
+                and self.manual_operations is not None and self.manual_seconds is not None
+                and self.manual_operations > 0 and self.manual_seconds > 0)
 
 
 class FunctionalTestRun(db.Model):
