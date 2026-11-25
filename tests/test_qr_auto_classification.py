@@ -140,3 +140,61 @@ def test_research_library_mode_controls_gone_but_download_buttons_remain(configu
         assert not soup.select('[name="qrWorkMode"]')
         assert soup.select_one("#playlistBulkDownloadQr") is not None
         assert soup.select_one('#assignVideoForm button[formaction*="download-selected"]') is not None
+
+
+def test_playlist_bulk_download_returns_only_selected_qrs_not_entire_course(configured_app):
+    """Tải tất cả từ Kho playlist KHÔNG được lẫn QR của playlist bỏ chọn."""
+    import io
+    import zipfile
+    from models import db, User, Playlist, YouTubeChannel, CoursePlaylist, QrCode
+    app, keys, _web = configured_app
+    with app.app_context():
+        teacher = db.session.get(User, keys["teacher"])
+        channel = YouTubeChannel.query.filter_by(user_id=teacher.id).first()
+        playlist_ids = [keys["playlist"]]
+        for index in range(2):
+            playlist = Playlist(channel_id=channel.id,
+                youtube_playlist_id=f"TEST-BULK-PLAYLIST-{index}",
+                title=f"Playlist hàng loạt {index}")
+            db.session.add(playlist)
+            db.session.flush()
+            playlist_ids.append(playlist.id)
+        qr_ids = []
+        for index, playlist_id in enumerate(playlist_ids):
+            qr = QrCode(owner_id=teacher.id, course_id=keys["course"],
+                playlist_id=playlist_id, target_type="playlist",
+                slug=f"test-selected-playlist-{index}",title=f"QR playlist {index}")
+            db.session.add(qr)
+            db.session.flush()
+            qr_ids.append(qr.id)
+            db.session.add(CoursePlaylist(course_id=keys["course"],
+                playlist_id=playlist_id, qr_id=qr.id, active=True))
+        db.session.commit()
+    data={
+        "course_id":str(keys["course"]),
+        "playlist_selection_mode":"none",
+        "selected_playlist_ids":[str(x) for x in playlist_ids[:2]],
+    }
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user_id"] = keys["teacher"]
+        json_response = client.post("/playlists/qr/download-selected",
+            data=data,headers={"Accept":"application/json"})
+        assert json_response.status_code == 200
+        assert {row["id"] for row in json_response.json["files"]} == set(qr_ids[:2])
+        assert len(json_response.json["files"]) == 2
+        zip_response = client.post("/playlists/qr/download-selected",data=data)
+        assert zip_response.status_code == 200
+        assert zip_response.mimetype == "application/zip"
+        with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
+            files = archive.namelist()
+            assert len(files) == 2
+            assert all(name.endswith(".png") for name in files)
+            assert all(archive.read(name).startswith(bytes([137,80,78,71,13,10,26,10]))
+                for name in files)
+        excluded = client.post("/playlists/qr/download-selected",
+            data={"course_id":keys["course"],"playlist_selection_mode":"all",
+                  "excluded_playlist_ids":[str(playlist_ids[1])]},
+            headers={"Accept":"application/json"})
+        assert excluded.status_code == 200
+        assert {row["id"] for row in excluded.json["files"]} == {qr_ids[0],qr_ids[2]}
