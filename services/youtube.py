@@ -553,7 +553,7 @@ def step_incremental_sync(user):
         account_label = credential.email if credential else user.email
         if not channel or channel.user_id != user.id or (credential and credential.user_id != user.id):
             reason = _record_sync_failure(user, account_label, "Đồng bộ video",
-                                          YouTubeSyncError("permission", "Không còn quyền đồng bộ kênh này."))
+                                          YouTubeSyncError("conflict", "Không xác định được kênh đã giao cho tài khoản này; vui lòng kiểm tra liên kết kênh."))
             payload["failed"].append(f"{account_label}: {reason}")
             payload.setdefault("failed_codes", []).append(reason.code)
         else:
