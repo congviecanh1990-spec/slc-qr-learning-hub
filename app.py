@@ -5405,17 +5405,29 @@ def register_routes(app):
             # Tiếp tục đo đã khởi động nếu trình duyệt bị đóng/trở lại phiên đăng nhập.
             pair = ongoing
         else:
-            pair = ResearchComparisonPair.query.filter(
+            # Chọn cặp đo phù hợp khối lượng. Kiểu nhiệm vụ mới chỉ là
+            # dự kiến khi gán/tạo; kiểu CHÍNH THỨC dựa vào nút tải sau cùng.
+            count_hint = request.form.get("selected_count", type=int)
+            scope = ResearchComparisonPair.query.filter(
                 ResearchComparisonPair.lecturer_id == user.id,
                 ResearchComparisonPair.course_id == course_id,
                 ResearchComparisonPair.active.is_(True),
                 ResearchComparisonPair.measurement_started_at.is_(None),
                 ResearchComparisonPair.measurement_verified.is_(False),
-                ResearchComparisonPair.task_kind == kind
-            ).order_by(ResearchComparisonPair.created_at, ResearchComparisonPair.id).first()
+            )
+            if count_hint is not None and 2 <= count_hint <= 1000:
+                scope = scope.filter(ResearchComparisonPair.qr_count == count_hint)
+            pair = scope.filter(ResearchComparisonPair.task_kind == kind).order_by(
+                ResearchComparisonPair.created_at, ResearchComparisonPair.id).first()
+            if not pair:
+                # Ví dụ: GV đã tích 2 video và tạo QR đồng loạt, nhưng sau đó
+                # tải QR từng dòng. Nếu chỉ có cặp "từng QR" được giao,
+                # vẫn phải đo từ LÚC TẠO (không bắt đầu trễ khi nhấn Tải).
+                pair = scope.order_by(
+                    ResearchComparisonPair.created_at, ResearchComparisonPair.id).first()
             if not pair:
                 return jsonify({"active": False,
-                    "message": "Chưa có lượt đối chứng tương ứng do quản trị viên lập. Bạn vẫn có thể tạo QR bình thường."})
+                    "message": "Chưa có lượt đối chứng phù hợp môn học và khối lượng. Bạn vẫn có thể tạo QR bình thường."})
             pair.measurement_started_at = utcnow()
             pair.measurement_finished_at = None
             pair.measurement_saved_at = None
