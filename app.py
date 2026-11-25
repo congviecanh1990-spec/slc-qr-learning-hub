@@ -45,6 +45,7 @@ from research_comparison import (
 from services.error_reporting import login_failure_reason, safe_error_diagnostic
 from services.google_permissions import (
     has_youtube_read_permission, explicitly_denied_by_user, historical_oauth_denial_clause,
+    only_permission_failures,
 )
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
@@ -2257,8 +2258,18 @@ def register_routes(app):
         try:
             result = step_incremental_sync(user)
             if was_running and result.get("status") == "done":
-                # Kênh trống hoặc không có video phù hợp KHÔNG phải lỗi đồng bộ.
-                # Chỉ đánh giá không đạt khi tồn tại phần lỗi thực sự.
+                # Những trường hợp thiếu/hết quyền API là việc cấp quyền của
+                # tài khoản, không đánh giá thất bại chức năng của Web App.
+                # Phải có mã phân loại của TẤT CẢ lỗi; trường hợp lẫn lỗi
+                # cấu hình/mạng/xử lý nội bộ vẫn được ghi Không đạt.
+                if only_permission_failures(result.get("failures", 0), result.get("failure_codes")):
+                    result["authorization_required"] = True
+                    result["message"] = (
+                        "Chưa hoàn tất quyền truy cập một hoặc nhiều kênh YouTube. "
+                        "Vui lòng đăng nhập lại, cấp đủ quyền hoặc kết nối lại tài khoản YouTube bổ sung. "
+                        "Lượt này không được tính là lỗi chức năng Web App."
+                    )
+                    return jsonify(result)
                 passed = result["failures"] == 0
                 reasons = "; ".join(result.get("failure_reasons", [])[:3])
                 record_functional_test("YT_SYNC", "Đồng bộ video YouTube", passed,
@@ -2271,6 +2282,17 @@ def register_routes(app):
         except Exception as exc:
             db.session.rollback()
             friendly = _friendly_sync_error(exc)
+            if getattr(friendly, "code", None) in {"permission", "auth_expired"}:
+                # Việc Google/YouTube từ chối quyền không phải lỗi tính toán
+                # hay lỗi xử lý của Web App, tránh tăng số phép đo không đạt.
+                return jsonify({
+                    "status": "permission_required",
+                    "authorization_required": True,
+                    "message": (
+                        "Tài khoản chưa cấp đủ quyền YouTube hoặc quyền đã hết hiệu lực. "
+                        "Vui lòng đăng nhập lại và cấp quyền, hoặc kết nối lại kênh bổ sung."
+                    )
+                }), 409
             db.session.add(ErrorLog(module="youtube", action="Đồng bộ từng bước",
                 course_module="Hệ thống", actor_user_id=user.id, actor_email=user.email,
                 message="Một bước đồng bộ chưa hoàn tất", reason=str(friendly),
