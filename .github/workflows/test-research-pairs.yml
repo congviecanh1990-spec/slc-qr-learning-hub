@@ -44,6 +44,8 @@ jobs:
         run: python -m pytest -q -v tests/test_lecturer_usage_analytics.py
       - name: QR measurement classification by actual download style
         run: python -m pytest -q -v tests/test_qr_auto_classification.py
+      - name: Web App measured first, manual counterpart entered afterward
+        run: python -m pytest -q -v tests/test_qr_webapp_before_manual.py
       - name: Google YouTube consent gate and KPI audit
         run: python -m pytest -q -v tests/test_youtube_permission_gate.py
       - name: Check browser operation-counter JavaScript syntax
