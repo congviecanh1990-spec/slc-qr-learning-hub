@@ -850,7 +850,8 @@ def create_app():
                 print("[SLC STARTUP] migrate_legacy_classes", flush=True)
                 migrate_legacy_classes()
                 # Sao lưu toàn bộ lỗi cũ TRƯỚC bước cleanup v4.3.28.
-                if app.config.get("BASE_URL", "").rstrip("/") == "https://slc-qr-learning-hub.onrender.com":
+                if (os.getenv("RENDER_SERVICE_ID") == "srv-db8a0pgm7kps73dks7jg"
+                        or app.config.get("BASE_URL", "").rstrip("/") == "https://slc-qr-learning-hub.onrender.com"):
                     step = "archive_pre_experiment_error_logs_once"
                     archived = archive_pre_experiment_error_logs_once(db.engine)
                     print(f"[SLC STARTUP] legacy error archive: status={archived['status']}, count={archived.get('archived', 0)}", flush=True)
