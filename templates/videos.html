@@ -255,7 +255,7 @@
               <button class="btn btn-primary btn-sm video-qr-create" {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
             </form>
             <div class="d-flex flex-wrap gap-1 align-items-center mt-1 video-qr-extra" data-qr-row="video-{{ v.id }}" hidden>
-              <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download" hidden aria-label="Tải mã QR video">Tải QR</a>
+              <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download qr-save-picker" hidden aria-label="Tải mã QR video">Tải QR</a>
               <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" hidden aria-expanded="false">Đổi đích</button>
               <form method="post" action="#" class="video-qr-delete library-qr-form" data-library-qr-form="1" hidden onsubmit="return confirm('Xóa mã QR này? Mã đã in sẽ ngừng hoạt động nhưng lịch sử vẫn được giữ lại.');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
