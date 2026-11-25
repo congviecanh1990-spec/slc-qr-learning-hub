@@ -1047,6 +1047,8 @@ def ensure_research_comparison_schema():
         "measurement_bulk_videos": "INTEGER NOT NULL DEFAULT 0",
         "measurement_verified": "BOOLEAN NOT NULL DEFAULT FALSE",
         "measurement_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
+        "measurement_saved_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
+        "measurement_download_style": "VARCHAR(20)",
         "measurement_save_method": "VARCHAR(32)",
         "measurement_saved_at": "TIMESTAMP WITH TIME ZONE",
     }
@@ -1085,51 +1087,52 @@ def research_created_qr_ids(pair):
         return []
 
 
+def research_saved_qr_ids(pair):
+    try:
+        values = json.loads(pair.measurement_saved_qr_ids or "[]")
+        return [int(v) for v in values if isinstance(v, int) and v > 0] if isinstance(values, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
 def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
-    """Chỉ ghi QR mới, đúng chức năng đã chọn ở Kho học liệu và đúng học phần."""
+    """Ghi nhận QR mới bất kể nút tạo: phân nhóm CHỈ sau thao tác tải thực tế.
+
+    Không suy ra tạo hàng loạt từ số mục tích chọn hoặc endpoint tạo QR.
+    Cùng một mã chỉ được tính một lần trong phiên đo, đúng học phần được giao.
+    """
     if not has_request_context() or not session.get("research_measurement_id"):
         return
     pair = active_research_measurement(lecturer_id)
     if not pair or pair.course_id != course_id or not qr_id:
-        return
-    endpoint = request.endpoint
-    task = normalize_kind(pair.task_kind)
-    single_video = kind == "video" and endpoint == "create_video_qr_from_library"
-    single_playlist = kind == "playlist" and endpoint == "create_playlist_qr_from_library"
-    bulk_video = kind == "video" and endpoint == "bulk_create_selected_video_qrs"
-    if not ((task == "QR_TUNG_VIDEO_PLAYLIST" and (single_video or single_playlist)) or
-            (task == "QR_VIDEO_HANG_LOAT" and bulk_video)):
         return
     known = research_created_qr_ids(pair)
     if qr_id in known or len(known) >= pair.qr_count:
         return
     known.append(qr_id)
     pair.measurement_qr_ids = json.dumps(known)
-    if single_video:
-        pair.measurement_single_videos += 1
-    elif single_playlist:
+    if kind == "playlist":
         pair.measurement_single_playlists += 1
-    else:
-        pair.measurement_bulk_videos += 1
+    elif kind == "video":
+        pair.measurement_single_videos += 1
+        if request.endpoint == "bulk_create_selected_video_qrs":
+            pair.measurement_bulk_videos += 1
 
 
 def research_measurement_complete_qrs(pair):
-    """Đủ mã QR theo nhiệm vụ và không tính mã bị xoá."""
+    """Xác minh đủ số mã MỚI của đúng học phần; chưa phụ thuộc nút tải."""
     if not pair or not pair.active or not pair.measurement_started_at:
         return False
-    qr_ids = research_created_qr_ids(pair)
-    if len(qr_ids) != pair.qr_count:
+    ids = research_created_qr_ids(pair)
+    if len(ids) != pair.qr_count:
         return False
-    qrs = QrCode.query.filter(QrCode.id.in_(qr_ids), QrCode.active.is_(True),
+    qrs = QrCode.query.filter(QrCode.id.in_(ids), QrCode.active.is_(True),
                               QrCode.course_id == pair.course_id).all()
-    if len(qrs) != len(qr_ids):
-        return False
-    if normalize_kind(pair.task_kind) == "QR_VIDEO_HANG_LOAT":
-        return pair.measurement_bulk_videos == pair.video_count and all(not q.is_playlist for q in qrs)
-    return (pair.measurement_single_videos == pair.video_count and
-            pair.measurement_single_playlists == pair.playlist_count and
-            sum(not q.is_playlist for q in qrs) == pair.video_count and
-            sum(q.is_playlist for q in qrs) == pair.playlist_count)
+    return (
+        len(qrs) == len(ids)
+        and sum(not q.is_playlist for q in qrs) == pair.video_count
+        and sum(q.is_playlist for q in qrs) == pair.playlist_count
+    )
 
 
 def research_setting(key, default=""):
@@ -5342,6 +5345,8 @@ def register_routes(app):
             pair.measurement_single_playlists = 0
             pair.measurement_bulk_videos = 0
             pair.measurement_qr_ids = "[]"
+            pair.measurement_saved_qr_ids = "[]"
+            pair.measurement_download_style = None
             pair.measurement_verified = False
             db.session.commit()
         session["research_measurement_id"] = pair.id
@@ -5471,6 +5476,8 @@ def register_routes(app):
         pair.measurement_bulk_videos = 0
         pair.measurement_verified = False
         pair.measurement_qr_ids = "[]"
+        pair.measurement_saved_qr_ids = "[]"
+        pair.measurement_download_style = None
         pair.measurement_save_method = None
         pair.measurement_saved_at = None
         pair.webapp_operations = None
