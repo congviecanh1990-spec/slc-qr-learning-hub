@@ -241,3 +241,56 @@ def test_analytics_excel_exports_and_research_form(configured_app):
     assert "Số QR cần tạo (tự tính)" not in template
     assert "Quản lý bản ghi đối chứng cần điều chỉnh" not in template
     assert "Hiển thị 120 lượt đo gần nhất" not in template
+
+
+def test_video_bulk_three_actions_and_download_only_existing_assigned_qrs(configured_app):
+    """Gán môn -> tạo QR cho video đã gán -> tải đúng QR của video được chọn."""
+    import io
+    import zipfile
+    from bs4 import BeautifulSoup
+    from models import db, CourseVideo, QrCode
+    app, keys, _ = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as ss: ss["user_id"] = keys["teacher"]
+        page = client.get("/videos")
+        assert page.status_code == 200
+        soup = BeautifulSoup(page.data, "html.parser")
+        form = soup.select_one("#assignVideoForm")
+        assert form is not None
+        assert len(form.select('button[formaction]')) == 2
+        assert "/videos/qr/bulk-selected" in str(form)
+        assert "/videos/qr/download-selected" in str(form)
+        chosen = [str(keys["video_ids"][2]), str(keys["video_ids"][10])]
+        post_data = {
+            "course_id": str(keys["course"]), "q": "Bài học",
+            "video_selection_mode": "none", "selected_video_ids": chosen,
+        }
+        # Không tạo QR tự động khi các video chưa được gán môn.
+        assert client.post("/videos/qr/bulk-selected", data=post_data).status_code == 302
+        with app.app_context():
+            assert CourseVideo.query.filter_by(course_id=keys["course"]).count() == 0
+            assert QrCode.query.count() == 0
+        assert client.post("/videos/qr/download-selected", data=post_data).status_code == 302
+        assert client.post("/videos/assign-course", data=post_data).status_code == 302
+        with app.app_context():
+            assert CourseVideo.query.filter_by(course_id=keys["course"]).count() == 2
+        assert client.post("/videos/qr/bulk-selected", data=post_data).status_code == 302
+        with app.app_context():
+            assert QrCode.query.count() == 2
+        response = client.post("/videos/qr/download-selected", data=post_data)
+        assert response.status_code == 200
+        assert response.mimetype == "application/zip"
+        with zipfile.ZipFile(io.BytesIO(response.data)) as zip_file:
+            files = zip_file.namelist()
+            assert len(files) == 2
+            assert all(path.endswith(".png") for path in files)
+            assert all(zip_file.read(path).startswith(bytes([137,80,78,71,13,10,26,10])) for path in files)
+        # Nếu chỉ còn chọn 1 video, ZIP cũng chỉ có duy nhất QR tương ứng.
+        single = dict(post_data, selected_video_ids=[chosen[0]])
+        response = client.post("/videos/qr/download-selected", data=single)
+        assert response.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(response.data)) as zip_file:
+            assert len(zip_file.namelist()) == 1
+        # Không truy cập được video hoặc QR của giảng viên khác.
+        outsider = dict(post_data, selected_video_ids=[str(keys["outsider"])])
+        assert client.post("/videos/qr/download-selected", data=outsider).status_code == 302
