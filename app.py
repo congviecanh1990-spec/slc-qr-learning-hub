@@ -3324,8 +3324,9 @@ def register_routes(app):
                 continue
             if not qr_managed_by_user(qr, user):
                 continue
-            target = qr.current_target
-            if not target or target.playlist_id != link.playlist_id:
+            # QR playlist lưu đích tại QrCode.playlist_id (không dùng
+            # QrTargetHistory vốn chỉ dành cho QR video).
+            if qr.playlist_id != link.playlist_id:
                 continue
             used.add(qr.id)
             qrs.append(qr)
@@ -5346,7 +5347,7 @@ def register_routes(app):
     @login_required
     def research_measurement_page():
         # Địa chỉ cũ chuyển vào Kho học liệu; không còn giao diện đo riêng.
-        return redirect(url_for("videos_page") + "#thuc-nghiem-qr")
+        return redirect(url_for("videos_page") + "#videos")
 
     def research_auto_status_payload(pair):
         if not pair:
@@ -5495,6 +5496,12 @@ def register_routes(app):
         ):
             abort(403)
 
+        # Không được đổi kiểu khi đã có mã QR được ghi là đã tải theo
+        # một phương thức khác: tránh chuyển nhầm kết quả đo cũ.
+        if pair.measurement_download_style and pair.measurement_download_style != style:
+            return jsonify({
+                **result, "message": "Đã bắt đầu tải theo cách khác; không trộn hai loại nhiệm vụ trong cùng lượt đo."
+            })
         old_kind = normalize_kind(pair.task_kind)
         if old_kind != task_kind:
             # Giảng viên có thể tích 2+ playlist/video, tạo QR cùng lúc rồi
@@ -5508,6 +5515,7 @@ def register_routes(app):
                 ResearchComparisonPair.qr_count == pair.qr_count,
                 ResearchComparisonPair.video_count == pair.video_count,
                 ResearchComparisonPair.playlist_count == pair.playlist_count,
+                ResearchComparisonPair.playlist_video_count == pair.playlist_video_count,
                 ResearchComparisonPair.measurement_started_at.is_(None),
                 ResearchComparisonPair.measurement_verified.is_(False),
             ).order_by(ResearchComparisonPair.created_at, ResearchComparisonPair.id).first()
