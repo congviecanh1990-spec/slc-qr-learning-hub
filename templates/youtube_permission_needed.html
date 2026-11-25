@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center my-4">
+  <div class="col-lg-8 col-xl-7">
+    <div class="card shadow-sm border-warning">
+      <div class="card-body p-4">
+        <h2 class="h4 mb-3">Cần cấp quyền truy cập YouTube</h2>
+        <p>Google đã xác thực tài khoản nhưng Web App chưa nhận được đầy đủ quyền đọc kênh YouTube. Vì vậy, bạn <strong>chưa thể vào Web App</strong>.</p>
+        <p class="mb-2">Để tiếp tục, hãy đăng nhập lại bằng tài khoản Google của bạn. Khi Google hỏi quyền truy cập, cần đồng ý quyền <strong>xem thông tin kênh và video YouTube</strong> mà Web App yêu cầu.</p>
+        <p class="small text-muted">Nếu chọn từ chối hoặc bỏ qua quyền YouTube, bạn sẽ quay lại màn hình này. Đây là bước cấp quyền chưa hoàn tất, không được tính là lỗi chức năng của hệ thống.</p>
+        <a class="btn btn-primary mt-2" href="{{ url_for('login') }}">Đăng nhập lại và cấp quyền YouTube</a>
+        <a class="btn btn-outline-secondary mt-2 ms-2" href="{{ url_for('logout') }}">Thoát</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
