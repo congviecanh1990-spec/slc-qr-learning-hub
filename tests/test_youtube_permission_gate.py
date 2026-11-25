@@ -13,6 +13,8 @@ def test_permission_helpers_classify_only_explicit_user_denial():
     )
     assert has_youtube_read_permission("openid email profile " + YOUTUBE_READ_SCOPE)
     assert has_youtube_read_permission(["profile", YOUTUBE_READ_SCOPE])
+    assert has_youtube_read_permission("https://www.googleapis.com/auth/youtube")
+    assert has_youtube_read_permission(["email https://www.googleapis.com/auth/youtube.force-ssl"])
     assert not has_youtube_read_permission("openid email profile")
     assert not has_youtube_read_permission(None)
     assert explicitly_denied_by_user(query_error="access_denied")
