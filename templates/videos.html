@@ -35,56 +35,9 @@
   </div>
 </div>
 
-<section id="thuc-nghiem-qr" class="card card-body shadow-sm mb-4" aria-label="Chức năng tạo mã QR" data-user-id="{{ me.id }}">
-  <div class="fw-bold mb-2">Chức năng tạo mã QR</div>
-  <div class="d-flex flex-wrap gap-3 mb-2">
-    <label class="form-check"><input class="form-check-input" type="radio" name="qrWorkMode"
-      value="QR_TUNG_VIDEO_PLAYLIST" checked>
-      <span class="form-check-label">Tạo mã QR cho từng video hoặc từng playlist</span></label>
-    <label class="form-check"><input class="form-check-input" type="radio" name="qrWorkMode"
-      value="QR_VIDEO_HANG_LOAT">
-      <span class="form-check-label">Tạo mã QR hàng loạt cho video</span></label>
-  </div>
-  <div class="row g-2 align-items-end">
-    <div class="col-lg-5">
-      <label class="form-label small fw-semibold" for="researchQrCourse">Môn học/mô đun đang tạo QR</label>
-      <select class="form-select" id="researchQrCourse">
-        <option value="">— Chọn môn học/mô đun —</option>
-        {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="col-lg-7">
-      <div id="researchQrStatus" class="small text-muted" aria-live="polite">
-        Chọn chức năng và môn học để tạo QR. Khi có lượt đối chứng được giao, hệ thống
-        tự đo thời gian và số thao tác; không cần mở trang đo khác.
-      </div>
-    </div>
-  </div>
-  <div id="researchQrSaveArea" class="border-top mt-3 pt-3" hidden>
-    <div class="small fw-semibold mb-2" id="researchQrReady"></div>
-    <button type="button" class="btn btn-success" id="researchQrSaveDirectory">
-      Lưu các tệp QR vào thư mục chọn
-    </button>
-    <button type="button" class="btn btn-outline-secondary ms-2" id="researchQrSaveFallback">
-      Tải ZIP nếu trình duyệt không hỗ trợ
-    </button>
-    <div id="researchQrManualConfirm" class="mt-2 p-2 border rounded" hidden>
-      <label class="form-check">
-        <input type="checkbox" class="form-check-input" id="researchQrConfirmedFiles">
-        <span class="form-check-label small">Tôi đã tải, giải nén (nếu là ZIP) và kiểm tra
-          đủ tệp QR có tên đúng trong thư mục mong muốn.</span>
-      </label>
-      <button type="button" class="btn btn-primary btn-sm mt-2" id="researchQrConfirmDone">
-        Xác nhận hoàn tất lưu tệp
-      </button>
-    </div>
-    <div class="small text-muted mt-2">
-      Thời gian đo bao gồm cả bước lưu tệp. Trên Chrome/Edge tương thích có thể
-      chọn thư mục và lưu trực tiếp; với ZIP cần xác nhận sau khi giải nén.
-      Ứng dụng không đọc đường dẫn hay nội dung thư mục cá nhân.
-    </div>
-  </div>
-</section>
+{# Loại QR được nhận diện tự động khi tải, không cần chọn thủ công. #}
+<div id="researchQrStatus" class="alert alert-info small d-none" role="status" aria-live="polite"></div>
+
 
 <section id="playlists" class="mb-5" style="scroll-margin-top:125px">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -120,7 +73,7 @@
 
   {# Mỗi playlist được chọn mặc định; các playlist bỏ tích được giữ lại khi chuyển trang. #}
   <form id="playlistBulkActions" method="post" action="{{ url_for('bulk_assign_filtered_library_playlists') }}"
-        data-user-id="{{ me.id }}" class="card card-body shadow-sm mb-3">
+        data-user-id="{{ me.id }}" data-playlist-total="{{ playlist_total }}" class="card card-body shadow-sm mb-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="return_query" value="{{ library_return_query }}">
     <input type="hidden" name="p_q" value="{{ playlist_search }}">
@@ -142,9 +95,9 @@
               {{ 'disabled' if not courses else '' }}>
         Tạo QR cho playlist đã chọn
       </button>
-      <a id="playlistBulkDownloadQr" class="btn btn-outline-success qr-save-picker disabled" href="#"
-         aria-disabled="true"
-         title="Tải tệp ZIP gồm các QR đã tạo của môn học đang chọn">Tải QR đã tạo</a>
+      <button type="button" id="playlistBulkDownloadQr" class="btn btn-outline-success" disabled
+         data-files-url="{{ url_for('download_selected_playlist_qrs') }}"
+         title="Tải tất cả QR của playlist đã chọn">Tải tất cả QR đã tạo</button>
     </div>
     <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">{{ 'Các playlist tìm được đang được chọn.' if playlist_search else 'Chưa chọn playlist nào.' }}</div>
   </form>
@@ -220,23 +173,6 @@
     </div>
   </form>
 
-  <form method="post" action="{{ url_for('bulk_create_selected_video_qrs') }}"
-        id="videoBulkQrForm" class="card card-body shadow-sm mb-3" hidden>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="course_id" value="" id="videoBulkQrCourse">
-    <input type="hidden" name="return_query" value="{{ library_return_query }}">
-    <input type="hidden" name="q" value="{{ search }}">
-    <input type="hidden" name="status" value="{{ status }}">
-    <input type="hidden" name="assignment" value="{{ assignment }}">
-    <input type="hidden" name="playlist_id" value="{{ playlist_filter_id or '' }}">
-    <div class="d-flex flex-wrap align-items-center gap-2">
-      <button class="btn btn-primary" type="submit">Tạo QR hàng loạt cho video đã chọn</button>
-      <span class="small text-muted" id="researchBulkCount">
-        Tích các video trong bảng; danh sách được giữ khi chuyển trang.
-      </span>
-    </div>
-  </form>
-
   <form method="post" action="{{ url_for('assign_videos_to_course') }}"
         id="assignVideoForm" data-user-id="{{ me.id }}" data-video-total="{{ video_total }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -260,7 +196,7 @@
                 {{ 'disabled' if not courses else '' }}>Tạo QR cho video đã gán môn</button>
         <button type="submit" class="btn btn-outline-success"
                 formaction="{{ url_for('download_selected_video_qrs') }}"
-                {{ 'disabled' if not courses else '' }}>Tải QR video đã tạo</button>
+                {{ 'disabled' if not courses else '' }}>Tải tất cả QR đã tạo</button>
         <span class="text-muted small" id="selectedVideoCount">Chưa chọn video nào.</span>
       </div>
     </div>
