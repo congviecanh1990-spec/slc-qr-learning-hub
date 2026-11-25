@@ -25,7 +25,9 @@ def test_selection_ui_and_scripts_are_consistent():
     assert "window.videoBulkSelection=api" in selection_js
     assert "video_selection.js" in template
     assert 'window.syncVideoBulkSelection?.();' in template
-    assert 'window.videoBulkSelection?.hasAny()' in js
+    assert 'window.videoBulkSelection?.selectedCount()' in js
+    assert 'download_style' in js
+    assert 'qr-download-complete' in js
     assert 'chosenVideos' not in js
     assert 'filtered_library_video_query' in py
     assert 'selected_filtered_library_video_ids(user, request.form)' in py
