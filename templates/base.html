@@ -104,7 +104,8 @@
   filesUrl: {{ url_for('research_auto_files')|tojson }},
   zipUrl: {{ url_for('research_auto_zip')|tojson }},
   completeUrl: {{ url_for('research_auto_complete')|tojson }},
-  progressUrl: {{ url_for('research_measurement_progress')|tojson }}
+  progressUrl: {{ url_for('research_measurement_progress')|tojson }},
+  savedUrl: {{ url_for('research_auto_download_saved')|tojson }}
 };</script>
 <script defer src="{{ url_for('static', filename='research_measurement.js') }}"></script>
 {% endif %}
