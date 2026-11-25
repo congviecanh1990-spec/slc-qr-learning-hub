@@ -116,6 +116,10 @@
     event.preventDefault();event.stopImmediatePropagation();
     const btn=event.submitter;
     const n=selectedNumber(form);
+    if(n<1 && (isPlaylistBulk(form)||isVideoBulk(form))){
+      announce('Chưa chọn video hoặc playlist; không khởi động lượt đo đối chứng.',true);
+      return;
+    }
     const kind=(n>=2 && (isPlaylistBulk(form)||isVideoBulk(form)))
       ?'QR_VIDEO_HANG_LOAT':'QR_TUNG_VIDEO_PLAYLIST';
     await begin(course,kind,n>=2?n:null);
