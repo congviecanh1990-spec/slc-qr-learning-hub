@@ -99,15 +99,10 @@ def test_analytics_system_has_5_rows_and_lecturers_excel(configured_app):
         soup = BeautifulSoup(response.data, "html.parser")
         section = soup.select_one("#hoat-dong-he-thong")
         assert section is not None
-        assert len(section.select("table tbody tr")) == 5 + 1  # nhật ký 5 + bảng giảng viên
-        assert "thong-ke-giang-vien" in response.get_data(as_text=True)
-        assert "export_xlsx=lecturers" in response.get_data(as_text=True)
-        exported = client.get("/analytics?export_xlsx=lecturers")
-        assert exported.status_code == 200
-        wb = load_workbook(io.BytesIO(exported.data), read_only=True)
-        assert "Thống kê khai thác theo giảng viên" in wb.active["A1"].value
-        assert wb.active.max_column == 11
-        wb.close()
+        assert len(section.select("table tbody tr")) == 5  # GV chỉ xem bảng hoạt động hệ thống.
+        assert "thong-ke-giang-vien" not in response.get_data(as_text=True)
+        assert "export_xlsx=lecturers" not in response.get_data(as_text=True)
+        assert client.get("/analytics?export_xlsx=lecturers").status_code == 403
 
 
 
