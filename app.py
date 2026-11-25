@@ -4267,6 +4267,7 @@ def register_routes(app):
                 FunctionalTestRun.source == "automatic",
                 FunctionalTestRun.participant_code.is_(None),
                 ~FunctionalTestRun.case_code.in_(["QR_SCAN", "QR_PLAYLIST_SCAN"]),
+                ~historical_oauth_denial_clause(FunctionalTestRun),
                 FunctionalTestRun.owner_id.isnot(None)
             )))
         if user.role != "admin":
@@ -4320,7 +4321,8 @@ def register_routes(app):
         test_page_numbers = list(range(max(1, test_page-2), min(test_pages, test_page+2)+1))
         test_feature_options = [row[0] for row in db.session.query(FunctionalTestRun.case_name)
                                 .filter(FunctionalTestRun.source == "automatic", FunctionalTestRun.participant_code.is_(None),
-                                        ~FunctionalTestRun.case_code.in_(["QR_SCAN", "QR_PLAYLIST_SCAN"]))
+                                        ~FunctionalTestRun.case_code.in_(["QR_SCAN", "QR_PLAYLIST_SCAN"]),
+                                        ~historical_oauth_denial_clause(FunctionalTestRun))
                                 .distinct().order_by(FunctionalTestRun.case_name).all()]
         test_rows = [{"test": t, "actor": (f"{t.owner.name or 'Giảng viên'} ({t.owner.email})" if t.owner else "Chưa xác định"),
                       "evidence": t.note or "—"} for t in tests]
