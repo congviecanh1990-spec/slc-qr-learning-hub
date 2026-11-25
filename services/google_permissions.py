@@ -6,17 +6,24 @@ Không coi hành động người dùng từ chối OAuth là kiểm thử chứ
 from __future__ import annotations
 
 YOUTUBE_READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+# Các quyền rộng hơn cũng cho phép đọc dữ liệu kênh YouTube; Google có thể
+# trả lại quyền đã được cấp trước đó khi include_granted_scopes=true.
+YOUTUBE_READ_CAPABLE_SCOPES = frozenset({
+    YOUTUBE_READ_SCOPE,
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+})
 USER_DENIAL_CODES = frozenset({"access_denied", "user_cancelled", "user_denied"})
 
 
 def scopes_set(value):
     if isinstance(value, (list, tuple, set)):
-        return {str(v).strip() for v in value if str(v).strip()}
+        return {part for item in value for part in str(item or "").split() if part}
     return set(str(value or "").split())
 
 
 def has_youtube_read_permission(granted_scopes):
-    return YOUTUBE_READ_SCOPE in scopes_set(granted_scopes)
+    return bool(YOUTUBE_READ_CAPABLE_SCOPES.intersection(scopes_set(granted_scopes)))
 
 
 def explicitly_denied_by_user(error=None, query_error=None):
