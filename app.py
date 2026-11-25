@@ -5368,6 +5368,146 @@ def register_routes(app):
         db.session.commit()
         return jsonify({"ok": True, "operations": pair.measurement_operations})
 
+    @app.post("/research/auto/download-saved")
+    @login_required
+    def research_auto_download_saved():
+        """Phân loại bằng NÚT TẢI thật, không dựa vào số checkbox đã chọn.
+
+        - Tải QR ở từng dòng: từng video/playlist, kể cả đã chọn hàng loạt.
+        - Tải tất cả QR với >=2 mã hợp lệ: hàng loạt.
+        - Ghi hoàn tất CHỈ khi trình duyệt lưu đủ PNG được xác minh, hoặc
+          người dùng xác nhận ZIP thủ công (giữ riêng, không tính KPI tự động).
+        """
+        user = current_user()
+        style = request.form.get("download_style", "")
+        method = request.form.get("save_method", "")
+        if style not in {"row", "bulk"} or method not in {
+            "directory_picker", "manual_confirmed", "not_verified"
+        }:
+            abort(400)
+        try:
+            posted = json.loads(request.form.get("qr_ids", "[]"))
+        except (ValueError, TypeError):
+            abort(400)
+        if not isinstance(posted, list) or len(posted) > 1000 or not posted or any(
+            not isinstance(v, int) or isinstance(v, bool) or v < 1 for v in posted
+        ) or len(set(posted)) != len(posted):
+            abort(400)
+        if style == "row" and len(posted) != 1:
+            abort(400)
+        if method == "manual_confirmed" and request.form.get("user_confirmed") != "yes":
+            abort(400)
+        is_bulk = style == "bulk" and len(posted) >= 2
+        task_kind = "QR_VIDEO_HANG_LOAT" if is_bulk else "QR_TUNG_VIDEO_PLAYLIST"
+        pair = active_research_measurement(user.id)
+        result = {"ok": True, "kind": task_kind, "measured": False}
+        if not pair:
+            return jsonify(result)
+
+        created = research_created_qr_ids(pair)
+        if not set(posted).issubset(set(created)):
+            return jsonify({**result, "message": "Mã tải không thuộc lượt QR mới được đo."})
+
+        qr_map = {q.id: q for q in QrCode.query.filter(
+            QrCode.id.in_(posted), QrCode.course_id == pair.course_id,
+            QrCode.active.is_(True)).all()}
+        if len(qr_map) != len(posted) or not all(
+            qr_managed_by_user(qr_map[qid], user) for qid in posted
+        ):
+            abort(403)
+
+        old_kind = normalize_kind(pair.task_kind)
+        if old_kind != task_kind:
+            # Giảng viên có thể tích 2+ playlist/video, tạo QR cùng lúc rồi
+            # lại bấm tải từng dòng. Khi đó phải dùng cặp đối chứng TỪNG QR,
+            # không được ghi nhầm cặp HÀNG LOẠT đã tự khởi động.
+            equivalent = ResearchComparisonPair.query.filter(
+                ResearchComparisonPair.lecturer_id == user.id,
+                ResearchComparisonPair.course_id == pair.course_id,
+                ResearchComparisonPair.active.is_(True),
+                ResearchComparisonPair.task_kind == task_kind,
+                ResearchComparisonPair.qr_count == pair.qr_count,
+                ResearchComparisonPair.video_count == pair.video_count,
+                ResearchComparisonPair.playlist_count == pair.playlist_count,
+                ResearchComparisonPair.measurement_started_at.is_(None),
+                ResearchComparisonPair.measurement_verified.is_(False),
+            ).order_by(ResearchComparisonPair.created_at, ResearchComparisonPair.id).first()
+            if not equivalent:
+                return jsonify({
+                    **result,
+                    "message": "Đã nhận diện thao tác tải đúng loại, nhưng chưa có cặp đối chứng phù hợp để chốt phép đo."
+                })
+            equivalent.measurement_started_at = pair.measurement_started_at
+            equivalent.measurement_qr_ids = pair.measurement_qr_ids
+            equivalent.measurement_operations = pair.measurement_operations
+            equivalent.measurement_single_videos = pair.measurement_single_videos
+            equivalent.measurement_single_playlists = pair.measurement_single_playlists
+            equivalent.measurement_bulk_videos = pair.measurement_bulk_videos
+            equivalent.measurement_downloaded_qr_ids = pair.measurement_saved_qr_ids or "[]"
+            # Reset hoàn toàn cặp ban đầu: được sử dụng cho lần đo khác.
+            pair.measurement_started_at = None
+            pair.measurement_qr_ids = "[]"
+            pair.measurement_saved_qr_ids = "[]"
+            pair.measurement_download_style = None
+            pair.measurement_operations = 0
+            pair.measurement_single_videos = 0
+            pair.measurement_single_playlists = 0
+            pair.measurement_bulk_videos = 0
+            pair = equivalent
+            session["research_measurement_id"] = pair.id
+
+        if pair.measurement_download_style and pair.measurement_download_style != style:
+            return jsonify({
+                **result, "message": "Không trộn tải từng dòng và tải tất cả trong cùng một lượt đo."
+            })
+        pair.measurement_download_style = style
+        if method == "not_verified":
+            db.session.commit()
+            return jsonify({
+                **result, "message": "Đã phân loại lượt tải; chờ xác minh tệp được lưu."
+            })
+        if not research_measurement_complete_qrs(pair):
+            db.session.commit()
+            return jsonify({
+                **result, "message": "Chưa tạo đủ QR mới theo khối lượng đối chứng."
+            })
+        saved = research_saved_qr_ids(pair)
+        for qr_id in posted:
+            if qr_id not in saved:
+                saved.append(qr_id)
+        pair.measurement_saved_qr_ids = json.dumps(saved)
+        if method == "manual_confirmed":
+            pair.measurement_save_method = "manual_confirmed"
+        reported_ops = request.form.get("operations_count", type=int)
+        if reported_ops is not None and 0 < reported_ops <= 100000:
+            pair.measurement_operations = max(pair.measurement_operations or 0, reported_ops)
+        pair.updated_at = utcnow()
+        complete = set(saved) == set(created)
+        result.update({"measured": True, "saved": len(saved), "expected": len(created),
+                       "completed": complete})
+        if complete:
+            ended = utcnow()
+            started = pair.measurement_started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            duration = (ended - started).total_seconds()
+            if duration <= 0 or duration > 864000:
+                db.session.rollback()
+                return jsonify({**result, "completed": False,
+                    "message": "Thời gian đo ngoài giới hạn, cần quản trị viên kiểm tra."}), 409
+            pair.webapp_seconds = round(duration, 2)
+            pair.webapp_operations = max(1, pair.measurement_operations or 1)
+            pair.measurement_finished_at = ended
+            pair.measurement_saved_at = ended
+            pair.measurement_save_method = pair.measurement_save_method or method
+            pair.measurement_verified = pair.measurement_save_method == "directory_picker"
+            result.update({"seconds": pair.webapp_seconds, "operations": pair.webapp_operations,
+                           "verified": pair.measurement_verified})
+            session.pop("research_measurement_id", None)
+            session.pop("research_measurement_nonce", None)
+        db.session.commit()
+        return jsonify(result)
+
     @app.get("/research/auto/files")
     @login_required
     def research_auto_files():
