@@ -68,7 +68,7 @@
                 <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
               </form>
               <div class="playlist-qr-compact-actions d-flex align-items-center flex-wrap gap-1 mt-1" hidden>
-                <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#" aria-label="Tải mã QR playlist">Tải QR</a>
+                <a class="btn btn-outline-secondary btn-sm playlist-qr-download qr-save-picker" hidden href="#" aria-label="Tải mã QR playlist">Tải QR</a>
                 <button type="button" class="btn btn-outline-warning btn-sm playlist-qr-retarget-toggle" hidden aria-expanded="false">Đổi đích</button>
                 <form method="post" action="#" class="playlist-qr-delete-form library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Ngừng sử dụng mã QR playlist này? Mã đã in sẽ không hoạt động nhưng lịch sử được giữ lại.');" hidden>
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
