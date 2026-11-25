@@ -9,7 +9,7 @@ import math
 
 RESEARCH_PAIR_KINDS = (
     ("QR_TUNG_VIDEO_PLAYLIST", "Tạo mã QR cho từng video hoặc từng playlist"),
-    ("QR_VIDEO_HANG_LOAT", "Tạo mã QR hàng loạt cho video"),
+    ("QR_VIDEO_HANG_LOAT", "Tạo mã QR hàng loạt cho video hoặc playlist"),
 )
 RESEARCH_PAIR_KIND_NAMES = dict(RESEARCH_PAIR_KINDS)
 LEGACY_KIND_MAPPING = {
@@ -56,8 +56,10 @@ def validate_pair_form(form):
     manual_seconds = _positive_seconds(form.get("manual_seconds"), "Thời gian thủ công")
 
     if kind == "QR_VIDEO_HANG_LOAT":
-        if not video_count or playlist_count or playlist_video_count:
-            raise ValueError("QR video hàng loạt chỉ gồm video lẻ; không được có playlist.")
+        # Hàng loạt khi giảng viên tải tất cả >=2 mã QR video hoặc playlist
+        # đã chọn. Không suy luận chỉ từ thao tác tích chọn.
+        if video_count + playlist_count < 2:
+            raise ValueError("Đo hàng loạt phải có ít nhất 2 video hoặc playlist.")
     elif video_count + playlist_count < 1:
         raise ValueError("Phải có video hoặc playlist để tạo mã QR.")
     if playlist_count == 0 and playlist_video_count != 0:
