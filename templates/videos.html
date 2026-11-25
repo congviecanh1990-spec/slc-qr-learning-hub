@@ -462,11 +462,8 @@ function restoreBulkCourse(){
   } catch (_) {}
 }
 function updateBulkQrDownload(){
-  const option=bulkCourseSelector?.selectedOptions[0];
-  const url=Number(option?.dataset.qrCount || 0)>0 ? option?.dataset.qrDownload : null;
-  if(!bulkDownload)return;
-  if(url){bulkDownload.href=url;bulkDownload.dataset.filename=option.dataset.qrFilename || 'Ma_QR_hoc_lieu.zip';bulkDownload.classList.remove('disabled');bulkDownload.removeAttribute('aria-disabled');}
-  else{bulkDownload.href='#';bulkDownload.classList.add('disabled');bulkDownload.setAttribute('aria-disabled','true');}
+  // Nút chỉ được bật khi có môn đã chọn; server kiểm tra lại QR đã có.
+  if(bulkDownload)bulkDownload.disabled=!bulkCourseSelector?.value;
 }
 // One-use URL marker after bulk POST. Remove before the next refresh/navigation.
 restoreBulkCourse();
@@ -489,15 +486,8 @@ function resetBulkCourseAfterDownload(){
   }
   updateBulkQrDownload();
 }
-// Native downloads have no reliable browser 'completed' event. Reset once
-// initiated; when the Save File Picker is available, reset only on success.
-bulkDownload?.addEventListener('click', event => {
-  if (bulkDownload.classList.contains('disabled')) return;
-  if (!(window.showSaveFilePicker && window.isSecureContext)) {
-    window.setTimeout(resetBulkCourseAfterDownload, 0);
-  }
-});
-bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownload);
+// Sau khi tải PNG thành công, mới xóa lựa chọn môn học.
+bulkDownload?.addEventListener('qr-download-complete',resetBulkCourseAfterDownload);
 
 </script>
 <script>
@@ -593,23 +583,20 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
     overrides=new Set();
     write();refresh();
   });
-  form.addEventListener('submit',()=>{
-    form.querySelectorAll('[data-playlist-selection]').forEach(el=>el.remove());
-    const modeInput=document.createElement('input');
-    modeInput.type='hidden';
-    modeInput.name='playlist_selection_mode';
-    modeInput.value=mode;
-    modeInput.dataset.playlistSelection='1';
-    form.append(modeInput);
-    for(const id of overrides){
-      const hidden=document.createElement('input');
-      hidden.type='hidden';
-      hidden.name=(mode==='all')?'excluded_playlist_ids':'selected_playlist_ids';
-      hidden.value=String(id);
-      hidden.dataset.playlistSelection='1';
-      form.append(hidden);
+  form.addEventListener('submit',()=>window.playlistBulkSelection.appendSelection(form));
+  window.playlistBulkSelection={
+    selectedCount:()=>mode==='all'?
+      Math.max(0,Number(form.dataset.playlistTotal||0)-overrides.size):overrides.size,
+    appendSelection:(target)=>{
+      target.querySelectorAll('[data-playlist-selection]').forEach(el=>el.remove());
+      const hidden=(name,value)=>{
+        const el=document.createElement('input');el.type='hidden';el.name=name;
+        el.value=String(value);el.dataset.playlistSelection='1';target.append(el);
+      };
+      hidden('playlist_selection_mode',mode);
+      for(const id of overrides)hidden(mode==='all'?'excluded_playlist_ids':'selected_playlist_ids',id);
     }
-  });
+  };
   window.syncPlaylistBulkSelection=refresh;
   refresh();
 })();
