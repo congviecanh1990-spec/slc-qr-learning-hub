@@ -240,3 +240,27 @@ def test_profile_setup_not_redirecting_to_itself(configured_app):
         assert allowed.status_code == 200
         assert allowed.request.path == "/profile/setup"
         assert len(allowed.history) == 0
+
+
+def test_error_log_archival_once_preserves_legacy_evidence_and_new_errors(configured_app):
+    import json
+    from sqlalchemy import text
+    from models import db, ErrorLog
+    from services.one_time_maintenance import archive_pre_experiment_error_logs_once
+    app, ids, _ = configured_app
+    with app.app_context():
+        db.session.add_all([
+            ErrorLog(module="youtube", message="Lỗi cũ 1", actor_user_id=ids["teacher"]),
+            ErrorLog(module="oauth", message="Lỗi cũ 2", actor_user_id=ids["teacher"]),
+        ])
+        db.session.commit()
+        result = archive_pre_experiment_error_logs_once(db.engine)
+        assert result["archived"] == 2
+        assert ErrorLog.query.count() == 0
+        archived = db.session.execute(text(
+            "SELECT payload_json FROM pre_experiment_error_log_archive")).scalars().all()
+        assert sorted(json.loads(x)["message"] for x in archived) == ["Lỗi cũ 1", "Lỗi cũ 2"]
+        db.session.add(ErrorLog(module="system", message="Lỗi thực nghiệm mới"))
+        db.session.commit()
+        assert archive_pre_experiment_error_logs_once(db.engine)["status"] == "already_processed"
+        assert ErrorLog.query.count() == 1
