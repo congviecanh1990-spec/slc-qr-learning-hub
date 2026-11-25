@@ -218,3 +218,25 @@ def test_historical_sync_permission_excluded_only_with_clear_evidence(configured
         assert len(excluded) == 1
         assert "phần lỗi: 1" in excluded[0].note
         assert FunctionalTestRun.query.count() == 3  # Lịch sử gốc vẫn còn.
+
+
+def test_profile_setup_not_redirecting_to_itself(configured_app):
+    from models import db, User
+    app, ids, _ = configured_app
+    with app.app_context():
+        user = db.session.get(User, ids["teacher"])
+        user.google_sub = "test-sub"
+        user.profile_completed = False
+        db.session.commit()
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user_id"] = ids["teacher"]
+        blocked = client.get("/profile/setup", follow_redirects=True)
+        assert blocked.status_code == 200
+        assert blocked.request.path == "/auth/youtube-permission"
+        with client.session_transaction() as sess:
+            sess["youtube_permission_verified_sub"] = "test-sub"
+        allowed = client.get("/profile/setup", follow_redirects=True)
+        assert allowed.status_code == 200
+        assert allowed.request.path == "/profile/setup"
+        assert len(allowed.history) == 0
