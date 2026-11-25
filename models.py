@@ -524,6 +524,8 @@ class ResearchComparisonPair(db.Model):
     measurement_bulk_videos = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     measurement_verified = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     measurement_qr_ids = db.Column(db.Text, nullable=False, default="[]", server_default="[]")
+    measurement_saved_qr_ids = db.Column(db.Text, nullable=False, default="[]", server_default="[]")
+    measurement_download_style = db.Column(db.String(20), nullable=True)
     measurement_save_method = db.Column(db.String(32), nullable=True)
     measurement_saved_at = db.Column(db.DateTime(timezone=True), nullable=True)
     note = db.Column(db.Text, nullable=True)
