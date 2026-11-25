@@ -21,6 +21,8 @@ def test_exactly_two_kinds_and_count_per_video():
     assert mixed["qr_count"]==8 and mixed["playlist_video_count"]==50
     assert mixed["video_count"]+mixed["playlist_video_count"]==53
     assert validate_pair_form(BULK)["qr_count"]==15
+    playlist_bulk=validate_pair_form(dict(BULK,video_count="0",playlist_count="3",playlist_video_count="18"))
+    assert playlist_bulk["qr_count"] == 3 and playlist_bulk["playlist_video_count"] == 18
     assert "pair_code" not in mixed and "webapp_seconds" not in mixed
     for bad in (dict(MIXED,playlist_video_count="4"),
                 dict(MIXED,video_count="0",playlist_count="0",playlist_video_count="0"),
@@ -87,9 +89,12 @@ def test_code_jinja_and_admin_only_data_form():
     assert 'colspan="2" scope="colgroup">Tổng thời gian (giây)</th>' in research
     assert 'Quản lý bản ghi đối chứng cần điều chỉnh' not in research
     assert "manual_seconds" not in library and "manual_operations" not in library
-    assert 'id="thuc-nghiem-qr"' in library
-    assert 'id="researchQrSaveDirectory"' in library
-    assert 'id="videoBulkQrForm"' in library
+    assert 'id="thuc-nghiem-qr"' not in library
+    assert 'name="qrWorkMode"' not in library
+    assert 'id="researchQrSaveDirectory"' not in library
+    assert 'id="videoBulkQrForm"' not in library
+    assert 'id="playlistBulkDownloadQr"' in library
+    assert 'data-files-url=' in library
     assert 'research_auto_start' in app and 'research_auto_complete' in app
     assert 'record_research_qr_creation(course.id, user.id, "video", qr.id)' in app
     assert 'record_research_qr_creation(course.id, user.id, "playlist", qr.id)' in app
