@@ -511,9 +511,9 @@ class ResearchComparisonPair(db.Model):
     playlist_video_count = db.Column(db.Integer, nullable=False, default=0)
     qr_count = db.Column(db.Integer, nullable=False)
     auto_discovered = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
-    # Kết quả thủ công có thể được bổ sung sau khi Web App đã đo xong.
-    manual_operations = db.Column(db.Integer, nullable=True)
-    manual_seconds = db.Column(db.Float, nullable=True)
+    # Giá trị 0 biểu thị chưa nhập thủ công, giữ tương thích ràng buộc NOT NULL cũ.
+    manual_operations = db.Column(db.Integer, nullable=False, default=0)
+    manual_seconds = db.Column(db.Float, nullable=False, default=0.0)
     # Để NULL cho đến khi cùng GV hoàn thành phép đo Web App trên cùng bộ học liệu.
     webapp_operations = db.Column(db.Integer, nullable=True)
     webapp_seconds = db.Column(db.Float, nullable=True)
