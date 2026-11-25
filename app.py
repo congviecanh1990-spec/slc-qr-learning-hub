@@ -1049,6 +1049,7 @@ def ensure_research_comparison_schema():
         "measurement_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_saved_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_download_style": "VARCHAR(20)",
+        "auto_discovered": "BOOLEAN NOT NULL DEFAULT FALSE",
         "measurement_save_method": "VARCHAR(32)",
         "measurement_saved_at": "TIMESTAMP WITH TIME ZONE",
     }
@@ -1107,10 +1108,20 @@ def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
     if not pair or pair.course_id != course_id or not qr_id:
         return
     known = research_created_qr_ids(pair)
-    if qr_id in known or len(known) >= pair.qr_count:
+    if qr_id in known or (not pair.auto_discovered and len(known) >= pair.qr_count):
         return
     known.append(qr_id)
     pair.measurement_qr_ids = json.dumps(known)
+    if pair.auto_discovered:
+        # Khối lượng được đo từ chính các QR mới tạo, không suy đoán
+        # từ tập checkbox (có thể có QR đã tồn tại hoặc mã lỗi).
+        pair.qr_count = len(known)
+        if kind == "playlist":
+            pair.playlist_count += 1
+            pair.playlist_video_count += db.session.query(PlaylistVideo).filter_by(
+                playlist_id=(db.session.get(QrCode, qr_id).playlist_id)).count()
+        elif kind == "video":
+            pair.video_count += 1
     if kind == "playlist":
         pair.measurement_single_playlists += 1
     elif kind == "video":
@@ -5388,7 +5399,9 @@ def register_routes(app):
             abort(403)
         active_pair = active_research_measurement(user.id)
         if active_pair:
-            if active_pair.course_id != course_id or normalize_kind(active_pair.task_kind) != kind:
+            if active_pair.course_id != course_id or (
+                not active_pair.auto_discovered and normalize_kind(active_pair.task_kind) != kind
+            ):
                 return jsonify({"active": False,
                                 "message": "Có lượt đo khác đang thực hiện. Hãy lưu đủ QR của lượt đó trước."}), 409
             return jsonify(research_auto_status_payload(active_pair))
@@ -5399,7 +5412,9 @@ def register_routes(app):
             ResearchComparisonPair.measurement_finished_at.is_(None)
         ).order_by(ResearchComparisonPair.created_at).first()
         if ongoing:
-            if ongoing.course_id != course_id or normalize_kind(ongoing.task_kind) != kind:
+            if ongoing.course_id != course_id or (
+                not ongoing.auto_discovered and normalize_kind(ongoing.task_kind) != kind
+            ):
                 return jsonify({"active": False,
                                 "message": "Đang có lượt đo khác chưa kết thúc. Liên hệ quản trị viên."}), 409
             # Tiếp tục đo đã khởi động nếu trình duyệt bị đóng/trở lại phiên đăng nhập.
@@ -5426,8 +5441,21 @@ def register_routes(app):
                 pair = scope.order_by(
                     ResearchComparisonPair.created_at, ResearchComparisonPair.id).first()
             if not pair:
-                return jsonify({"active": False,
-                    "message": "Chưa có lượt đối chứng phù hợp môn học và khối lượng. Bạn vẫn có thể tạo QR bình thường."})
+                # Giảng viên KHÔNG cần chờ quản trị viên nhập số liệu thủ công.
+                # Tạo một bản đo Web App riêng, khối lượng QR được xác định
+                # khi sinh mã mới, loại thao tác xác định khi tải tệp.
+                pair = ResearchComparisonPair(
+                    pair_code="TN" + secrets.token_hex(8).upper(),
+                    lecturer_id=user.id, course_id=course.id,
+                    lecturer_name_snapshot=(user.name or user.email or "")[:255],
+                    course_name_snapshot=(course.name or "")[:255],
+                    task_kind=kind, video_count=0, playlist_count=0,
+                    playlist_video_count=0, qr_count=0,
+                    manual_operations=0, manual_seconds=0.0,
+                    auto_discovered=True,
+                )
+                db.session.add(pair)
+                db.session.flush()
             pair.measurement_started_at = utcnow()
             pair.measurement_finished_at = None
             pair.measurement_saved_at = None
@@ -5515,6 +5543,11 @@ def register_routes(app):
                 **result, "message": "Đã bắt đầu tải theo cách khác; không trộn hai loại nhiệm vụ trong cùng lượt đo."
             })
         old_kind = normalize_kind(pair.task_kind)
+        if pair.auto_discovered:
+            # Việc tải QR mới là tiêu chí phân loại chính thức.
+            # Nhóm hàng loạt đòi hỏi ít nhất 2 QR mới được ghi nhận.
+            pair.task_kind = task_kind
+            old_kind = task_kind
         if old_kind != task_kind:
             # Giảng viên có thể tích 2+ playlist/video, tạo QR cùng lúc rồi
             # lại bấm tải từng dòng. Khi đó phải dùng cặp đối chứng TỪNG QR,
