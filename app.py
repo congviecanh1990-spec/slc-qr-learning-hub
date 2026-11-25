@@ -50,7 +50,7 @@ from services.google_permissions import (
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
 from services.websub import subscribe_channel, verify_callback, parse_notification
-from services.one_time_maintenance import cleanup_initial_three_error_logs_once
+from services.one_time_maintenance import cleanup_initial_three_error_logs_once, archive_pre_experiment_error_logs_once
 
 csrf = CSRFProtect()
 oauth = OAuth()
@@ -852,6 +852,12 @@ def create_app():
                 step = "cleanup_initial_three_error_logs_once"
                 print("[SLC STARTUP] one-time cleanup marker check", flush=True)
                 cleanup_initial_three_error_logs_once(db.engine)
+                # Chỉ dọn nhật ký lỗi tiền thực nghiệm trên bản CHÍNH.
+                # Sao lưu bản gốc trong bảng lưu trữ, không can thiệp dữ liệu TEST.
+                if app.config.get("BASE_URL", "").rstrip("/") == "https://slc-qr-learning-hub.onrender.com":
+                    step = "archive_pre_experiment_error_logs_once"
+                    archived = archive_pre_experiment_error_logs_once(db.engine)
+                    print(f"[SLC STARTUP] legacy error archive: status={archived['status']}, count={archived.get('archived', 0)}", flush=True)
             except Exception as exc:
                 # Không in kết nối DB, token hoặc dữ liệu giảng viên vào log.
                 print(f"[SLC STARTUP] FAILED step={step} type={type(exc).__name__}", flush=True)
