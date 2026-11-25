@@ -3225,7 +3225,12 @@ def register_routes(app):
             if not video_is_usable(video) or not video_accessible_to_lecturer(video, user):
                 skipped += 1
                 continue
-            link, _ = ensure_course_video_link(course, video, user, manual=True)
+            # Chỉ tạo QR cho video ĐÃ gán vào đúng môn học đang chọn.
+            # Không ngầm gán môn khi nhấn Tạo QR.
+            link = CourseVideo.query.filter_by(course_id=course.id, video_id=video.id).first()
+            if link is None:
+                skipped += 1
+                continue
             _, was_created = create_qr_for_course_video(course, video, user, link)
             if was_created:
                 created += 1
@@ -3239,6 +3244,62 @@ def register_routes(app):
         flash(f"Đã tạo {created} mã QR video mới; {existing} đã có mã; {skipped} chưa đủ điều kiện.",
               "success" if created else "warning")
         return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+
+    @app.post("/videos/qr/download-selected")
+    @login_required
+    def download_selected_video_qrs():
+        """ZIP QR chỉ cho video được chọn, đã gán vào môn và đã có QR hợp lệ.
+
+        Dùng cùng lựa chọn xuyên trang với Gán môn và Tạo QR.
+        Không tự tạo QR và không lấy QR của người dùng khác.
+        """
+        user = current_user()
+        course_id = request.form.get("course_id", type=int)
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        video_ids = selected_filtered_library_video_ids(user, request.form, max_selected=1000)
+        if not video_ids:
+            flash("Vui lòng chọn video có QR để tải.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+        links = CourseVideo.query.filter(
+            CourseVideo.course_id == course.id,
+            CourseVideo.video_id.in_(video_ids)).all()
+        qrs = []
+        used_qr_ids = set()
+        for link in links:
+            qr = (db.session.get(QrCode, link.qr_id) if link.qr_id
+                  else active_qr_for_course_video(course.id, link.video_id, user.id))
+            if not qr or not qr.active or not qr_managed_by_user(qr, user) or qr.id in used_qr_ids:
+                continue
+            # Tránh tải QR playlist hoặc QR đã đổi video đích vào danh sách video.
+            if qr.is_playlist:
+                continue
+            target = qr.current_target
+            if not target or target.video_id != link.video_id:
+                continue
+            used_qr_ids.add(qr.id)
+            qrs.append(qr)
+        if not qrs:
+            flash("Các video đã chọn chưa có mã QR hợp lệ trong môn học/mô đun này.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+        bio = io.BytesIO()
+        used_names = set()
+        with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
+            for qr in qrs:
+                img = generate_branded_qr(qr)
+                png = io.BytesIO()
+                img.save(png, format="PNG")
+                name = qr_download_name(qr)
+                if name in used_names:
+                    stem, ext = os.path.splitext(name)
+                    name = f"{stem}_{qr.slug}{ext}"
+                used_names.add(name)
+                zf.writestr(name, png.getvalue())
+        bio.seek(0)
+        return send_file(
+            bio, mimetype="application/zip", as_attachment=True,
+            download_name=f"Ma_QR_video_da_chon_{safe_filename(course.code)}.zip")
 
     @app.post("/courses/<int:course_id>/qr/bulk")
     @login_required
@@ -4419,7 +4480,9 @@ def register_routes(app):
         # Thống kê GV luôn dựa trên phân công hiện hành, không lấy 5 dòng nhật ký.
         # Chỉ truy vấn khi render phần thống kê hoặc xuất riêng danh sách GV.
         lecturer_rows = (lecturer_usage_rows(user, current_app.config["COMPLETION_THRESHOLD"], utcnow().date())
-                         if export_section in {"", "lecturers"} else [])
+                         if user.role == "admin" and export_section in {"", "lecturers"} else [])
+        if export_section == "lecturers" and user.role != "admin":
+            abort(403)
         if export_section:
             # Tạo Excel tại máy chủ, tuyệt đối không phụ thuộc 10 dòng đang hiển thị.
             # Mọi truy vấn ở trên đều đã áp dụng bộ lọc và giới hạn quyền người dùng.
