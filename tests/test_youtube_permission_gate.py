@@ -165,7 +165,7 @@ def test_sync_permission_failure_is_not_failed_functional_test(configured_app, m
     sync_state = {"status": "done", "failures": 1, "failure_codes": ["permission"],
                   "failure_reasons": ["YouTube chưa cho phép truy cập dữ liệu kênh."],
                   "videos_found": 0}
-    monkeypatch.setattr(web, "step_incremental_sync", lambda user: sync_state)
+    monkeypatch.setattr(web, "step_incremental_sync", lambda user: dict(sync_state))
     with app.test_client() as client:
         with client.session_transaction() as sess: sess["user_id"] = keys["teacher"]
         denied = client.post("/youtube/sync/step")
