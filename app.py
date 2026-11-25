@@ -1927,7 +1927,10 @@ def register_routes(app):
         # Giữ tương thích tài khoản kiểm thử cục bộ chưa có google_sub.
         if user and user.google_sub and session.get("youtube_permission_verified_sub") != user.google_sub:
             return redirect(url_for("youtube_permission_needed"))
-        if user and not user.profile_completed:
+        # Trang khai báo hồ sơ phải truy cập được SAU KHI xác minh quyền
+        # YouTube. Chỉ chặn những trang nghiệp vụ khác: tránh /profile/setup
+        # tự chuyển hướng về chính nó vô hạn (ERR_TOO_MANY_REDIRECTS).
+        if user and not user.profile_completed and request.endpoint != "profile_setup":
             return redirect(url_for("profile_setup"))
         return None
 
