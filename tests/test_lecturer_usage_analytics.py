@@ -220,7 +220,7 @@ def test_lecturer_delete_two_step_confirmation_and_keep_classes(configured_app):
         page = client.get("/admin/lecturers")
         assert page.status_code == 200
         html = page.get_data(as_text=True)
-        assert "Không – Giữ danh sách lớp" in html and "Có – Xóa lớp không dùng chung" in html
+        assert '>Không</button>' in html and '>Có</button>' in html
         assert 'name="confirm_email"' not in html and "prompt(" not in html
         route = f"/admin/lecturers/{uid}/delete"
         assert client.post(route, data={}).status_code == 302
