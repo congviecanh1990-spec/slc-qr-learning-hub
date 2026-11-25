@@ -26,7 +26,7 @@ def test_exactly_two_kinds_and_count_per_video():
     assert "pair_code" not in mixed and "webapp_seconds" not in mixed
     for bad in (dict(MIXED,playlist_video_count="4"),
                 dict(MIXED,video_count="0",playlist_count="0",playlist_video_count="0"),
-                dict(BULK,playlist_count="5",playlist_video_count="50"),
+                dict(BULK,video_count="1",playlist_count="0",playlist_video_count="0"),
                 dict(VIDEO,task_kind="QR_PLAYLIST"),
                 dict(VIDEO,manual_seconds="nan")):
         with pytest.raises(ValueError):validate_pair_form(bad)
