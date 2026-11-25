@@ -3279,6 +3279,79 @@ def register_routes(app):
         )
         return redirect(url_for("courses_page"))
 
+    @app.post("/playlists/qr/download-selected")
+    @login_required
+    def download_selected_playlist_qrs():
+        """Chỉ trả QR của playlist được CHỌN (xuyên trang) và đã gán đúng môn."""
+        user = current_user()
+        course_id = request.form.get("course_id", type=int)
+        course = db.session.get(Course, course_id) if course_id else None
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        selection_mode = request.form.get("playlist_selection_mode", "none")
+        if selection_mode not in {"all", "none"}:
+            abort(400)
+        key = ("excluded_playlist_ids" if selection_mode == "all"
+               else "selected_playlist_ids")
+        raw_ids = request.form.getlist(key)
+        if len(raw_ids) > 2000 or any(
+            not str(x).isascii() or not str(x).isdigit() or int(x) < 1
+            for x in raw_ids
+        ):
+            abort(400)
+        overrides = {int(x) for x in raw_ids}
+        keyword = (request.form.get("p_q") or "").strip()[:150]
+        assignment = (request.form.get("p_assignment") or "").strip()
+        if assignment not in {"", "assigned", "unassigned"}:
+            abort(400)
+        filtered_ids = {p.id for p in filtered_library_playlist_query(
+            user, keyword, assignment).all()}
+        candidate_ids = (
+            filtered_ids - overrides if selection_mode == "all"
+            else filtered_ids & overrides
+        )
+        if not candidate_ids:
+            return jsonify({"ok": False, "message": "Chưa tích chọn playlist hợp lệ."}), 409
+        links = CoursePlaylist.query.filter(
+            CoursePlaylist.course_id == course.id,
+            CoursePlaylist.playlist_id.in_(candidate_ids),
+            CoursePlaylist.active.is_(True)).all()
+        qrs = []
+        used = set()
+        for link in links:
+            qr = link.qr
+            if not qr or not qr.active or not qr.is_playlist or qr.id in used:
+                continue
+            if not qr_managed_by_user(qr, user):
+                continue
+            target = qr.current_target
+            if not target or target.playlist_id != link.playlist_id:
+                continue
+            used.add(qr.id)
+            qrs.append(qr)
+        if not qrs:
+            return jsonify({"ok": False,
+                "message": "Những playlist được chọn chưa có mã QR hợp lệ trong môn học."}), 409
+        if request.headers.get("Accept") == "application/json":
+            return jsonify({"ok": True, "course_id": course.id,
+                            "files": [{"id": q.id, "name": qr_download_name(q),
+                                       "url": url_for("qr_png", qr_id=q.id)} for q in qrs]})
+        bio = io.BytesIO()
+        names = set()
+        with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as archive:
+            for qr in qrs:
+                image = io.BytesIO()
+                generate_branded_qr(qr).save(image, format="PNG")
+                name = qr_download_name(qr)
+                if name in names:
+                    root, ext = os.path.splitext(name)
+                    name = f"{root}_{qr.slug}{ext}"
+                names.add(name)
+                archive.writestr(name, image.getvalue())
+        bio.seek(0)
+        return send_file(bio, mimetype="application/zip", as_attachment=True,
+                         download_name=f"Ma_QR_playlist_{safe_filename(course.code)}.zip")
+
     @app.post("/videos/qr/bulk-selected")
     @login_required
     def bulk_create_selected_video_qrs():
@@ -3361,8 +3434,14 @@ def register_routes(app):
             used_qr_ids.add(qr.id)
             qrs.append(qr)
         if not qrs:
+            if request.headers.get("Accept") == "application/json":
+                return jsonify({"ok": False, "message": "Video được chọn chưa có QR hợp lệ."}), 409
             flash("Các video đã chọn chưa có mã QR hợp lệ trong môn học/mô đun này.", "warning")
             return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+        if request.headers.get("Accept") == "application/json":
+            return jsonify({"ok": True, "course_id": course.id,
+                            "files": [{"id": q.id, "name": qr_download_name(q),
+                                       "url": url_for("qr_png", qr_id=q.id)} for q in qrs]})
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -5443,7 +5522,7 @@ def register_routes(app):
             equivalent.measurement_single_videos = pair.measurement_single_videos
             equivalent.measurement_single_playlists = pair.measurement_single_playlists
             equivalent.measurement_bulk_videos = pair.measurement_bulk_videos
-            equivalent.measurement_downloaded_qr_ids = pair.measurement_saved_qr_ids or "[]"
+            equivalent.measurement_saved_qr_ids = pair.measurement_saved_qr_ids or "[]"
             # Reset hoàn toàn cặp ban đầu: được sử dụng cho lần đo khác.
             pair.measurement_started_at = None
             pair.measurement_qr_ids = "[]"
