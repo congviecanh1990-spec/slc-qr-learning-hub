@@ -43,6 +43,9 @@ from research_comparison import (
     normalize_kind, pair_metrics, video_coverage,
 )
 from services.error_reporting import login_failure_reason, safe_error_diagnostic
+from services.google_permissions import (
+    has_youtube_read_permission, explicitly_denied_by_user, historical_oauth_denial_clause,
+)
 from services.youtube import (sync_my_channel, sync_video_ids, reconcile_user, sync_all_connected_channels,
     build_sync_summary, _friendly_sync_error, start_incremental_sync, incremental_sync_state, step_incremental_sync)
 from services.websub import subscribe_channel, verify_callback, parse_notification
@@ -1913,11 +1916,16 @@ def register_routes(app):
         """Yêu cầu kê khai thông tin một lần trước khi sử dụng chức năng nghiệp vụ."""
         if not session.get("user_id"):
             return None
-        if (request.endpoint in {"static", "login", "auth_callback", "logout", "profile_setup",
-                                 "sync_wait", "sync_run", "connect_youtube_callback", "privacy_policy", "health"}
+        if (request.endpoint in {"static", "login", "auth_callback", "logout", "youtube_permission_needed",
+                                 "privacy_policy", "health"}
                 or (request.endpoint or "").startswith("websub_")):
             return None
         user = current_user()
+        # Mọi phiên Google thực tế (có sub) chỉ được mở Web App sau khi OAuth
+        # callback xác minh YouTube scope của CHÍNH lần cấp quyền đó.
+        # Giữ tương thích tài khoản kiểm thử cục bộ chưa có google_sub.
+        if user and user.google_sub and session.get("youtube_permission_verified_sub") != user.google_sub:
+            return redirect(url_for("youtube_permission_needed"))
         if user and not user.profile_completed:
             return redirect(url_for("profile_setup"))
         return None
@@ -1979,12 +1987,18 @@ def register_routes(app):
             class_count=class_count, whole_system=whole_system,
         )
 
+    @app.get("/auth/youtube-permission")
+    def youtube_permission_needed():
+        """Hướng dẫn quay lại Google cấp quyền, không tạo vòng lặp tự động."""
+        return render_template("youtube_permission_needed.html")
+
     @app.get("/auth/login")
     def login():
         if not current_app.config["GOOGLE_CLIENT_ID"]:
             flash("Chưa cấu hình GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET.", "danger")
             return redirect(url_for("index"))
         redirect_uri = f"{base_url()}/auth/callback"
+        session.pop("youtube_permission_verified_sub", None)
         session["oauth_retry_attempt"] = 1 if request.args.get("retry") == "1" else 0
         session["after_login"] = safe_next(request.args.get("next")) or url_for("index")
         return oauth.google.authorize_redirect(
@@ -1999,6 +2013,14 @@ def register_routes(app):
         # Chỉ gán email sau khi đã nhận userinfo từ Google qua token xác thực.
         # Trước bước này, không thể xác định một cách đáng tin cậy ai đăng nhập lỗi.
         verified_google_email = None
+        # Quyền được xác minh lại ở callback; không thừa nhận phiên cũ.
+        session.pop("youtube_permission_verified_sub", None)
+        if request.args.get("error") == "access_denied":
+            # GV chưa cấp quyền: trạng thái chưa hoàn tất xác thực, KHÔNG phải
+            # lỗi tính năng hoặc lỗi máy chủ, nên không ghi FunctionalTestRun.
+            session.pop("user_id", None)
+            flash("Bạn chưa đồng ý cấp quyền truy cập YouTube. Hãy đăng nhập lại và chọn đầy đủ quyền để tiếp tục.", "warning")
+            return redirect(url_for("youtube_permission_needed"))
         try:
             token = oauth.google.authorize_access_token()
             access_token = token.get("access_token")
@@ -2015,6 +2037,24 @@ def register_routes(app):
             if not email:
                 raise RuntimeError("Không đọc được email từ Google")
             verified_google_email = email[:255]
+            google_sub = info.get("sub")
+            if not google_sub:
+                raise RuntimeError("Google không cung cấp định danh tài khoản hợp lệ.")
+            # Không được mặc định token có quyền theo GOOGLE_SCOPES được yêu cầu.
+            # Nếu token thiếu scope, đối chiếu trực tiếp với Google tokeninfo.
+            token_scope = token.get("scope")
+            if not token_scope:
+                tokeninfo = requests.get(
+                    "https://oauth2.googleapis.com/tokeninfo",
+                    params={"access_token": access_token}, timeout=15,
+                )
+                tokeninfo.raise_for_status()
+                token_scope = tokeninfo.json().get("scope", "")
+            if not has_youtube_read_permission(token_scope):
+                # Không tạo user, không sửa token cũ và không ghi ca không đạt.
+                session.pop("user_id", None)
+                flash("Bạn chưa cấp đủ quyền đọc kênh YouTube cho Web App. Vui lòng đăng nhập lại và chọn cấp quyền YouTube.", "warning")
+                return redirect(url_for("youtube_permission_needed"))
             user = User.query.filter_by(email=email).first()
             if not user:
                 role = "admin" if email in current_app.config["ADMIN_EMAILS"] else "lecturer"
@@ -2046,7 +2086,6 @@ def register_routes(app):
                 account = OAuthAccount(user_id=user.id, provider="google", token_encrypted="")
                 db.session.add(account)
             account.token_encrypted = encrypt_json(token)
-            token_scope = token.get("scope") or current_app.config["GOOGLE_SCOPES"]
             account.scopes = " ".join(token_scope) if isinstance(token_scope, (list, tuple)) else str(token_scope)
             record_functional_test(
                 "AUTH_LOGIN", "Đăng nhập Google", True, owner_id=user.id,
@@ -2054,6 +2093,7 @@ def register_routes(app):
             )
             db.session.commit()
             session["user_id"] = user.id
+            session["youtube_permission_verified_sub"] = google_sub
             session.pop("oauth_retry_attempt", None)
             session.permanent = True
             session["yt_auto_sync_request"] = True
@@ -2069,6 +2109,12 @@ def register_routes(app):
             return redirect(url_for("index"))
         except Exception as exc:
             db.session.rollback()
+            if explicitly_denied_by_user(exc, request.args.get("error")):
+                # Chỉ lỗi từ chối OAuth có mã rõ ràng mới là hành động GV;
+                # không che giấu lỗi state, mạng, token hoặc cấu hình thực sự.
+                session.pop("user_id", None)
+                flash("Bạn chưa cấp quyền truy cập YouTube. Hãy đăng nhập lại và đồng ý cấp quyền cho Web App.", "warning")
+                return redirect(url_for("youtube_permission_needed"))
             # OAuth state là biện pháp phòng chống CSRF: tuyệt đối KHÔNG bỏ qua
             # kiểm tra state hoặc tự chấp nhận callback không khớp.
             error_text = str(exc)
@@ -4232,6 +4278,9 @@ def register_routes(app):
         test_query = FunctionalTestRun.query.filter_by(source="automatic").filter(
             FunctionalTestRun.participant_code.is_(None),
             ~FunctionalTestRun.case_code.in_(["QR_SCAN", "QR_PLAYLIST_SCAN"]),
+            # Các lượt GV từ chối cấp quyền ở bản cũ đã bị ghi nhầm là
+            # "Không đạt". Giữ bản ghi gốc để kiểm toán, chỉ loại khỏi KPI.
+            ~historical_oauth_denial_clause(FunctionalTestRun),
         )
         if user.role != "admin":
             test_query = test_query.filter(FunctionalTestRun.owner_id == user.id)
