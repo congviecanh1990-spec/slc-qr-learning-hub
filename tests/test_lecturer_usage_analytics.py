@@ -275,6 +275,7 @@ def test_lecturer_delete_classes_preserves_shared_and_removes_exclusive(configur
                 started_on=date.today()-timedelta(days=3)))
         db.session.commit()
         aid, uid = admin.id, gv.id
+        other_course_id = other_course.id
         exclusive_id, shared_id, own_student, shared_student = exclusive.id, shared.id, student1.id, student2.id
     with app.test_client() as client:
         with client.session_transaction() as ss: ss["user_id"]=aid
@@ -287,7 +288,7 @@ def test_lecturer_delete_classes_preserves_shared_and_removes_exclusive(configur
             assert db.session.get(Student,own_student) is None
             assert db.session.get(SchoolClass,shared_id) is not None
             assert db.session.get(Student,shared_student) is not None
-            assert CourseClass.query.filter_by(course_id=other_course.id,school_class_id=shared_id).count() == 1
+            assert CourseClass.query.filter_by(course_id=other_course_id,school_class_id=shared_id).count() == 1
 
 
 def test_lecturer_video_count_sum_playlist_contents_by_qr(configured_app):
