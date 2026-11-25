@@ -29,13 +29,38 @@ def explicitly_denied_by_user(error=None, query_error=None):
 def historical_oauth_denial_clause(model):
     """Bộ lọc loại riêng lượt từ chối đã ghi nhầm: giữ nguyên bản ghi gốc.
 
-    Chỉ khớp dòng AUTH_LOGIN không đạt có ghi chú CHÍNH XÁC kiểu phân loại
-    'người dùng hủy / chưa đồng ý cấp quyền' của phiên bản trước.
-    Không loại lỗi token, OAuth state, mất mạng, cấu hình, hay lỗi khác.
+    Chỉ khớp các lỗi rõ ràng về từ chối cấp quyền OAuth hoặc một lỗi
+    YouTube permissions đã ghi trong phiên bản cũ; tuyệt đối không tự động
+    loại trường hợp nhiều loại lỗi pha trộn hay lỗi mạng/cấu hình.
     """
-    from sqlalchemy import and_
-    return and_(
+    from sqlalchemy import and_, or_
+    auth_denial = and_(
         model.case_code == "AUTH_LOGIN",
         model.passed.is_(False),
         model.note.ilike("%Người đăng nhập đã hủy hoặc chưa đồng ý cấp quyền cho ứng dụng%"),
     )
+    # Bản cũ còn ghi một ca YT_SYNC "Không đạt" khi YouTube trả mã
+    # thiếu quyền. Chỉ phân loại lại nếu ghi chú nhận diện chính xác
+    # MỘT lỗi quyền (hoặc lỗi quyền duy nhất tại xử lý trực tiếp).
+    # Nếu có nhiều lỗi pha trộn thì giữ là thất bại, chờ đối chiếu thủ công.
+    yt_permission_denial = and_(
+        model.case_code == "YT_SYNC",
+        model.passed.is_(False),
+        or_(
+            model.note.ilike("Lỗi xử lý đồng bộ: YouTube chưa cho phép truy cập dữ liệu kênh%"),
+            and_(
+                model.note.ilike("%phần lỗi: 1.%"),
+                model.note.ilike("%YouTube chưa cho phép truy cập dữ liệu kênh%"),
+            ),
+        ),
+    )
+    return or_(auth_denial, yt_permission_denial)
+
+
+def only_permission_failures(failures, codes):
+    """Trả True chỉ khi MỌI lỗi đồng bộ có mã phân loại rõ ràng và là lỗi quyền."""
+    if not isinstance(failures, int) or failures <= 0:
+        return False
+    if not isinstance(codes, (list, tuple)) or len(codes) != failures:
+        return False
+    return all(code in {"permission", "auth_expired"} for code in codes)
