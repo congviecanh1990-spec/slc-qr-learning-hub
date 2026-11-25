@@ -849,15 +849,14 @@ def create_app():
                 step = "migrate_legacy_classes"
                 print("[SLC STARTUP] migrate_legacy_classes", flush=True)
                 migrate_legacy_classes()
-                step = "cleanup_initial_three_error_logs_once"
-                print("[SLC STARTUP] one-time cleanup marker check", flush=True)
-                cleanup_initial_three_error_logs_once(db.engine)
-                # Chỉ dọn nhật ký lỗi tiền thực nghiệm trên bản CHÍNH.
-                # Sao lưu bản gốc trong bảng lưu trữ, không can thiệp dữ liệu TEST.
+                # Sao lưu toàn bộ lỗi cũ TRƯỚC bước cleanup v4.3.28.
                 if app.config.get("BASE_URL", "").rstrip("/") == "https://slc-qr-learning-hub.onrender.com":
                     step = "archive_pre_experiment_error_logs_once"
                     archived = archive_pre_experiment_error_logs_once(db.engine)
                     print(f"[SLC STARTUP] legacy error archive: status={archived['status']}, count={archived.get('archived', 0)}", flush=True)
+                step = "cleanup_initial_three_error_logs_once"
+                print("[SLC STARTUP] one-time cleanup marker check", flush=True)
+                cleanup_initial_three_error_logs_once(db.engine)
             except Exception as exc:
                 # Không in kết nối DB, token hoặc dữ liệu giảng viên vào log.
                 print(f"[SLC STARTUP] FAILED step={step} type={type(exc).__name__}", flush=True)
