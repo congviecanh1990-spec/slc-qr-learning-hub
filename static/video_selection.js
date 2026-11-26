@@ -98,20 +98,43 @@
       hidden(mode==='all'?'excluded_video_ids':'selected_video_ids',id);
     }
   }
+  // Môn học tại cột Mã QR được chọn độc lập cho từng video đang hiện trên trang.
+  // Chỉ đưa lựa chọn lên máy chủ khi nhấn nút Gán môn, không tự gán khi đổi select.
+  function qrCourseSelections(){
+    return [...document.querySelectorAll('#videos tr.library-target-row')].flatMap(row=>{
+      const id=Number(row.id.replace(/^video-/,'')),course=Number(
+        row.querySelector('.video-qr-course-select')?.value||0);
+      return Number.isSafeInteger(id)&&id>0&&Number.isSafeInteger(course)&&course>0
+        ?[`${id}:${course}`]:[];
+    });
+  }
+  function appendRowCourseAssignments(target){
+    target.querySelectorAll('[data-video-qr-assignment]').forEach(el=>el.remove());
+    for(const item of qrCourseSelections()){
+      const hidden=document.createElement('input');
+      hidden.type='hidden';hidden.name='qr_course_assignments';hidden.value=item;
+      hidden.dataset.videoQrAssignment='1';target.append(hidden);
+    }
+  }
   const api={
     selectedCount,refresh,
     appendSelection,
+    selectedQrCourseCount:()=>qrCourseSelections().length,
     hasAny:()=>selectedCount()>0
   };
   window.videoBulkSelection=api;
   for(const target of [form,qrForm].filter(Boolean)){
     target.addEventListener('submit',event=>{
-      if(!api.hasAny()){
+      const endpoint=new URL(event.submitter?.formAction||target.action,window.location.href).pathname;
+      const isAssignment=endpoint==='/videos/assign-course';
+      const isCreateAllQr=endpoint==='/videos/qr/bulk-selected';
+      if(!isCreateAllQr && !api.hasAny() && !(isAssignment && api.selectedQrCourseCount()>0)){
         event.preventDefault();
-        if(summary)summary.textContent='Vui lòng tích chọn ít nhất một video trước khi thực hiện.';
+        if(summary)summary.textContent='Hãy chọn video hoặc môn học ở cột Mã QR trước khi thực hiện.';
         return;
       }
       appendSelection(target);
+      if(isAssignment)appendRowCourseAssignments(target);
     });
   }
   window.syncVideoBulkSelection=refresh;
