@@ -12,7 +12,7 @@
   const count=document.getElementById('selectedVideoCount');
   const qrCount=document.getElementById('researchBulkCount');
   if(!form)return;
-  const storagePrefix='slc-video-selection-v1:';
+  const storagePrefix='slc-video-selection-v2:';
   const total=Math.max(0,Number(form.dataset.videoTotal)||0);
   const snapshot={
     q:(form.querySelector('[name="q"]')?.value||'').trim(),
@@ -98,20 +98,38 @@
       hidden(mode==='all'?'excluded_video_ids':'selected_video_ids',id);
     }
   }
+  // Mỗi lựa chọn ở cột Mã QR được lưu ngay trong input hidden form-associated
+  // ở chính dòng đó. Không đợi tới sự kiện submit (có thể bị preflight chặn).
+  // Chỉ gửi các dòng mà giảng viên chủ động đổi môn; không áp dụng lựa chọn
+  // mặc định khi chưa hề thay đổi.
+  function qrCourseSelections(){
+    return [...document.querySelectorAll('input[data-video-row-assign]')]
+      .filter(input=>!input.disabled && input.value).map(input=>input.value);
+  }
+  function appendRowCourseAssignments(target){
+    // Bản mới đã dùng form="assignVideoForm": input hidden tự tham gia POST.
+    // Xóa các phần tử sinh từ phiên bản JS cũ để không gửi bản ghi trùng.
+    target.querySelectorAll('[data-video-qr-assignment]').forEach(el=>el.remove());
+  }
   const api={
     selectedCount,refresh,
     appendSelection,
+    selectedQrCourseCount:()=>qrCourseSelections().length,
     hasAny:()=>selectedCount()>0
   };
   window.videoBulkSelection=api;
   for(const target of [form,qrForm].filter(Boolean)){
     target.addEventListener('submit',event=>{
-      if(!api.hasAny()){
+      const endpoint=new URL(event.submitter?.formAction||target.action,window.location.href).pathname;
+      const isAssignment=endpoint==='/videos/assign-course';
+      const isCreateAllQr=endpoint==='/videos/qr/bulk-selected';
+      if(!isCreateAllQr && !api.hasAny() && !(isAssignment && api.selectedQrCourseCount()>0)){
         event.preventDefault();
-        if(summary)summary.textContent='Vui lòng tích chọn ít nhất một video trước khi thực hiện.';
+        if(summary)summary.textContent='Hãy chọn video hoặc môn học ở cột Mã QR trước khi thực hiện.';
         return;
       }
       appendSelection(target);
+      if(isAssignment)appendRowCourseAssignments(target);
     });
   }
   window.syncVideoBulkSelection=refresh;

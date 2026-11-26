@@ -51,10 +51,28 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-bold">1. Hiệu quả quy trình – đo đối chứng theo từng cặp</div>
   <div class="card-body">
-    <h5 class="mb-3">A. Lập lượt đo đối chứng mới</h5>
+    <h5 class="mb-3">A. Nhập kết quả đối chứng thủ công (có thể nhập sau khi Web App đã đo)</h5>
     <form method="post" id="researchPairCreateForm" class="border rounded p-3 mb-4" action="{{ url_for('research_page') }}#cap-do-chi-tiet">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="form_type" value="pair_create">
+      <div class="mb-3">
+        <label for="existingResearchPair" class="form-label fw-semibold">Ghép vào lượt Web App đã đo (nếu có)</label>
+        <select id="existingResearchPair" name="existing_pair_id" class="form-select">
+          <option value="">— Tự tìm lượt phù hợp hoặc lưu kết quả thủ công mới —</option>
+          {% for p in web_only_pairs %}
+          <option value="{{ p.id }}"
+            data-lecturer="{{ p.lecturer_id or '' }}" data-course="{{ p.course_id or '' }}"
+            data-kind="{{ normalize_pair_kind(p.task_kind) }}"
+            data-videos="{{ p.video_count }}" data-playlists="{{ p.playlist_count }}"
+            data-playlist-videos="{{ p.playlist_video_count }}">
+            {{ p.pair_code }} – {{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}
+            – {{ p.course.name if p.course else p.course_name_snapshot }}
+            – {{ p.qr_count }} QR – {{ p.measurement_finished_at.strftime('%d/%m/%Y %H:%M') }}
+          </option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Có thể tạo và đo QR trước. Sau khi Web App ghi lượt đo, chọn đúng lượt ở đây và chỉ nhập số thao tác, thời gian thủ công. Các thông tin khác tự điền để đối chiếu.</div>
+      </div>
       <div class="row g-3">
         <div class="col-lg-3 col-md-6">
           <label class="form-label fw-semibold">Giảng viên thực nghiệm *</label>
@@ -112,10 +130,17 @@
     </form>
 
     <h5 class="mb-2">B. Kết quả đối chứng theo từng loại học liệu</h5>
+    {% if pending_measurements %}
+    <p class="small text-primary mb-2">
+      <strong>{{ pending_measurements|length }} lượt Web App đang thực hiện.</strong>
+      Số QR đã tạo được hiển thị ngay trong bảng C; số thao tác và thời gian đang chạy chỉ là tạm tính,
+      chưa được cộng vào tỷ lệ nghiệm thu. Tải và xác minh lưu đủ QR để chốt lượt đo.
+    </p>
+    {% endif %}
     <div class="table-responsive mb-3">
       <table class="table table-bordered table-sm align-middle">
         <thead class="table-light"><tr>
-          <th>Loại nhiệm vụ</th><th>Số cặp</th><th>Số QR</th><th>Video học liệu</th>
+          <th>Loại nhiệm vụ</th><th>Lượt Web App / Cặp đối chứng</th><th>Số QR</th><th>Video học liệu</th>
           <th>Thủ công (giây/video)</th><th>Web App (giây/video)</th>
           <th>Thao tác/QR (thủ công → Web App)</th>
           <th>Giảm thời gian</th><th>Giảm thao tác</th>
@@ -123,19 +148,25 @@
         <tbody>
         {% for g in paired_groups %}
           <tr>
-            <td>{{ g.label }}</td><td>{{ g.n }}</td><td>{{ g.qr_count }}</td><td>{{ g.video_coverage }}</td>
-            <td>{{ '%.2f'|format(g.manual_per_video) }}</td>
+            <td>{{ g.label }}</td>
+            <td>{{ g.web_count }} lượt Web App / {{ g.n }} cặp đủ đối chứng</td>
+            <td>{{ g.qr_count }}</td><td>{{ g.video_coverage }}</td>
+            <td>{{ '%.2f'|format(g.manual_per_video) if g.manual_per_video is not none else '—' }}</td>
             <td>{{ '%.2f'|format(g.app_per_video) }}</td>
-            <td>{{ '%.2f'|format(g.manual_ops_per_qr) }} → {{ '%.2f'|format(g.app_ops_per_qr) }}</td>
-            <td>{{ g.time_reduction }}%</td><td>{{ g.ops_reduction }}%</td>
+            <td>{{ '%.2f'|format(g.manual_ops_per_qr) if g.manual_ops_per_qr is not none else '—' }} → {{ '%.2f'|format(g.app_ops_per_qr) }}</td>
+            <td>{{ (g.time_reduction|string) ~ '%' if g.time_reduction is not none else '—' }}</td>
+            <td>{{ (g.ops_reduction|string) ~ '%' if g.ops_reduction is not none else '—' }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="9" class="text-center text-muted">Chưa có cặp đo Web App tự động đã xác minh. Chưa tính tỷ lệ tiết kiệm.</td></tr>
+          <tr><td colspan="9" class="text-center text-muted">Chưa có lượt đo Web App đã xác minh. Dữ liệu Web App sẽ tự hiển thị sau khi tạo và lưu QR.</td></tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
-    <p class="small mb-4"><strong>Tổng số cặp hoàn chỉnh:</strong> {{ paired_totals.paired_count }};
+    <p class="small mb-4"><strong>Lượt Web App đã xác minh:</strong> {{ paired_totals.web_count }};
+      <strong>chờ nhập đối chứng thủ công:</strong> {{ paired_totals.pending_manual }}.
+      Chỉ tính tỷ lệ cải thiện từ những cặp đã có đủ hai kết quả.<br>
+      <strong>Tổng số cặp hoàn chỉnh:</strong> {{ paired_totals.paired_count }};
       <strong>tổng QR được đối chứng:</strong> {{ paired_totals.qr_count }};
       <strong>tổng video học liệu:</strong> {{ paired_totals.video_coverage }}.
       {% if paired_totals.time_reduction is not none %}
@@ -170,24 +201,45 @@
           <tr class="{{ 'table-secondary' if not p.active else '' }}">
             <td>{{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}</td>
             <td>{{ p.course.name if p.course else p.course_name_snapshot }}</td>
-            <td>{{ dict(pair_kinds).get(normalize_pair_kind(p.task_kind), p.task_kind) }}</td>
+            <td>
+              {{ dict(pair_kinds).get(normalize_pair_kind(p.task_kind), p.task_kind) }}
+              {% if p.measurement_started_at and not p.measurement_finished_at %}
+                <div class="small text-primary">Đang đo – loại nhiệm vụ chỉ chốt khi tải QR</div>
+              {% endif %}
+            </td>
             <td>
               <strong>{{ p.qr_count }} mã QR</strong>
+              {% if p.id in pending_measurements %}
+                <div class="small text-primary">Đã ghi nhận tạo QR; chờ tải và xác minh lưu</div>
+              {% endif %}
               {% if p.video_count %}<div class="small text-muted">{{ p.video_count }} video lẻ</div>{% endif %}
               {% if p.playlist_count %}
                 <div class="small text-muted">{{ p.playlist_count }} playlist ({{ p.playlist_video_count }} video trong playlist)</div>
               {% endif %}
             </td>
-            <td class="text-center text-nowrap">{{ p.manual_operations }}</td>
+            <td class="text-center text-nowrap">{{ p.manual_operations if (p.manual_operations or 0) > 0 else '—' }}</td>
             <td class="text-center text-nowrap">
-              {{ p.webapp_operations if p.webapp_operations is not none else '—' }}
-              {% if p.webapp_operations is not none and not p.is_paired %}
+              {% if p.webapp_operations is not none %}
+                {{ p.webapp_operations }}
+              {% elif p.id in pending_measurements %}
+                {{ pending_measurements[p.id].operations }}
+                <div class="small text-muted">Tạm tính – đang đo</div>
+              {% else %}—{% endif %}
+              {% if p.measurement_verified and not p.is_paired %}
+                <div class="small text-warning-emphasis">Chờ nhập thủ công</div>
+              {% elif p.measurement_start_source == 'server_fallback' %}
+                <div class="small text-warning-emphasis">Ghi QR dự phòng; cần đo lại toàn bộ thời gian để nghiệm thu</div>
+              {% elif p.webapp_operations is not none and not p.measurement_verified %}
                 <div class="small text-muted">Chưa xác minh lưu tệp</div>
               {% endif %}
             </td>
-            <td class="text-center text-nowrap">{{ '%.2f'|format(p.manual_seconds) }}</td>
+            <td class="text-center text-nowrap">{{ '%.2f'|format(p.manual_seconds) if (p.manual_seconds or 0) > 0 else '—' }}</td>
             <td class="text-center text-nowrap">
-              {{ '%.2f'|format(p.webapp_seconds) if p.webapp_seconds is not none else '—' }}
+              {% if p.webapp_seconds is not none %}{{ '%.2f'|format(p.webapp_seconds) }}
+              {% elif p.id in pending_measurements %}
+                ~{{ '%.1f'|format(pending_measurements[p.id].seconds) }}
+                <div class="small text-muted">Đang chạy – chưa chốt</div>
+              {% else %}—{% endif %}
             </td>
           </tr>
         {% else %}
@@ -227,6 +279,21 @@
 (() => {
   const button = document.getElementById('clearResearchPairForm');
   const form = document.getElementById('researchPairCreateForm');
+  const existing = document.getElementById('existingResearchPair');
+  existing?.addEventListener('change',()=>{
+    const o=existing.selectedOptions[0];
+    if(!o?.value||!form)return;
+    const fields={
+      lecturer_id:o.dataset.lecturer,course_id:o.dataset.course,
+      task_kind:o.dataset.kind,video_count:o.dataset.videos,
+      playlist_count:o.dataset.playlists,playlist_video_count:o.dataset.playlistVideos
+    };
+    for(const [name,value] of Object.entries(fields)){
+      const el=form.querySelector('[name="'+name+'"]');
+      if(el&&value!==undefined)el.value=value;
+    }
+    form.querySelector('[name="manual_operations"]')?.focus();
+  });
   button?.addEventListener('click', () => {
     if (!form) return;
     for (const field of form.querySelectorAll('input:not([type="hidden"]), select, textarea')) {

@@ -31,60 +31,13 @@
   <div class="fw-bold mb-1">Hướng dẫn gán học liệu vào môn học/ mô đun</div>
   <div>
     <div>• Nếu kênh YouTube đã tổ chức video theo <strong>playlist</strong>, ưu tiên <strong>gán playlist cho môn học/ mô đun</strong>. Khi đó, các video trong playlist sẽ tự động được gán vào môn học/ mô đun tương ứng.</div>
-    <div class="mt-1">• Nếu <strong>không muốn gán toàn bộ video trong playlist</strong> cho môn học/ mô đun, hãy thực hiện <strong>chọn từng video cần sử dụng và gán video đó vào môn học/ mô đun tương ứng</strong>.</div>
+    <div class="mt-1">• <strong>Danh sách video</strong> chỉ hiển thị video độc lập chưa thuộc playlist học liệu. Những video đã nằm trong playlist được quản lý ở <strong>Danh sách playlist</strong>.</div>
   </div>
 </div>
 
-<section id="thuc-nghiem-qr" class="card card-body shadow-sm mb-4" aria-label="Chức năng tạo mã QR" data-user-id="{{ me.id }}">
-  <div class="fw-bold mb-2">Chức năng tạo mã QR</div>
-  <div class="d-flex flex-wrap gap-3 mb-2">
-    <label class="form-check"><input class="form-check-input" type="radio" name="qrWorkMode"
-      value="QR_TUNG_VIDEO_PLAYLIST" checked>
-      <span class="form-check-label">Tạo mã QR cho từng video hoặc từng playlist</span></label>
-    <label class="form-check"><input class="form-check-input" type="radio" name="qrWorkMode"
-      value="QR_VIDEO_HANG_LOAT">
-      <span class="form-check-label">Tạo mã QR hàng loạt cho video</span></label>
-  </div>
-  <div class="row g-2 align-items-end">
-    <div class="col-lg-5">
-      <label class="form-label small fw-semibold" for="researchQrCourse">Môn học/mô đun đang tạo QR</label>
-      <select class="form-select" id="researchQrCourse">
-        <option value="">— Chọn môn học/mô đun —</option>
-        {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="col-lg-7">
-      <div id="researchQrStatus" class="small text-muted" aria-live="polite">
-        Chọn chức năng và môn học để tạo QR. Khi có lượt đối chứng được giao, hệ thống
-        tự đo thời gian và số thao tác; không cần mở trang đo khác.
-      </div>
-    </div>
-  </div>
-  <div id="researchQrSaveArea" class="border-top mt-3 pt-3" hidden>
-    <div class="small fw-semibold mb-2" id="researchQrReady"></div>
-    <button type="button" class="btn btn-success" id="researchQrSaveDirectory">
-      Lưu các tệp QR vào thư mục chọn
-    </button>
-    <button type="button" class="btn btn-outline-secondary ms-2" id="researchQrSaveFallback">
-      Tải ZIP nếu trình duyệt không hỗ trợ
-    </button>
-    <div id="researchQrManualConfirm" class="mt-2 p-2 border rounded" hidden>
-      <label class="form-check">
-        <input type="checkbox" class="form-check-input" id="researchQrConfirmedFiles">
-        <span class="form-check-label small">Tôi đã tải, giải nén (nếu là ZIP) và kiểm tra
-          đủ tệp QR có tên đúng trong thư mục mong muốn.</span>
-      </label>
-      <button type="button" class="btn btn-primary btn-sm mt-2" id="researchQrConfirmDone">
-        Xác nhận hoàn tất lưu tệp
-      </button>
-    </div>
-    <div class="small text-muted mt-2">
-      Thời gian đo bao gồm cả bước lưu tệp. Trên Chrome/Edge tương thích có thể
-      chọn thư mục và lưu trực tiếp; với ZIP cần xác nhận sau khi giải nén.
-      Ứng dụng không đọc đường dẫn hay nội dung thư mục cá nhân.
-    </div>
-  </div>
-</section>
+{# Loại QR được nhận diện tự động khi tải, không cần chọn thủ công. #}
+<div id="researchQrStatus" class="alert alert-info small d-none" role="status" aria-live="polite"></div>
+
 
 <section id="playlists" class="mb-5" style="scroll-margin-top:125px">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -120,11 +73,12 @@
 
   {# Mỗi playlist được chọn mặc định; các playlist bỏ tích được giữ lại khi chuyển trang. #}
   <form id="playlistBulkActions" method="post" action="{{ url_for('bulk_assign_filtered_library_playlists') }}"
-        data-user-id="{{ me.id }}" class="card card-body shadow-sm mb-3">
+        data-user-id="{{ me.id }}" data-playlist-total="{{ playlist_total }}" class="card card-body shadow-sm mb-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="return_query" value="{{ library_return_query }}">
     <input type="hidden" name="p_q" value="{{ playlist_search }}">
     <input type="hidden" name="p_assignment" value="{{ playlist_assignment }}">
+    <input type="hidden" name="download_scope" value="all_assigned">
     <div class="d-flex flex-wrap align-items-end gap-2">
       <div class="flex-grow-1" style="min-width:210px;max-width:420px">
         <label class="form-label small" for="playlistBulkCourse">Môn học/ mô đun áp dụng hàng loạt</label>
@@ -139,12 +93,12 @@
       </button>
       <button type="submit" class="btn btn-outline-primary" name="bulk_action" value="qr"
               formaction="{{ url_for('bulk_create_playlist_qrs_from_library') }}"
-              {{ 'disabled' if not courses else '' }}>
-        Tạo QR cho playlist đã chọn
+              formnovalidate {{ 'disabled' if not courses else '' }}>
+        Tạo QR cho playlist đã gán MH/MĐ
       </button>
-      <a id="playlistBulkDownloadQr" class="btn btn-outline-success qr-save-picker disabled" href="#"
-         aria-disabled="true"
-         title="Tải tệp ZIP gồm các QR đã tạo của môn học đang chọn">Tải QR đã tạo</a>
+      <button type="button" id="playlistBulkDownloadQr" class="btn btn-outline-success"
+         data-files-url="{{ url_for('download_selected_playlist_qrs') }}"
+         title="Tải toàn bộ QR playlist đã tạo trong các môn được gán">Tải tất cả QR đã tạo</button>
     </div>
     <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">{{ 'Các playlist tìm được đang được chọn.' if playlist_search else 'Chưa chọn playlist nào.' }}</div>
   </form>
@@ -155,13 +109,13 @@
         <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllPlaylists" {{ 'checked' if playlist_search else '' }}
             aria-label="Chọn tất cả hoặc bỏ chọn tất cả playlist ở mọi trang"
             title="Chọn tất cả / Bỏ chọn tất cả playlist trên mọi trang, không chỉ trang đang xem"></th>
-        <th>Playlist</th><th>Kênh YouTube</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
+        <th>Playlist</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
       </tr></thead>
       <tbody>
       {% for p in playlists %}
         {% include '_playlist_library_row.html' %}
       {% else %}
-        <tr><td colspan="7" class="text-center text-muted py-4">Không có playlist phù hợp bộ lọc. Hãy đồng bộ kênh YouTube nếu chưa có dữ liệu.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted py-4">Không có playlist phù hợp bộ lọc. Hãy đồng bộ kênh YouTube nếu chưa có dữ liệu.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -173,7 +127,7 @@
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
     <div>
       <h4 class="mb-0">2. Danh sách video</h4>
-      <div class="text-muted small">Chỉ gán riêng khi video chưa được xử lý qua playlist hoặc khi bạn không muốn dùng toàn bộ playlist cho môn học/ mô đun.</div>
+      <div class="text-muted small">Chỉ hiển thị video chưa thuộc playlist học liệu; video đã thuộc playlist được quản lý ở danh sách phía trên.</div>
     </div>
     <span class="text-muted small">Có {{ video_total|default(videos|length) }} video · Trang {{ video_page|default(1) }}/{{ video_pages|default(1) }} · 5 dòng/trang</span>
   </div>
@@ -195,45 +149,19 @@
           <option value="unavailable" {{ 'selected' if status=='unavailable' else '' }}>Không truy cập</option>
         </select>
       </div>
-      <div class="col-xl-2 col-lg-6">
-        <label class="form-label small">Phân loại môn học/ mô đun</label>
+      <div class="col-xl-4 col-lg-6">
+        <label class="form-label small text-nowrap">Phân loại môn học/ mô đun</label>
         <select class="form-select" name="assignment">
           <option value="">Tất cả</option>
           <option value="unassigned" {{ 'selected' if assignment=='unassigned' else '' }}>Chưa gán môn học/ mô đun</option>
           <option value="assigned" {{ 'selected' if assignment=='assigned' else '' }}>Đã gán môn học/ mô đun</option>
         </select>
       </div>
-      <div class="col-xl-3 col-lg-6">
-        <label class="form-label small">Playlist</label>
-        <select class="form-select" name="playlist_id">
-          <option value="">Tất cả playlist</option>
-          {% for p in available_playlists %}
-            <option value="{{ p.id }}" {{ 'selected' if playlist_filter_id == p.id else '' }}>{{ p.title }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-xl-2 d-flex flex-wrap gap-2">
+      <div class="col-xl-3 col-lg-6 d-flex flex-wrap gap-2">
         <button type="submit" class="btn btn-outline-primary flex-grow-1">Lọc video</button>
         <a class="btn btn-outline-secondary flex-grow-1" id="resetVideoFilters"
            data-library-filter-reset="video" href="{{ video_reset_url }}">Bỏ lọc</a>
       </div>
-    </div>
-  </form>
-
-  <form method="post" action="{{ url_for('bulk_create_selected_video_qrs') }}"
-        id="videoBulkQrForm" class="card card-body shadow-sm mb-3" hidden>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="course_id" value="" id="videoBulkQrCourse">
-    <input type="hidden" name="return_query" value="{{ library_return_query }}">
-    <input type="hidden" name="q" value="{{ search }}">
-    <input type="hidden" name="status" value="{{ status }}">
-    <input type="hidden" name="assignment" value="{{ assignment }}">
-    <input type="hidden" name="playlist_id" value="{{ playlist_filter_id or '' }}">
-    <div class="d-flex flex-wrap align-items-center gap-2">
-      <button class="btn btn-primary" type="submit">Tạo QR hàng loạt cho video đã chọn</button>
-      <span class="small text-muted" id="researchBulkCount">
-        Tích các video trong bảng; danh sách được giữ khi chuyển trang.
-      </span>
     </div>
   </form>
 
@@ -245,13 +173,15 @@
     <input type="hidden" name="status" value="{{ status }}">
     <input type="hidden" name="assignment" value="{{ assignment }}">
     <input type="hidden" name="playlist_id" value="{{ playlist_filter_id or '' }}">
+    {# Tải tất cả QR thuộc những video đã gán môn, không cần tích hay chọn môn. #}
+    <input type="hidden" name="download_scope" value="all_assigned">
     <div class="card shadow-sm mb-3">
       <div class="card-body d-flex flex-wrap gap-2 align-items-end">
         <div class="flex-grow-1" style="min-width:210px;max-width:420px">
-          <label class="form-label small">Môn học/ mô đun áp dụng cho video đã chọn</label>
-          <select class="form-select" name="course_id" required>
+          <label class="form-label small">Môn học/ mô đun áp dụng cho video tích chọn</label>
+          <select class="form-select" name="course_id">
             <option value="">— Chọn môn học/ mô đun —</option>
-            {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+            {% for c in courses %}<option value="{{ c.id }}" data-assigned-video-count="{{ (course_assigned_video_counts|default({})).get(c.id, 0) }}" {{ 'selected' if (request.args.get('video_course_id')|int) == c.id else '' }}>{{ c.name }}</option>{% endfor %}
           </select>
         </div>
         <button type="submit" class="btn btn-primary" {{ 'disabled' if not courses else '' }}>Gán môn cho video đã chọn</button>
@@ -260,12 +190,11 @@
                 {{ 'disabled' if not courses else '' }}>Tạo QR cho video đã gán môn</button>
         <button type="submit" class="btn btn-outline-success"
                 formaction="{{ url_for('download_selected_video_qrs') }}"
-                {{ 'disabled' if not courses else '' }}>Tải QR video đã tạo</button>
+                {{ 'disabled' if not courses else '' }}>Tải tất cả QR đã tạo</button>
         <span class="text-muted small" id="selectedVideoCount">Chưa chọn video nào.</span>
       </div>
     </div>
     <div class="small fw-semibold text-primary mt-1 mb-2" id="videoBulkSelectedSummary" aria-live="polite">Chưa chọn video nào.</div>
-    <div class="small text-muted mb-1">Ô tích ở tiêu đề chọn hoặc bỏ chọn <strong>toàn bộ video trong kết quả lọc trên mọi trang</strong>, không chỉ 5 dòng đang xem.</div>
   </form>
 
     <div class="table-responsive">
@@ -274,52 +203,61 @@
           <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllVideos" {{ 'checked' if search else '' }}
              aria-label="Chọn tất cả hoặc bỏ chọn tất cả video trong kết quả lọc trên mọi trang"
              title="Chọn tất cả / Bỏ chọn tất cả video trong kết quả lọc trên mọi trang"></th>
-          <th>Video học liệu</th><th>Kênh YouTube</th><th>Playlist</th><th>Môn học/ mô đun đã gán</th><th>Khả năng phát</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
+          <th>Video học liệu</th><th>Môn học/ mô đun đã gán</th><th>Khả năng phát</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
         </tr></thead>
         <tbody>
         {% for v in videos %}<tr id="video-{{ v.id }}" class="library-target-row">
           <td><input class="form-check-input video-check" type="checkbox" form="assignVideoForm" name="video_ids" value="{{ v.id }}"></td>
           <td><div class="d-flex gap-2 align-items-center">{% if v.thumbnail_url %}<img class="thumb" src="{{ v.thumbnail_url }}" alt="">{% endif %}<div><div class="fw-semibold">{{ v.title }}</div><div class="small text-muted">{{ v.youtube_video_id }}</div></div></div></td>
-          <td>{% if v.uploader_channel_id == v.channel.channel_id %}{{ v.channel.title }}{% else %}<span class="small">Video tuyển chọn</span><div class="text-muted small">Mã kênh gốc: {{ v.uploader_channel_id or 'Chưa rõ' }}</div>{% endif %}</td>
-          <td>
-            {% set pl_state = namespace(has_playlist=false, has_qr=false) %}
-            {% for plink in v.playlist_links if plink.playlist.is_available and plink.playlist.youtube_playlist_id != v.channel.uploads_playlist_id %}
-              {% set pl_state.has_playlist = true %}
-              <span class="badge text-bg-light border me-1 mb-1">{{ plink.playlist.title }}</span>
-            {% endfor %}
-            {% if pl_state.has_playlist %}
-              {% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}
-                {% if link.qr and link.qr.active %}{% set pl_state.has_qr = true %}{% endif %}
-              {% endfor %}
-              <div><span class="badge {{ 'text-bg-success' if pl_state.has_qr else 'text-bg-secondary' }}">{{ 'Đã có mã QR' if pl_state.has_qr else 'Chưa có mã QR' }}</span></div>
-            {% else %}<span class="text-muted small">Không thuộc playlist</span>{% endif %}
-          </td>
           <td>{% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}<span class="badge text-bg-light border me-1 mb-1">{{ link.course.name }}</span>{% else %}<span class="text-muted small">Chưa gán</span>{% endfor %}</td>
           <td>{{ 'Có thể phát' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'Cần kiểm tra' }}</td>
           <td><span class="badge {{ 'text-bg-success' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'text-bg-warning' }}">{{ v.status_label }}</span></td>
           <td>
-            {% set vqr = namespace(selected=false) %}
+            {% set vqr = namespace(assigned_qr=none) %}
+            {# Mặc định chọn môn mà video đã được gán để nút Tạo QR sáng ngay. #}
+            {% set assigned_video_course = namespace(id=none) %}
+            {# Khi video nằm trong nhiều môn: ưu tiên hiện môn đã có QR,
+               tránh nút Tạo QR xuất hiện trong khi mã thực tế đã được tạo. #}
+            {% for link in v.course_links if link.course.owner_id == me.id and link.course.active and link.qr and link.qr.active %}
+              {% if assigned_video_course.id is none %}
+                {% set assigned_video_course.id = link.course_id %}
+                {% set vqr.assigned_qr = link.qr %}
+              {% endif %}
+            {% endfor %}
+            {% if assigned_video_course.id is none %}
+              {% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}
+                {% if assigned_video_course.id is none %}{% set assigned_video_course.id = link.course_id %}{% endif %}
+              {% endfor %}
+            {% endif %}
             <form method="post" action="{{ url_for('create_video_qr_from_library', video_id=v.id) }}" class="d-flex flex-wrap gap-1 align-items-center library-qr-form video-qr-actions" data-library-qr-form="1" data-video-usable="{{ '1' if v.is_available and v.embeddable is not sameas false and v.privacy_status != 'private' else '0' }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-              <select class="form-select form-select-sm video-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR video" required>
+              <select class="form-select form-select-sm video-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR video" required
+                      onchange="var mirror=document.getElementById('video-course-mirror-{{ v.id }}');if(mirror){mirror.disabled=!this.value;mirror.value=this.value?'{{ v.id }}:'+this.value:'';}">
                 {% if courses|length != 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
                 {% for c in courses %}
                   {% set found = namespace(qr=none) %}
                   {% for link in v.course_links if link.course_id == c.id %}
                     {% if link.qr and link.qr.active %}{% set found.qr=link.qr %}{% endif %}
                   {% endfor %}
-                  <option value="{{ c.id }}" {% if found.qr %}
+                  <option value="{{ c.id }}" {{ 'selected' if assigned_video_course.id == c.id else '' }} {% if found.qr %}
                      data-qr-png="{{ url_for('qr_png', qr_id=found.qr.id) }}"
+                     data-qr-filename="{{ v.title }}.png"
                      data-qr-delete="{{ url_for('delete_qr', qr_id=found.qr.id) }}"
                      data-qr-retarget="{{ url_for('qr_retarget', qr_id=found.qr.id) }}"
                      {% endif %}>{{ c.name }}{{ ' – đã có mã QR' if found.qr else '' }}</option>
                 {% endfor %}
               </select>
-              <button class="btn btn-primary btn-sm video-qr-create" {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
+              <button class="btn btn-primary btn-sm video-qr-create"
+                {{ 'hidden' if vqr.assigned_qr else '' }}
+                {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
             </form>
+            {# Thuộc form Gán môn ở phía trên dù đang hiển thị trong dòng video:
+               cập nhật NGAY khi chọn môn, không phụ thuộc xử lý sự kiện submit. #}
+            <input type="hidden" id="video-course-mirror-{{ v.id }}" name="qr_course_assignments"
+                   form="assignVideoForm" data-video-row-assign="{{ v.id }}" disabled>
             <div class="d-flex flex-wrap gap-1 align-items-center mt-1 video-qr-extra" data-qr-row="video-{{ v.id }}" hidden>
-              <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download" hidden aria-label="Tải mã QR video">Tải QR</a>
+              <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download qr-save-picker" hidden aria-label="Tải mã QR video">Tải QR</a>
               <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" hidden aria-expanded="false">Đổi đích</button>
               <form method="post" action="#" class="video-qr-delete library-qr-form" data-library-qr-form="1" hidden onsubmit="return confirm('Xóa mã QR này? Mã đã in sẽ ngừng hoạt động nhưng lịch sử vẫn được giữ lại.');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -341,7 +279,7 @@
               </form>
             </div>
           </td>
-        </tr>{% else %}<tr><td colspan="8" class="text-center text-muted py-4">Không có video phù hợp bộ lọc.</td></tr>{% endfor %}
+        </tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Không có video phù hợp bộ lọc.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -421,7 +359,14 @@
     create.hidden=hasQr; create.disabled=!valid || row.dataset.playlistUsable!=='1';
     if(compact) compact.hidden=!hasQr;
     download.hidden=!hasQr;
-    if(hasQr) download.href=option.dataset.qrPng; else download.removeAttribute('href');
+    if(hasQr){
+      download.href=option.dataset.qrPng;
+      download.download=(option.dataset.qrFilename||'Playlist.png').normalize('NFC')
+        .replace(/[\\/:*?"<>|\x00-\x1F]/g,'_').replace(/\s+/g,' ').trim().slice(0,184);
+    }else{
+      download.removeAttribute('href');
+      download.removeAttribute('download');
+    }
     if(remove){remove.hidden=!hasQr;if(hasQr)remove.action=option.dataset.qrDelete;}
     if(toggle){toggle.hidden=!hasQr; if(!hasQr){retarget.hidden=true;toggle.setAttribute('aria-expanded','false');}}
     if(hasQr && retarget)retarget.action=option.dataset.qrRetargetPlaylist;
@@ -434,11 +379,23 @@
     const extra=row.querySelector('.video-qr-extra'), download=extra.querySelector('.video-qr-download');
     const remove=extra.querySelector('.video-qr-delete'), retarget=extra.querySelector('.video-qr-retarget');
     const toggle=extra.querySelector('.video-qr-retarget-toggle');
+    // Khi QR đã tồn tại, chỉ còn 3 nút Tải QR / Đổi đích / Xóa QR;
+    // nút Tạo mã QR chỉ hiện khi môn đang chọn chưa có mã.
     create.hidden=hasQr;create.disabled=!select.value || area.dataset.videoUsable!=='1';
     extra.hidden=!hasQr;
     download.hidden=!hasQr;
-    if(hasQr){download.href=option.dataset.qrPng;remove.action=option.dataset.qrDelete;retarget.action=option.dataset.qrRetarget;}
-    else{download.removeAttribute('href');retarget.hidden=true;toggle.setAttribute('aria-expanded','false');}
+    if(hasQr){
+      download.href=option.dataset.qrPng;
+      download.download=(option.dataset.qrFilename||'Video.png').normalize('NFC')
+        .replace(/[\\/:*?"<>|\x00-\x1F]/g,'_').replace(/\s+/g,' ').trim().slice(0,184);
+      remove.action=option.dataset.qrDelete;
+      retarget.action=option.dataset.qrRetarget;
+    }else{
+      download.removeAttribute('href');
+      download.removeAttribute('download');
+      retarget.hidden=true;
+      toggle.setAttribute('aria-expanded','false');
+    }
     remove.hidden=!hasQr;toggle.hidden=!hasQr;
   }
   function setupQrActions(scope) {
@@ -526,11 +483,8 @@ function restoreBulkCourse(){
   } catch (_) {}
 }
 function updateBulkQrDownload(){
-  const option=bulkCourseSelector?.selectedOptions[0];
-  const url=Number(option?.dataset.qrCount || 0)>0 ? option?.dataset.qrDownload : null;
-  if(!bulkDownload)return;
-  if(url){bulkDownload.href=url;bulkDownload.dataset.filename=option.dataset.qrFilename || 'Ma_QR_hoc_lieu.zip';bulkDownload.classList.remove('disabled');bulkDownload.removeAttribute('aria-disabled');}
-  else{bulkDownload.href='#';bulkDownload.classList.add('disabled');bulkDownload.setAttribute('aria-disabled','true');}
+  // Playlist: tải tất cả QR đã tạo không phụ thuộc môn đang chọn/ô tích.
+  if(bulkDownload)bulkDownload.disabled=false;
 }
 // One-use URL marker after bulk POST. Remove before the next refresh/navigation.
 restoreBulkCourse();
@@ -553,15 +507,8 @@ function resetBulkCourseAfterDownload(){
   }
   updateBulkQrDownload();
 }
-// Native downloads have no reliable browser 'completed' event. Reset once
-// initiated; when the Save File Picker is available, reset only on success.
-bulkDownload?.addEventListener('click', event => {
-  if (bulkDownload.classList.contains('disabled')) return;
-  if (!(window.showSaveFilePicker && window.isSecureContext)) {
-    window.setTimeout(resetBulkCourseAfterDownload, 0);
-  }
-});
-bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownload);
+// Sau khi tải PNG thành công, mới xóa lựa chọn môn học.
+bulkDownload?.addEventListener('qr-download-complete',resetBulkCourseAfterDownload);
 
 </script>
 <script>
@@ -657,23 +604,20 @@ bulkDownload?.addEventListener('qr-download-complete', resetBulkCourseAfterDownl
     overrides=new Set();
     write();refresh();
   });
-  form.addEventListener('submit',()=>{
-    form.querySelectorAll('[data-playlist-selection]').forEach(el=>el.remove());
-    const modeInput=document.createElement('input');
-    modeInput.type='hidden';
-    modeInput.name='playlist_selection_mode';
-    modeInput.value=mode;
-    modeInput.dataset.playlistSelection='1';
-    form.append(modeInput);
-    for(const id of overrides){
-      const hidden=document.createElement('input');
-      hidden.type='hidden';
-      hidden.name=(mode==='all')?'excluded_playlist_ids':'selected_playlist_ids';
-      hidden.value=String(id);
-      hidden.dataset.playlistSelection='1';
-      form.append(hidden);
+  form.addEventListener('submit',()=>window.playlistBulkSelection.appendSelection(form));
+  window.playlistBulkSelection={
+    selectedCount:()=>mode==='all'?
+      Math.max(0,Number(form.dataset.playlistTotal||0)-overrides.size):overrides.size,
+    appendSelection:(target)=>{
+      target.querySelectorAll('[data-playlist-selection]').forEach(el=>el.remove());
+      const hidden=(name,value)=>{
+        const el=document.createElement('input');el.type='hidden';el.name=name;
+        el.value=String(value);el.dataset.playlistSelection='1';target.append(el);
+      };
+      hidden('playlist_selection_mode',mode);
+      for(const id of overrides)hidden(mode==='all'?'excluded_playlist_ids':'selected_playlist_ids',id);
     }
-  });
+  };
   window.syncPlaylistBulkSelection=refresh;
   refresh();
 })();
@@ -698,7 +642,9 @@ document.querySelectorAll('.playlist-course-form').forEach(form=>{
 
 
 </script>
-<script src="{{ url_for('static', filename='video_selection.js') }}" defer></script>
+{# Đổi URL để trình duyệt không tiếp tục dùng JS đã cache trước bản sửa cột QR. #}
+<script src="{{ url_for('static', filename='video_selection.js', v='row-mirror-20261126') }}" defer></script>
 <script src="{{ url_for('static', filename='library_filter_reset.js') }}" defer></script>
-<script src="{{ url_for('static', filename='qr_save_picker.js') }}" defer></script>
+{# Tải một QR bằng tính năng download gốc của trình duyệt.
+   Không dùng showSaveFilePicker: server đã trả Content-Disposition đúng tên học liệu. #}
 {% endblock %}

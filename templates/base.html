@@ -95,7 +95,8 @@
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 {% block scripts %}{% endblock %}
-{% if me and me.profile_completed and me.role != 'admin' %}
+{# Quản trị viên kiêm giảng viên cũng phải được tự động ghi nhận QR của chính mình. #}
+{% if me and me.profile_completed %}
 <script>window.researchMeasurement = {
   id: {{ session.get('research_measurement_id')|tojson }},
   nonce: {{ session.get('research_measurement_nonce', '')|tojson }},
@@ -104,9 +105,10 @@
   filesUrl: {{ url_for('research_auto_files')|tojson }},
   zipUrl: {{ url_for('research_auto_zip')|tojson }},
   completeUrl: {{ url_for('research_auto_complete')|tojson }},
-  progressUrl: {{ url_for('research_measurement_progress')|tojson }}
+  progressUrl: {{ url_for('research_measurement_progress')|tojson }},
+  savedUrl: {{ url_for('research_auto_download_saved')|tojson }}
 };</script>
-<script defer src="{{ url_for('static', filename='research_measurement.js') }}"></script>
+<script defer src="{{ url_for('static', filename='research_measurement.js', v='native-zip-20261126') }}"></script>
 {% endif %}
 {% if me and me.profile_completed %}
 <script>window.youtubeSyncAutoStart = {{ 'true' if session.get('yt_auto_sync_request') else 'false' }};</script>

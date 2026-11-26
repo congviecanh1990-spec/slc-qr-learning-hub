@@ -9,7 +9,7 @@ import math
 
 RESEARCH_PAIR_KINDS = (
     ("QR_TUNG_VIDEO_PLAYLIST", "Tạo mã QR cho từng video hoặc từng playlist"),
-    ("QR_VIDEO_HANG_LOAT", "Tạo mã QR hàng loạt cho video"),
+    ("QR_VIDEO_HANG_LOAT", "Tạo mã QR hàng loạt cho video hoặc playlist"),
 )
 RESEARCH_PAIR_KIND_NAMES = dict(RESEARCH_PAIR_KINDS)
 LEGACY_KIND_MAPPING = {
@@ -56,8 +56,10 @@ def validate_pair_form(form):
     manual_seconds = _positive_seconds(form.get("manual_seconds"), "Thời gian thủ công")
 
     if kind == "QR_VIDEO_HANG_LOAT":
-        if not video_count or playlist_count or playlist_video_count:
-            raise ValueError("QR video hàng loạt chỉ gồm video lẻ; không được có playlist.")
+        # Hàng loạt khi giảng viên tải tất cả >=2 mã QR video hoặc playlist
+        # đã chọn. Không suy luận chỉ từ thao tác tích chọn.
+        if video_count + playlist_count < 2:
+            raise ValueError("Đo hàng loạt phải có ít nhất 2 video hoặc playlist.")
     elif video_count + playlist_count < 1:
         raise ValueError("Phải có video hoặc playlist để tạo mã QR.")
     if playlist_count == 0 and playlist_video_count != 0:
@@ -86,49 +88,72 @@ def video_coverage(pair):
 
 
 def pair_metrics(pairs):
-    """Chỉ dùng lượt đã xác minh tự động, tách riêng 2 nhóm nhiệm vụ.
+    """Hiển thị thống kê Web App ngay cả khi chưa nhập đối chứng thủ công.
 
-    Mức giảm dựa trên tổng thời gian của cùng các cặp đo. Giây/video =
-    tổng thời gian / tổng video học liệu bao phủ, không phải số mã QR.
+    Thông số giảm thời gian/thao tác CHỈ được tính trên các cặp đủ hai
+    vế đo, cùng khối lượng. Số đo Web App chưa đối chứng hiển thị riêng,
+    tuyệt đối không suy ra % cải thiện từ số liệu chưa đầy đủ.
     """
-    valid = [
+    web = [
         p for p in pairs if p.active and getattr(p, "measurement_verified", False)
         and getattr(p, "measurement_save_method", None) == "directory_picker"
         and getattr(p, "measurement_saved_at", None) is not None
         and p.webapp_operations is not None and p.webapp_seconds is not None
-        and p.manual_seconds > 0 and p.manual_operations > 0
-        and video_coverage(p) > 0
+        and video_coverage(p) > 0 and p.qr_count > 0
+    ]
+    paired = [
+        p for p in web if (p.manual_seconds or 0) > 0
+        and (p.manual_operations or 0) > 0
     ]
     groups = []
     for key, label in RESEARCH_PAIR_KINDS:
-        rows = [p for p in valid if normalize_kind(p.task_kind) == key]
-        if not rows:
+        web_rows = [p for p in web if normalize_kind(p.task_kind) == key]
+        match = [p for p in paired if normalize_kind(p.task_kind) == key]
+        if not web_rows:
             continue
-        covered = sum(video_coverage(p) for p in rows)
-        qrs = sum(p.qr_count for p in rows)
-        mt, wt = sum(p.manual_seconds for p in rows), sum(p.webapp_seconds for p in rows)
-        mo, wo = sum(p.manual_operations for p in rows), sum(p.webapp_operations for p in rows)
+        app_coverage = sum(video_coverage(p) for p in web_rows)
+        app_qrs = sum(p.qr_count for p in web_rows)
+        app_time = sum(p.webapp_seconds for p in web_rows)
+        app_ops = sum(p.webapp_operations for p in web_rows)
+
+        matched_coverage = sum(video_coverage(p) for p in match)
+        matched_qrs = sum(p.qr_count for p in match)
+        manual_time = sum(p.manual_seconds for p in match)
+        manual_ops = sum(p.manual_operations for p in match)
+        matched_app_time = sum(p.webapp_seconds for p in match)
+        matched_app_ops = sum(p.webapp_operations for p in match)
         groups.append(dict(
-            key=key, label=label, n=len(rows), qr_count=qrs, video_coverage=covered,
-            manual_time=round(mt, 2), app_time=round(wt, 2),
-            manual_per_video=round(mt/covered, 2), app_per_video=round(wt/covered, 2),
-            manual_ops=mo, app_ops=wo,
-            manual_ops_per_qr=round(mo/qrs, 2), app_ops_per_qr=round(wo/qrs, 2),
-            time_reduction=round(100*(mt-wt)/mt, 1),
-            ops_reduction=round(100*(mo-wo)/mo, 1),
+            key=key, label=label,
+            n=len(match), web_count=len(web_rows),
+            qr_count=app_qrs, video_coverage=app_coverage,
+            manual_time=round(manual_time, 2) if match else None,
+            app_time=round(app_time, 2),
+            manual_per_video=round(manual_time/matched_coverage, 2) if match else None,
+            app_per_video=round(app_time/app_coverage, 2),
+            manual_ops=manual_ops if match else None, app_ops=app_ops,
+            manual_ops_per_qr=round(manual_ops/matched_qrs, 2) if match else None,
+            app_ops_per_qr=round(app_ops/app_qrs, 2),
+            time_reduction=round(100*(manual_time-matched_app_time)/manual_time, 1) if match else None,
+            ops_reduction=round(100*(manual_ops-matched_app_ops)/manual_ops, 1) if match else None,
         ))
-    if valid:
-        mt=sum(p.manual_seconds for p in valid)
-        at=sum(p.webapp_seconds for p in valid)
-        mo=sum(p.manual_operations for p in valid)
-        ao=sum(p.webapp_operations for p in valid)
+    if paired:
+        mt=sum(p.manual_seconds for p in paired)
+        at=sum(p.webapp_seconds for p in paired)
+        mo=sum(p.manual_operations for p in paired)
+        ao=sum(p.webapp_operations for p in paired)
         totals=dict(
-            paired_count=len(valid), qr_count=sum(p.qr_count for p in valid),
-            video_coverage=sum(video_coverage(p) for p in valid),
+            paired_count=len(paired),
+            qr_count=sum(p.qr_count for p in paired),
+            video_coverage=sum(video_coverage(p) for p in paired),
+            web_count=len(web),
+            pending_manual=len(web)-len(paired),
             time_reduction=round(100*(mt-at)/mt, 1),
             ops_reduction=round(100*(mo-ao)/mo, 1),
         )
     else:
-        totals=dict(paired_count=0, qr_count=0, video_coverage=0,
-                    time_reduction=None, ops_reduction=None)
+        totals=dict(
+            paired_count=0, qr_count=0, video_coverage=0,
+            web_count=len(web), pending_manual=len(web),
+            time_reduction=None, ops_reduction=None,
+        )
     return groups, totals

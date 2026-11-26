@@ -510,13 +510,16 @@ class ResearchComparisonPair(db.Model):
     playlist_count = db.Column(db.Integer, nullable=False, default=0)
     playlist_video_count = db.Column(db.Integer, nullable=False, default=0)
     qr_count = db.Column(db.Integer, nullable=False)
-    manual_operations = db.Column(db.Integer, nullable=False)
-    manual_seconds = db.Column(db.Float, nullable=False)
+    auto_discovered = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    # Giá trị 0 biểu thị chưa nhập thủ công, giữ tương thích ràng buộc NOT NULL cũ.
+    manual_operations = db.Column(db.Integer, nullable=False, default=0)
+    manual_seconds = db.Column(db.Float, nullable=False, default=0.0)
     # Để NULL cho đến khi cùng GV hoàn thành phép đo Web App trên cùng bộ học liệu.
     webapp_operations = db.Column(db.Integer, nullable=True)
     webapp_seconds = db.Column(db.Float, nullable=True)
     # Ghi nhận tự động khi GV bấm bắt đầu/kết thúc; không cho người nhập tay.
     measurement_started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    measurement_start_source = db.Column(db.String(30), nullable=True)  # ui_preflight | server_fallback
     measurement_finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
     measurement_operations = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     measurement_single_videos = db.Column(db.Integer, nullable=False, default=0, server_default="0")
@@ -524,6 +527,8 @@ class ResearchComparisonPair(db.Model):
     measurement_bulk_videos = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     measurement_verified = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     measurement_qr_ids = db.Column(db.Text, nullable=False, default="[]", server_default="[]")
+    measurement_saved_qr_ids = db.Column(db.Text, nullable=False, default="[]", server_default="[]")
+    measurement_download_style = db.Column(db.String(20), nullable=True)
     measurement_save_method = db.Column(db.String(32), nullable=True)
     measurement_saved_at = db.Column(db.DateTime(timezone=True), nullable=True)
     note = db.Column(db.Text, nullable=True)
@@ -538,7 +543,9 @@ class ResearchComparisonPair(db.Model):
     @property
     def is_paired(self):
         return (self.active and self.measurement_verified and
-                self.webapp_operations is not None and self.webapp_seconds is not None)
+                self.webapp_operations is not None and self.webapp_seconds is not None
+                and self.manual_operations is not None and self.manual_seconds is not None
+                and self.manual_operations > 0 and self.manual_seconds > 0)
 
 
 class FunctionalTestRun(db.Model):

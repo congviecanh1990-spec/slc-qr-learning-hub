@@ -12,7 +12,6 @@
           <td>
             <div class="fw-semibold">{{ p.title }}</div>{% if not p.is_available %}<span class="badge text-bg-warning">Playlist không còn trên YouTube</span><div class="small text-muted">QR cũ được giữ để tra cứu lịch sử; có thể ngừng sử dụng QR.</div>{% endif %}
           </td>
-          <td>{{ p.channel.title }}</td>
           <td>{{ p.video_links|length }}</td>
           <td>
             <form method="post" action="{{ url_for('set_playlist_course_assignments', playlist_id=p.id) }}" class="playlist-course-form" data-playlist-id="{{ p.id }}">
@@ -50,6 +49,17 @@
           </td>
           <td>
             {% set active_links = p.course_links | selectattr('active') | selectattr('course.active') | selectattr('course.owner_id', 'equalto', me.id) | list %}
+            {# Ưu tiên môn đã có QR để khi tải trang hiện ngay 3 nút hành động. #}
+            {% set chosen_playlist_course = namespace(id=none, has_qr=false) %}
+            {% for l in active_links if l.qr and l.qr.active %}
+              {% if chosen_playlist_course.id is none %}
+                {% set chosen_playlist_course.id = l.course_id %}
+                {% set chosen_playlist_course.has_qr = true %}
+              {% endif %}
+            {% endfor %}
+            {% if chosen_playlist_course.id is none and active_links %}
+              {% set chosen_playlist_course.id = active_links[0].course_id %}
+            {% endif %}
             {% if active_course_ids %}
               <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap playlist-qr-actions align-items-center library-qr-form" data-library-qr-form="1">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -57,18 +67,21 @@
                 <select class="form-select form-select-sm playlist-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR playlist" required>
                   {% if active_course_ids|length > 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
                   {% for l in active_links if l.course.owner_id == me.id and l.course.active %}
-                    <option value="{{ l.course.id }}"
+                    <option value="{{ l.course.id }}" {{ 'selected' if chosen_playlist_course.id == l.course_id else '' }}
                       {% if l.qr and l.qr.active %}
                       data-qr-png="{{ url_for('qr_png', qr_id=l.qr.id) }}"
+                      data-qr-filename="{{ p.title }}.png"
                       data-qr-delete="{{ url_for('delete_qr', qr_id=l.qr.id) }}"
                       data-qr-retarget-playlist="{{ url_for('qr_retarget_playlist', qr_id=l.qr.id) }}"
                       {% endif %}>{{ l.course.name }}{{ ' – đã có mã QR' if l.qr and l.qr.active else '' }}</option>
                   {% endfor %}
                 </select>
-                <button class="btn btn-primary btn-sm playlist-qr-create" {{ 'disabled' if not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
+                <button class="btn btn-primary btn-sm playlist-qr-create"
+                        {{ 'hidden' if chosen_playlist_course.has_qr else '' }}
+                        {{ 'disabled' if not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
               </form>
               <div class="playlist-qr-compact-actions d-flex align-items-center flex-wrap gap-1 mt-1" hidden>
-                <a class="btn btn-outline-secondary btn-sm playlist-qr-download" hidden href="#" aria-label="Tải mã QR playlist">Tải QR</a>
+                <a class="btn btn-outline-secondary btn-sm playlist-qr-download qr-save-picker" hidden href="#" aria-label="Tải mã QR playlist">Tải QR</a>
                 <button type="button" class="btn btn-outline-warning btn-sm playlist-qr-retarget-toggle" hidden aria-expanded="false">Đổi đích</button>
                 <form method="post" action="#" class="playlist-qr-delete-form library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Ngừng sử dụng mã QR playlist này? Mã đã in sẽ không hoạt động nhưng lịch sử được giữ lại.');" hidden>
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

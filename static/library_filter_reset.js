@@ -32,7 +32,7 @@
       clearOwnSelections('slc-playlist-selection-v4:',userId);
     }else if(link.dataset.libraryFilterReset==='video'){
       const userId=document.getElementById('assignVideoForm')?.dataset.userId;
-      clearOwnSelections('slc-video-selection-v1:',userId);
+      clearOwnSelections('slc-video-selection-v2:',userId);
     }
     // Để trình duyệt mở URL do server cung cấp: các ô lọc trở về mặc định.
   });
