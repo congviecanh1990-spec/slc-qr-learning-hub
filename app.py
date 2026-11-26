@@ -5356,6 +5356,19 @@ def register_routes(app):
             ResearchComparisonPair.created_at.desc(), ResearchComparisonPair.id.desc()).all()
         paired_groups, paired_totals = pair_metrics(all_research_pairs)
         research_pairs = all_research_pairs[:120]
+        # Trong khi chưa tải/lưu đủ QR, bảng vẫn phải hiện rõ lượt vừa
+        # tạo; thời gian tạm tính KHÔNG được dùng trong KPI nghiệm thu.
+        observation_now = utcnow()
+        pending_measurements = {}
+        for item in research_pairs:
+            if item.active and item.measurement_started_at and not item.measurement_finished_at:
+                started = item.measurement_started_at
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                pending_measurements[item.id] = {
+                    "seconds": round(max(0, (observation_now-started).total_seconds()), 1),
+                    "operations": item.measurement_operations or 0,
+                }
         web_only_pairs = [
             p for p in all_research_pairs if p.active
             and p.measurement_finished_at is not None
@@ -5420,6 +5433,7 @@ def register_routes(app):
             comparison_rows=comparison_rows, task_catalog=task_catalog,
             survey_links=survey_links,
             research_pairs=research_pairs, web_only_pairs=web_only_pairs,
+            pending_measurements=pending_measurements,
             paired_groups=paired_groups, paired_totals=paired_totals,
             pair_kinds=RESEARCH_PAIR_KINDS, normalize_pair_kind=normalize_kind,
             lecturers_for_research=lecturers_for_research,
