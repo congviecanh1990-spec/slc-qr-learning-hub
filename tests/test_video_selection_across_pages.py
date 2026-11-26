@@ -697,7 +697,7 @@ def test_download_all_js_has_no_checkbox_or_course_gate():
     assert "form.querySelector('[name=\"download_scope\"]')?.value==='all_assigned'" in js
     assert "if(!allAssignedQrs){" in js
     assert "else if(isVideoBulk(form) && !allVideoQrs)" in js
-    assert "create.hidden=false;create.disabled=!select.value" in html
+    assert "create.hidden=hasQr;create.disabled=!select.value" in html
 
 
 
