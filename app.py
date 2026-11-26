@@ -2643,7 +2643,10 @@ def register_routes(app):
         user = current_user()
         selected_ids = selected_filtered_library_video_ids(user, request.form)
         raw_row_assignments = request.form.getlist("qr_course_assignments")
-        if len(raw_row_assignments) > 5:
+        # Trong quá trình cập nhật bộ nhớ JS cũ, cùng một dòng có thể được gửi
+        # hai lần (input form-associated và input được JS cũ thêm ở submit).
+        # Chấp nhận bản sao giống hệt, nhưng vẫn từ chối môn mâu thuẫn.
+        if len(raw_row_assignments) > 10:
             abort(400)
         # Không cho gửi ID ngẫu nhiên ngoài đúng 5 dòng đang hiển thị.
         args = dict(parse_qsl((request.form.get("return_query") or "")[:1200], keep_blank_values=True))
@@ -2668,10 +2671,13 @@ def register_routes(app):
             ):
                 abort(400)
             video_id, row_course_id = int(video_part), int(course_part)
-            if (video_id not in current_page_ids or video_id in row_course_ids
-                    or row_course_id <= 0):
+            if video_id not in current_page_ids or row_course_id <= 0:
+                abort(400)
+            if video_id in row_course_ids and row_course_ids[video_id] != row_course_id:
                 abort(400)
             row_course_ids[video_id] = row_course_id
+        if len(row_course_ids) > 5:
+            abort(400)
 
         selected_course_id = request.form.get("course_id", type=int)
         selected_course = db.session.get(Course, selected_course_id) if selected_course_id else None
@@ -2740,7 +2746,8 @@ def register_routes(app):
         db.session.commit()
         flash(
             f"Đã gán mới {created} liên kết video–môn học/mô đun; "
-            f"thay thế {removed} liên kết môn cũ; {skipped} liên kết đã có.",
+            f"thay thế {removed} liên kết môn cũ; {skipped} liên kết đã có. "
+            f"Đã nhận môn chọn riêng tại {len(row_course_ids)} dòng Mã QR.",
             "success",
         )
         return redirect(videos_library_return("videos", request.form.get("return_query")))
