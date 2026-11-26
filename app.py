@@ -3609,47 +3609,92 @@ def register_routes(app):
     @app.post("/videos/qr/download-selected")
     @login_required
     def download_selected_video_qrs():
-        """ZIP QR chỉ cho video được chọn, đã gán vào môn và đã có QR hợp lệ.
+        """Tải toàn bộ QR đã tạo hoặc tải riêng các video đã chọn (API cũ).
 
-        Dùng cùng lựa chọn xuyên trang với Gán môn và Tạo QR.
-        Không tự tạo QR và không lấy QR của người dùng khác.
+        Nút trên Kho video dùng download_scope=all_assigned: không cần chọn môn
+        hay checkbox, chỉ lấy QR đang hoạt động của những video độc lập đã gán
+        vào môn do người dùng phụ trách. Nhánh cũ vẫn giới hạn theo môn và ID
+        được chọn để bảo toàn các luồng tải riêng đã tồn tại.
         """
         user = current_user()
-        course_id = request.form.get("course_id", type=int)
-        course = db.session.get(Course, course_id) if course_id else None
-        if not course or not course.active or not course_owned_by_user(course, user):
-            abort(403)
-        video_ids = selected_filtered_library_video_ids(user, request.form, max_selected=1000)
-        if not video_ids:
-            flash("Vui lòng chọn video có QR để tải.", "warning")
-            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
-        links = CourseVideo.query.filter(
-            CourseVideo.course_id == course.id,
-            CourseVideo.video_id.in_(video_ids)).all()
+        download_all = request.form.get("download_scope") == "all_assigned"
+        course = None
+        if download_all:
+            independent_ids = filtered_library_video_query(user).with_entities(Video.id)
+            links = (
+                CourseVideo.query.join(Course, CourseVideo.course_id == Course.id)
+                .filter(
+                    Course.owner_id == user.id,
+                    Course.active.is_(True),
+                    CourseVideo.video_id.in_(independent_ids),
+                )
+                .order_by(CourseVideo.course_id, CourseVideo.id)
+                .limit(1001)
+                .all()
+            )
+            if len(links) > 1000:
+                msg = "Có hơn 1000 liên kết video–môn. Hãy liên hệ quản trị viên để tải theo đợt."
+                if request.headers.get("Accept") == "application/json":
+                    return jsonify({"ok": False, "message": msg}), 413
+                flash(msg, "warning")
+                return redirect(videos_library_return(
+                    "videos", request.form.get("return_query", "")))
+        else:
+            course_id = request.form.get("course_id", type=int)
+            course = db.session.get(Course, course_id) if course_id else None
+            if not course or not course.active or not course_owned_by_user(course, user):
+                abort(403)
+            video_ids = selected_filtered_library_video_ids(user, request.form, max_selected=1000)
+            if not video_ids:
+                if request.headers.get("Accept") == "application/json":
+                    return jsonify({
+                        "ok": False, "message": "Hãy tích chọn video có QR để tải."
+                    }), 409
+                flash("Vui lòng chọn video có QR để tải.", "warning")
+                return redirect(videos_library_return(
+                    "videos", request.form.get("return_query", "")))
+            links = CourseVideo.query.filter(
+                CourseVideo.course_id == course.id,
+                CourseVideo.video_id.in_(video_ids),
+            ).order_by(CourseVideo.id).all()
+
         qrs = []
         used_qr_ids = set()
         for link in links:
             qr = (db.session.get(QrCode, link.qr_id) if link.qr_id
-                  else active_qr_for_course_video(course.id, link.video_id, user.id))
+                  else active_qr_for_course_video(link.course_id, link.video_id, user.id))
             if not qr or not qr.active or not qr_managed_by_user(qr, user) or qr.id in used_qr_ids:
                 continue
-            # Tránh tải QR playlist hoặc QR đã đổi video đích vào danh sách video.
+            # Không lấy mã QR playlist, QR thuộc người khác hoặc QR đã đổi đích.
             if qr.is_playlist:
                 continue
             target = qr.current_target
-            if not target or target.video_id != link.video_id:
+            if not target or target.video_id != link.video_id or qr.course_id != link.course_id:
                 continue
             used_qr_ids.add(qr.id)
             qrs.append(qr)
         if not qrs:
+            message = (
+                "Chưa có mã QR hợp lệ cho các video độc lập đã gán môn. "
+                "Hãy bấm Tạo QR cho video đã gán môn trước."
+                if download_all else
+                "Video được chọn chưa có QR hợp lệ."
+            )
             if request.headers.get("Accept") == "application/json":
-                return jsonify({"ok": False, "message": "Video được chọn chưa có QR hợp lệ."}), 409
-            flash("Các video đã chọn chưa có mã QR hợp lệ trong môn học/mô đun này.", "warning")
-            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+                return jsonify({"ok": False, "message": message}), 409
+            flash(message, "warning")
+            return redirect(videos_library_return(
+                "videos", request.form.get("return_query", "")))
         if request.headers.get("Accept") == "application/json":
-            return jsonify({"ok": True, "course_id": course.id,
-                            "files": [{"id": q.id, "name": qr_download_name(q),
-                                       "url": url_for("qr_png", qr_id=q.id)} for q in qrs]})
+            return jsonify({
+                "ok": True, "course_id": course.id if course else None,
+                "count": len(qrs),
+                "files": [
+                    {"id": qr.id, "name": qr_download_name(qr),
+                     "url": url_for("qr_png", qr_id=qr.id)}
+                    for qr in qrs
+                ],
+            })
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -3664,9 +3709,13 @@ def register_routes(app):
                 used_names.add(name)
                 zf.writestr(name, png.getvalue())
         bio.seek(0)
+        download_name = (
+            "Ma_QR_video_da_tao_tat_ca.zip" if download_all
+            else f"Ma_QR_video_da_chon_{safe_filename(course.code)}.zip"
+        )
         return send_file(
             bio, mimetype="application/zip", as_attachment=True,
-            download_name=f"Ma_QR_video_da_chon_{safe_filename(course.code)}.zip")
+            download_name=download_name)
 
     @app.post("/courses/<int:course_id>/qr/bulk")
     @login_required
