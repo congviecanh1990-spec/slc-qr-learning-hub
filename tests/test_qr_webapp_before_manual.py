@@ -229,7 +229,7 @@ def test_backend_qr_creation_survives_missing_javascript_start(configured_app):
         report = client.get("/research")
         assert report.status_code == 200
         assert "Đã ghi nhận tạo QR; chờ tải và lưu tệp" in report.get_data(as_text=True)
-        assert "Ghi QR dự phòng; cần đo lại toàn bộ thời gian" in report.get_data(as_text=True)
+        assert "Mốc bắt đầu dự phòng; cần đo lại từ đầu để tính KPI" in report.get_data(as_text=True)
 
         saved = client.post("/research/auto/download-saved", data={
             "download_style": "row", "qr_ids": json.dumps([qr_id]),
