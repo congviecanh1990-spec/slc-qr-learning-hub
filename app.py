@@ -2877,52 +2877,53 @@ def register_routes(app):
     @app.post("/playlists/bulk-create-course-qrs")
     @login_required
     def bulk_create_playlist_qrs_from_library():
-        """Tạo QR cho tất cả playlist đã gán môn, không phụ thuộc bộ lọc hiện hành.
+        """Tạo QR cho TẤT CẢ playlist đã gán MH/MĐ của giảng viên.
 
-        Mã QR cũ được tái sử dụng; QR riêng từng playlist vẫn hoạt động như trước.
+        Không phụ thuộc ô tích, môn đang chọn, tìm kiếm hay trang. Một QR
+        duy nhất cho từng cặp playlist–môn; mã cũ được giữ nguyên.
         """
         user = current_user()
-        course = db.session.get(Course, request.form.get("course_id", type=int))
-        if not course or not course.active or not course_owned_by_user(course, user):
-            abort(403)
-        redirect_to = videos_library_return_with_bulk_course(request.form.get("return_query", ""), course.id)
-        selection_mode = request.form.get("playlist_selection_mode", "none")
-        if selection_mode not in {"all", "none"}:
-            abort(400)
-        list_name = ("excluded_playlist_ids" if selection_mode == "all"
-                     else "selected_playlist_ids")
-        raw_ids = request.form.getlist(list_name) if hasattr(request.form, "getlist") else []
-        if len(raw_ids) > 2000 or any(not str(value).isascii() or not str(value).isdigit() or int(value) <= 0 for value in raw_ids):
-            abort(400)
-        override_ids = {int(value) for value in raw_ids}
-        # Tạo QR chỉ cho playlist thuộc đúng kết quả lọc mà người dùng đang chọn;
-        # không tự tạo QR cho playlist khác của cùng môn nằm ngoài từ khóa.
-        playlist_search = request.form.get("p_q", "").strip()[:150]
-        playlist_assignment = request.form.get("p_assignment", "").strip()
-        if playlist_assignment not in {"", "assigned", "unassigned"}:
-            abort(400)
-        filtered_ids = {playlist.id for playlist in
-                        filtered_library_playlist_query(user, playlist_search, playlist_assignment).all()}
-        all_links = CoursePlaylist.query.filter_by(course_id=course.id, active=True).order_by(CoursePlaylist.id).all()
-        links = [link for link in all_links
-                 if link.playlist_id in filtered_ids and
-                 ((link.playlist_id not in override_ids) if selection_mode == "all"
-                  else (link.playlist_id in override_ids))]
+        allowed_ids = visible_playlist_query(user).with_entities(Playlist.id)
+        links = (
+            CoursePlaylist.query
+            .join(Course, Course.id == CoursePlaylist.course_id)
+            .filter(
+                Course.owner_id == user.id,
+                Course.active.is_(True),
+                CoursePlaylist.active.is_(True),
+                CoursePlaylist.playlist_id.in_(allowed_ids),
+            )
+            .order_by(CoursePlaylist.id)
+            .limit(501)
+            .all()
+        )
+        redirect_to = videos_library_return(
+            "playlists", request.form.get("return_query", ""))
         if not links:
-            flash("Không có playlist nào được chọn và đã gán môn để tạo mã QR.", "warning")
+            flash(
+                "Chưa có playlist nào được gán môn học/mô đun để tạo QR. "
+                "Hãy gán môn cho playlist trước.", "warning")
             return redirect(redirect_to)
+        if len(links) > 500:
+            flash(
+                "Có trên 500 liên kết playlist–môn. Hãy liên hệ quản trị viên "
+                "để xử lý theo đợt.", "warning")
+            return redirect(redirect_to)
+
         playlist_ids = [link.playlist_id for link in links]
-        playable_ids = set()
-        if playlist_ids:
-            playable_ids = {row[0] for row in (
+        playable_ids = {
+            row[0] for row in (
                 db.session.query(PlaylistVideo.playlist_id)
                 .join(Video, Video.id == PlaylistVideo.video_id)
-                .filter(PlaylistVideo.playlist_id.in_(playlist_ids),
-                        Video.is_available.is_(True),
-                        or_(Video.privacy_status.is_(None), Video.privacy_status != "private"),
-                        Video.embeddable.isnot(False))
-                .distinct().all()
-            )}
+                .filter(
+                    PlaylistVideo.playlist_id.in_(playlist_ids),
+                    Video.is_available.is_(True),
+                    or_(Video.privacy_status.is_(None),
+                        Video.privacy_status != "private"),
+                    Video.embeddable.isnot(False),
+                ).distinct().all()
+            )
+        }
         created = existing = skipped = 0
         started = time.perf_counter()
         total_processing = 0.0
@@ -2931,33 +2932,43 @@ def register_routes(app):
             if not playlist or not playlist.is_available or playlist.id not in playable_ids:
                 skipped += 1
                 continue
-            # Chỉ giảng viên có kết nối với kênh gốc mới được tạo QR mới.
-            # QR cũ từ trước khi bàn giao được giữ nguyên, không tạo trùng.
+            # Không tạo QR mới cho playlist thuộc kênh của người khác;
+            # QR đã chuyển giao vẫn được tái sử dụng theo phân quyền.
             try:
-                qr, was_created = create_qr_for_course_playlist(course, playlist, user, link)
+                qr, was_created = create_qr_for_course_playlist(
+                    link.course, playlist, user, link)
             except ValueError:
                 skipped += 1
                 continue
             if was_created:
                 created += 1
-                total_processing += qr.processing_seconds or 0.0
+                total_processing += float(qr.processing_seconds or 0)
             else:
                 existing += 1
-        elapsed = time.perf_counter() - started
-        passed = bool(created or existing)
         record_functional_test(
-            "QR_PLAYLIST_FILTERED_BULK", "Tạo QR cho playlist đã chọn và đã gán môn", passed,
-            owner_id=user.id,
-            note=f"Môn: {course.name}; bộ lọc {playlist_search!r}/{playlist_assignment or 'tất cả'}; "
-                 f"tổng playlist đã gán {len(all_links)}; trong phạm vi và được chọn {len(links)}; "
-                 f"bỏ chọn {len(all_links)-len(links)}; QR mới {created}; đã có {existing}; bỏ qua {skipped}.",
+            "QR_PLAYLIST_FILTERED_BULK",
+            "Tạo QR cho toàn bộ playlist đã gán MH/MĐ",
+            bool(created or existing), owner_id=user.id,
+            note=(
+                f"Tất cả môn/playlist của GV: {len(links)} liên kết; "
+                f"QR mới {created}; đã có {existing}; bỏ qua {skipped}."
+            ),
         )
         record_webapp_experiment(
-            user.id, "TAO_QR_HANG_LOAT", elapsed, operations_count=1, success=passed,
-            note=f"Môn {course.name}: QR playlist mới {created}; đã có {existing}; bỏ qua {skipped}",
-            processing_seconds=(total_processing / created if created else None),
+            user.id, "TAO_QR_HANG_LOAT", time.perf_counter() - started,
+            operations_count=1, success=bool(created or existing),
+            note=(
+                f"Playlist đã gán MH/MĐ {len(links)}; "
+                f"mới {created}; cũ {existing}; bỏ qua {skipped}"
+            ),
+            processing_seconds=total_processing,
         )
         db.session.commit()
+        flash(
+            f"Đã xử lý {len(links)} liên kết playlist–môn: tạo {created} mã QR mới, "
+            f"{existing} mã đã có, {skipped} playlist chưa đủ điều kiện.",
+            "success" if (created or existing) else "warning",
+        )
         return redirect(redirect_to)
 
     @app.post("/playlists/<int:playlist_id>/set-courses")
@@ -3455,40 +3466,73 @@ def register_routes(app):
     @app.post("/playlists/qr/download-selected")
     @login_required
     def download_selected_playlist_qrs():
-        """Chỉ trả QR của playlist được CHỌN (xuyên trang) và đã gán đúng môn."""
+        """Tải toàn bộ QR playlist đã gán môn, giữ lựa chọn riêng cho API cũ.
+
+        download_scope=all_assigned bỏ yêu cầu checkbox/course_id, chỉ lấy QR
+        đang hoạt động của các playlist thuộc kênh và môn đang quản lý.
+        """
         user = current_user()
-        course_id = request.form.get("course_id", type=int)
-        course = db.session.get(Course, course_id) if course_id else None
-        if not course or not course.active or not course_owned_by_user(course, user):
-            abort(403)
-        selection_mode = request.form.get("playlist_selection_mode", "none")
-        if selection_mode not in {"all", "none"}:
-            abort(400)
-        key = ("excluded_playlist_ids" if selection_mode == "all"
-               else "selected_playlist_ids")
-        raw_ids = request.form.getlist(key)
-        if len(raw_ids) > 2000 or any(
-            not str(x).isascii() or not str(x).isdigit() or int(x) < 1
-            for x in raw_ids
-        ):
-            abort(400)
-        overrides = {int(x) for x in raw_ids}
-        keyword = (request.form.get("p_q") or "").strip()[:150]
-        assignment = (request.form.get("p_assignment") or "").strip()
-        if assignment not in {"", "assigned", "unassigned"}:
-            abort(400)
-        filtered_ids = {p.id for p in filtered_library_playlist_query(
-            user, keyword, assignment).all()}
-        candidate_ids = (
-            filtered_ids - overrides if selection_mode == "all"
-            else filtered_ids & overrides
-        )
-        if not candidate_ids:
-            return jsonify({"ok": False, "message": "Chưa tích chọn playlist hợp lệ."}), 409
-        links = CoursePlaylist.query.filter(
-            CoursePlaylist.course_id == course.id,
-            CoursePlaylist.playlist_id.in_(candidate_ids),
-            CoursePlaylist.active.is_(True)).all()
+        all_assigned = request.form.get("download_scope") == "all_assigned"
+        course = None
+        if all_assigned:
+            allowed_ids = visible_playlist_query(user).with_entities(Playlist.id)
+            links = (
+                CoursePlaylist.query
+                .join(Course, Course.id == CoursePlaylist.course_id)
+                .filter(
+                    Course.owner_id == user.id,
+                    Course.active.is_(True),
+                    CoursePlaylist.active.is_(True),
+                    CoursePlaylist.playlist_id.in_(allowed_ids),
+                )
+                .order_by(CoursePlaylist.course_id, CoursePlaylist.id)
+                .limit(1001)
+                .all()
+            )
+            if len(links) > 1000:
+                msg = "Có hơn 1000 liên kết playlist–môn. Hãy tải theo đợt."
+                if request.headers.get("Accept") == "application/json":
+                    return jsonify({"ok": False, "message": msg}), 413
+                flash(msg, "warning")
+                return redirect(videos_library_return(
+                    "playlists", request.form.get("return_query", "")))
+        else:
+            course_id = request.form.get("course_id", type=int)
+            course = db.session.get(Course, course_id) if course_id else None
+            if not course or not course.active or not course_owned_by_user(course, user):
+                abort(403)
+            selection_mode = request.form.get("playlist_selection_mode", "none")
+            if selection_mode not in {"all", "none"}:
+                abort(400)
+            key = ("excluded_playlist_ids" if selection_mode == "all"
+                   else "selected_playlist_ids")
+            raw_ids = request.form.getlist(key)
+            if len(raw_ids) > 2000 or any(
+                not str(x).isascii() or not str(x).isdigit() or int(x) < 1
+                for x in raw_ids
+            ):
+                abort(400)
+            overrides = {int(x) for x in raw_ids}
+            keyword = (request.form.get("p_q") or "").strip()[:150]
+            assignment = (request.form.get("p_assignment") or "").strip()
+            if assignment not in {"", "assigned", "unassigned"}:
+                abort(400)
+            filtered_ids = {p.id for p in filtered_library_playlist_query(
+                user, keyword, assignment).all()}
+            candidate_ids = (
+                filtered_ids - overrides if selection_mode == "all"
+                else filtered_ids & overrides
+            )
+            if not candidate_ids:
+                return jsonify({
+                    "ok": False, "message": "Chưa tích chọn playlist hợp lệ."
+                }), 409
+            links = CoursePlaylist.query.filter(
+                CoursePlaylist.course_id == course.id,
+                CoursePlaylist.playlist_id.in_(candidate_ids),
+                CoursePlaylist.active.is_(True),
+            ).all()
+
         qrs = []
         used = set()
         for link in links:
@@ -3497,19 +3541,33 @@ def register_routes(app):
                 continue
             if not qr_managed_by_user(qr, user):
                 continue
-            # QR playlist lưu đích tại QrCode.playlist_id (không dùng
-            # QrTargetHistory vốn chỉ dành cho QR video).
-            if qr.playlist_id != link.playlist_id:
+            if qr.playlist_id != link.playlist_id or qr.course_id != link.course_id:
                 continue
             used.add(qr.id)
             qrs.append(qr)
         if not qrs:
-            return jsonify({"ok": False,
-                "message": "Những playlist được chọn chưa có mã QR hợp lệ trong môn học."}), 409
+            message = (
+                "Chưa có QR hợp lệ cho các playlist đã gán môn. "
+                "Hãy bấm Tạo QR cho playlist đã gán MH/MĐ trước."
+                if all_assigned else
+                "Những playlist được chọn chưa có mã QR hợp lệ trong môn học."
+            )
+            if request.headers.get("Accept") == "application/json":
+                return jsonify({"ok": False, "message": message}), 409
+            flash(message, "warning")
+            return redirect(videos_library_return(
+                "playlists", request.form.get("return_query", "")))
         if request.headers.get("Accept") == "application/json":
-            return jsonify({"ok": True, "course_id": course.id,
-                            "files": [{"id": q.id, "name": qr_download_name(q),
-                                       "url": url_for("qr_png", qr_id=q.id)} for q in qrs]})
+            return jsonify({
+                "ok": True,
+                "course_id": course.id if course else None,
+                "count": len(qrs),
+                "files": [
+                    {"id": qr.id, "name": qr_download_name(qr),
+                     "url": url_for("qr_png", qr_id=qr.id)}
+                    for qr in qrs
+                ],
+            })
         bio = io.BytesIO()
         names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -3523,8 +3581,11 @@ def register_routes(app):
                 names.add(name)
                 archive.writestr(name, image.getvalue())
         bio.seek(0)
-        return send_file(bio, mimetype="application/zip", as_attachment=True,
-                         download_name=f"Ma_QR_playlist_{safe_filename(course.code)}.zip")
+        name = ("Ma_QR_playlist_da_tao_tat_ca.zip" if all_assigned
+                else f"Ma_QR_playlist_{safe_filename(course.code)}.zip")
+        return send_file(
+            bio, mimetype="application/zip", as_attachment=True,
+            download_name=name)
 
     @app.post("/videos/qr/bulk-selected")
     @login_required
