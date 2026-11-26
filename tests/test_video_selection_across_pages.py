@@ -660,6 +660,16 @@ def test_bulk_create_then_all_qr_download_and_row_buttons(configured_app):
         assert len({x["id"] for x in payload["files"]}) == 2
 
         # Không cần chọn môn hay tích checkbox để tải ZIP.
+        # Mỗi môn có thư mục riêng, giữ nguyên tên video bên trong.
+        with app.app_context():
+            python_course = db.session.get(Course, keys["course"])
+            python_folder = web.qr_zip_course_folder(
+                QrCode.query.filter_by(course_id=python_course.id).first()
+            )
+            math_folder = web.qr_zip_course_folder(
+                QrCode.query.filter_by(course_id=math_id).first()
+            )
+        assert python_folder != math_folder
         response = client.post("/videos/qr/download-selected", data={
             "download_scope": "all_assigned",
         })
@@ -669,9 +679,12 @@ def test_bulk_create_then_all_qr_download_and_row_buttons(configured_app):
         with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
             names = archive.namelist()
             assert set(names) == {
-                "Bài học Tin học số 12.png",
-                "Bài học Tin học số 10.png",
+                f"{python_folder}/Bài học Tin học số 12.png",
+                f"{math_folder}/Bài học Tin học số 10.png",
             }
+            assert all(len(n.split("/")) == 2 for n in names)
+            assert all(n.startswith((python_folder + "/", math_folder + "/"))
+                       for n in names)
             assert all(archive.read(n).startswith(bytes([137, 80, 78, 71, 13, 10, 26, 10]))
                        for n in names)
 
@@ -807,6 +820,16 @@ def test_playlist_bulk_qr_all_assigned_shows_three_actions_and_downloads_zip(con
         assert payload["ok"] and payload["count"] == 2
         assert len({item["id"] for item in payload["files"]}) == 2
         assert all(item["url"].endswith("/png") for item in payload["files"])
+        with app.app_context():
+            python_qr = QrCode.query.filter_by(
+                target_type="playlist", course_id=keys["course"]
+            ).first()
+            math_qr = QrCode.query.filter_by(
+                target_type="playlist", course_id=math_id
+            ).first()
+            python_folder = web.qr_zip_course_folder(python_qr)
+            math_folder = web.qr_zip_course_folder(math_qr)
+        assert python_folder != math_folder
         zip_response = client.post("/playlists/qr/download-selected", data={
             "download_scope": "all_assigned"
         })
@@ -815,8 +838,10 @@ def test_playlist_bulk_qr_all_assigned_shows_three_actions_and_downloads_zip(con
         assert "Ma_QR_playlist_da_tao_tat_ca.zip" in zip_response.headers["Content-Disposition"]
         with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
             assert set(archive.namelist()) == {
-                "Chủ đề 1.png", "Playlist thứ hai.png"
+                f"{python_folder}/Chủ đề 1.png",
+                f"{math_folder}/Playlist thứ hai.png",
             }
+            assert all(len(n.split("/")) == 2 for n in archive.namelist())
             for name in archive.namelist():
                 assert name.endswith(".png")
                 assert archive.read(name).startswith(bytes([137,80,78,71,13,10,26,10]))
@@ -905,6 +930,34 @@ def test_qr_downloads_use_original_media_titles_without_browser_write_prompts(co
     assert "const a=document.createElement('a');" in js
     assert "a.download=allVideoQrs?" in js
     assert "recordDownload(ids.length>=2?'bulk':'row',ids,'not_verified')" in js
+
+
+
+
+def test_zip_folder_names_are_safe_unique_and_keep_vietnamese():
+    """Trùng tên môn/QR vẫn không ghi đè; tên môn có dấu vẫn hiển thị."""
+    from types import SimpleNamespace
+    import app as web
+    c1 = SimpleNamespace(id=17, name="Lập trình / Python")
+    c2 = SimpleNamespace(id=18, name="Lập trình / Python")
+    p = SimpleNamespace(title="Bài 01: Toán rời rạc")
+    qr1 = SimpleNamespace(course=c1, is_playlist=True, playlist=p,
+                          slug="first-qr", id=21, title="Unused")
+    qr2 = SimpleNamespace(course=c1, is_playlist=True, playlist=p,
+                          slug="second-qr", id=22, title="Unused")
+    qr3 = SimpleNamespace(course=c2, is_playlist=True, playlist=p,
+                          slug="third-qr", id=23, title="Unused")
+    names = set()
+    first = web.qr_zip_entry_name(qr1, names)
+    second = web.qr_zip_entry_name(qr2, names)
+    third = web.qr_zip_entry_name(qr3, names)
+    assert len(names) == 3
+    assert first == "Lập trình _ Python (MH000017)/Bài 01_ Toán rời rạc.png"
+    assert second == "Lập trình _ Python (MH000017)/Bài 01_ Toán rời rạc_second-qr.png"
+    assert third == "Lập trình _ Python (MH000018)/Bài 01_ Toán rời rạc.png"
+    assert all(name.count("/") == 1 for name in names)
+    # Phân loại chỉ thay đổi cách đóng gói ZIP, không thay đổi tên PNG tải riêng.
+    assert web.qr_download_name(qr1) == "Bài 01_ Toán rời rạc.png"
 
 
 
