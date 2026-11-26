@@ -5895,24 +5895,51 @@ def register_routes(app):
             abort(400)
         if method == "manual_confirmed" and request.form.get("user_confirmed") != "yes":
             abort(400)
-        is_bulk = style == "bulk" and len(posted) >= 2
-        task_kind = "QR_VIDEO_HANG_LOAT" if is_bulk else "QR_TUNG_VIDEO_PLAYLIST"
-        pair = active_research_measurement(user.id)
-        result = {"ok": True, "kind": task_kind, "measured": False}
-        if not pair:
-            return jsonify(result)
-
-        created = research_created_qr_ids(pair)
-        if not set(posted).issubset(set(created)):
-            return jsonify({**result, "message": "Mã tải không thuộc lượt QR mới được đo."})
-
+        # Một tệp ZIP "Tải tất cả" có thể chứa mã tạo trước đó và thuộc
+        # nhiều môn. Chỉ đối chiếu phần giao với QR MỚI của lượt đo hiện hành,
+        # sau khi kiểm tra quyền của TOÀN BỘ danh sách được gửi.
         qr_map = {q.id: q for q in QrCode.query.filter(
-            QrCode.id.in_(posted), QrCode.course_id == pair.course_id,
-            QrCode.active.is_(True)).all()}
+            QrCode.id.in_(posted), QrCode.active.is_(True)).all()}
         if len(qr_map) != len(posted) or not all(
             qr_managed_by_user(qr_map[qid], user) for qid in posted
         ):
             abort(403)
+        pair = active_research_measurement(user.id)
+        if not pair:
+            # Khôi phục phiên đo sau khi đổi trang/đăng nhập lại, nhưng chỉ khi
+            # có DUY NHẤT một lượt mở chứa QR đang tải. Không tự chọn một
+            # trong nhiều lượt đo có thể gây ghi nhầm kết quả nghiên cứu.
+            candidates = ResearchComparisonPair.query.filter(
+                ResearchComparisonPair.lecturer_id == user.id,
+                ResearchComparisonPair.active.is_(True),
+                ResearchComparisonPair.measurement_started_at.isnot(None),
+                ResearchComparisonPair.measurement_finished_at.is_(None),
+            ).order_by(ResearchComparisonPair.measurement_started_at.desc()).limit(50).all()
+            matching = [p for p in candidates
+                        if set(posted).intersection(research_created_qr_ids(p))]
+            if len(matching) == 1:
+                pair = matching[0]
+                session["research_measurement_id"] = pair.id
+                session["research_measurement_nonce"] = secrets.token_hex(12)
+            elif len(matching) > 1:
+                return jsonify({
+                    "ok": True, "measured": False,
+                    "message": "Tệp chứa QR của nhiều lượt đo đang mở. "
+                               "Hãy xác nhận riêng từng lượt để tránh cộng trùng số liệu."
+                })
+        created = research_created_qr_ids(pair) if pair else []
+        matched = [qid for qid in posted if qid in set(created)
+                   and qr_map[qid].course_id == pair.course_id]
+        is_bulk = style == "bulk" and len(matched) >= 2
+        task_kind = "QR_VIDEO_HANG_LOAT" if is_bulk else "QR_TUNG_VIDEO_PLAYLIST"
+        result = {"ok": True, "kind": task_kind, "measured": False,
+                  "matched": len(matched), "downloaded": len(posted)}
+        if not pair:
+            return jsonify({**result, "message":
+                "Tệp đã gửi tới trình duyệt nhưng không có lượt đo tạo QR mới đang mở."})
+        if not matched:
+            return jsonify({**result, "message":
+                "QR tải xuống không thuộc học phần hoặc lượt tạo QR mới đang đo."})
 
         # Không được đổi kiểu khi đã có mã QR được ghi là đã tải theo
         # một phương thức khác: tránh chuyển nhầm kết quả đo cũ.
@@ -5972,9 +5999,17 @@ def register_routes(app):
             })
         pair.measurement_download_style = style
         if method == "not_verified":
+            reported_ops = request.form.get("operations_count", type=int)
+            if reported_ops is not None and 0 < reported_ops <= 100000:
+                pair.measurement_operations = max(
+                    pair.measurement_operations or 0, reported_ops
+                )
+            pair.updated_at = utcnow()
             db.session.commit()
             return jsonify({
-                **result, "message": "Đã phân loại lượt tải; chờ xác minh tệp được lưu."
+                **result, "message": "Đã ghi nhận yêu cầu tải "
+                     f"{len(matched)}/{len(created)} QR của lượt đo; "
+                     "đang chờ giảng viên xác nhận tệp đã lưu."
             })
         if not research_measurement_complete_qrs(pair):
             db.session.commit()
@@ -5982,7 +6017,7 @@ def register_routes(app):
                 **result, "message": "Chưa tạo đủ QR mới theo khối lượng đối chứng."
             })
         saved = research_saved_qr_ids(pair)
-        for qr_id in posted:
+        for qr_id in matched:
             if qr_id not in saved:
                 saved.append(qr_id)
         pair.measurement_saved_qr_ids = json.dumps(saved)
@@ -5994,7 +6029,7 @@ def register_routes(app):
         pair.updated_at = utcnow()
         complete = set(saved) == set(created)
         result.update({"measured": True, "saved": len(saved), "expected": len(created),
-                       "completed": complete})
+                       "completed": complete, "confirmation_method": method})
         if complete:
             ended = utcnow()
             started = pair.measurement_started_at
