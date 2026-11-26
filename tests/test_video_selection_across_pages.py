@@ -641,6 +641,9 @@ def test_bulk_create_then_all_qr_download_and_row_buttons(configured_app):
             selected = select.select_one("option[selected]")
             assert selected and selected["value"] == str(course_id)
             assert selected.get("data-qr-png")
+            assert selected.get("data-qr-filename") == (
+                f"Bài học Tin học số {12 if video_id == first_id else 10}.png"
+            )
             create_button = row.select_one(".video-qr-create")
             assert create_button is not None and not create_button.has_attr("disabled")
             assert row.select_one(".video-qr-download")
@@ -665,8 +668,10 @@ def test_bulk_create_then_all_qr_download_and_row_buttons(configured_app):
         assert "Ma_QR_video_da_tao_tat_ca.zip" in response.headers["Content-Disposition"]
         with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
             names = archive.namelist()
-            assert len(names) == 2
-            assert all(name.lower().endswith(".png") for name in names)
+            assert set(names) == {
+                "Bài học Tin học số 12.png",
+                "Bài học Tin học số 10.png",
+            }
             assert all(archive.read(n).startswith(bytes([137, 80, 78, 71, 13, 10, 26, 10]))
                        for n in names)
 
@@ -785,6 +790,10 @@ def test_playlist_bulk_qr_all_assigned_shows_three_actions_and_downloads_zip(con
             assert row is not None
             option = row.select_one(".playlist-qr-course-select option[selected]")
             assert option and option.get("data-qr-png")
+            assert option.get("data-qr-filename") == (
+                "Chủ đề 1.png" if playlist_id == first_playlist_id
+                else "Playlist thứ hai.png"
+            )
             assert row.select_one(".playlist-qr-create").has_attr("hidden")
             assert row.select_one(".playlist-qr-download") is not None
             assert row.select_one(".playlist-qr-retarget-toggle") is not None
@@ -805,7 +814,9 @@ def test_playlist_bulk_qr_all_assigned_shows_three_actions_and_downloads_zip(con
         assert zip_response.mimetype == "application/zip"
         assert "Ma_QR_playlist_da_tao_tat_ca.zip" in zip_response.headers["Content-Disposition"]
         with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
-            assert len(archive.namelist()) == 2
+            assert set(archive.namelist()) == {
+                "Chủ đề 1.png", "Playlist thứ hai.png"
+            }
             for name in archive.namelist():
                 assert name.endswith(".png")
                 assert archive.read(name).startswith(bytes([137,80,78,71,13,10,26,10]))
@@ -831,6 +842,69 @@ def test_playlist_all_download_empty_returns_error_and_qr_ui_matches_video(confi
     assert "formnovalidate" in html
     assert "allPlaylistQrs=isPlaylistBulk(form)" in js
     assert "event.submitter?.formAction?.includes('/playlists/bulk-create-course-qrs')" in js
+
+
+
+
+def test_qr_downloads_use_original_media_titles_without_browser_write_prompts(configured_app):
+    """Tải PNG dùng Content-Disposition đúng tên, ZIP dùng trình duyệt native."""
+    from urllib.parse import unquote
+    from bs4 import BeautifulSoup
+    from models import db, Course, CourseVideo, CoursePlaylist, QrCode
+    app, keys, web = configured_app
+    with app.app_context():
+        teacher = db.session.get(web.User, keys["teacher"])
+        course = db.session.get(Course, keys["course"])
+        video = db.session.get(web.Video, keys["video_ids"][12])
+        playlist = db.session.get(web.Playlist, keys["playlist"])
+        video.title = "Tiếng Việt: Bài 4 / Lập trình"
+        playlist.title = "Playlist: Học Python / Cơ bản"
+        video_link, _ = web.ensure_course_video_link(course, video, teacher)
+        qr_video, _ = web.create_qr_for_course_video(
+            course, video, teacher, video_link
+        )
+        playlist_link, _ = web.ensure_course_playlist_link(
+            course, playlist, teacher
+        )
+        qr_playlist, _ = web.create_qr_for_course_playlist(
+            course, playlist, teacher, playlist_link
+        )
+        db.session.commit()
+        video_id, playlist_id = qr_video.id, qr_playlist.id
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+        page = client.get("/videos")
+        assert page.status_code == 200
+        soup = BeautifulSoup(page.data, "html.parser")
+        opt_video = soup.select_one(
+            f"#video-{keys['video_ids'][12]} option[data-qr-png]"
+        )
+        opt_playlist = soup.select_one(
+            f"#playlist-{keys['playlist']} option[data-qr-png]"
+        )
+        assert opt_video["data-qr-filename"] == "Tiếng Việt: Bài 4 / Lập trình.png"
+        assert opt_playlist["data-qr-filename"] == "Playlist: Học Python / Cơ bản.png"
+        assert not soup.select('script[src*="qr_save_picker.js"]')
+        assert soup.select('script[src*="research_measurement.js?v=native-zip-20261126"]')
+        for qr_id, expected in (
+            (video_id, "Tiếng Việt_ Bài 4 _ Lập trình.png"),
+            (playlist_id, "Playlist_ Học Python _ Cơ bản.png"),
+        ):
+            download = client.get(f"/qr/{qr_id}/png")
+            assert download.status_code == 200
+            assert download.mimetype == "image/png"
+            assert download.data.startswith(bytes([137,80,78,71,13,10,26,10]))
+            assert expected in unquote(download.headers["Content-Disposition"])
+
+    ui = (ROOT / "templates/videos.html").read_text(encoding="utf-8")
+    js = (ROOT / "static/research_measurement.js").read_text(encoding="utf-8")
+    assert "download.download=(option.dataset.qrFilename" in ui
+    assert "window.showDirectoryPicker(" not in js
+    assert "window.showSaveFilePicker(" not in js
+    assert "const a=document.createElement('a');" in js
+    assert "a.download=allVideoQrs?" in js
+    assert "recordDownload(ids.length>=2?'bulk':'row',ids,'not_verified')" in js
 
 
 
