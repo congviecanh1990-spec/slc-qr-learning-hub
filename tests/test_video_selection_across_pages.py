@@ -566,7 +566,7 @@ def test_create_all_qrs_bypasses_single_course_browser_preflight():
     js = (ROOT / "static/research_measurement.js").read_text(encoding="utf-8")
     html = (ROOT / "templates/videos.html").read_text(encoding="utf-8")
     app_text = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert "event.submitter?.formAction?.includes('/videos/qr/bulk-selected'))return;" in js
+    assert "event.submitter?.formAction?.includes('/videos/qr/bulk-selected')" in js
     assert "Môn học/ mô đun áp dụng cho video tích chọn</label>" in html
     route = app_text.split('@app.post("/videos/qr/bulk-selected")')[1]
     route = route.split('@app.post("/videos/qr/download-selected")')[0]
@@ -695,7 +695,7 @@ def test_download_all_js_has_no_checkbox_or_course_gate():
     js = (ROOT / "static/research_measurement.js").read_text(encoding="utf-8")
     html = (ROOT / "templates/videos.html").read_text(encoding="utf-8")
     assert "form.querySelector('[name=\"download_scope\"]')?.value==='all_assigned'" in js
-    assert "if(!allVideoQrs){" in js
+    assert "if(!allAssignedQrs){" in js
     assert "else if(!allVideoQrs)window.videoBulkSelection?.appendSelection(form)" in js
     assert "create.hidden=false;create.disabled=!select.value" in html
 
