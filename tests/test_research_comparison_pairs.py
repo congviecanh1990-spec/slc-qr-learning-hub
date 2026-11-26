@@ -269,4 +269,4 @@ def test_flask_role_workflow_and_legacy_schema(tmp_path,monkeypatch):
         assert "Nhật ký đối chứng theo giảng viên và học phần".encode() in response.data
         assert 'Tổng thời gian (giây)'.encode() in response.data
         assert 'Số thao tác'.encode() in response.data
-        assert 'Chưa xác minh lưu tệp'.encode() in response.data
+        assert 'Đã chốt theo xác nhận giảng viên'.encode() in response.data
