@@ -1371,11 +1371,23 @@ def visible_playlist_query(user: User):
 
 
 def filtered_library_video_query(user, search="", status="", assignment="", playlist_id=None):
-    """Một truy vấn chung cho danh sách video VÀ các lệnh chọn mọi trang.
+    """Chỉ video chưa thuộc playlist học liệu; dùng chung cho chọn mọi trang.
 
-    Luôn giới hạn theo tài khoản giảng viên, kể cả khi trình duyệt gửi ID khác.
+    Giới hạn quyền theo giảng viên, loại playlist Uploads hệ thống của YouTube.
     """
-    q = visible_video_query(user)
+    # Video đã nằm trong một playlist học liệu (kể cả kênh khác, chưa gán môn
+    # hay chưa có QR) không được xuất hiện trong danh sách video độc lập.
+    # Uploads chỉ là danh sách tự sinh của YouTube, không tính là playlist học liệu.
+    in_learning_playlists = (
+        db.session.query(PlaylistVideo.video_id)
+        .join(Playlist, Playlist.id == PlaylistVideo.playlist_id)
+        .join(YouTubeChannel, YouTubeChannel.id == Playlist.channel_id)
+        .filter(or_(
+            YouTubeChannel.uploads_playlist_id.is_(None),
+            Playlist.youtube_playlist_id != YouTubeChannel.uploads_playlist_id,
+        ))
+    )
+    q = visible_video_query(user).filter(~Video.id.in_(in_learning_playlists))
     if status == "private":
         q = q.filter(Video.privacy_status == "private")
     elif status == "noembed":
