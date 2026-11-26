@@ -267,10 +267,10 @@ def test_assign_qr_row_course_and_create_all_assigned_without_video_checks(confi
             "return_query":"v_page=1",
             "qr_course_assignments":[f"{row_video}:{foreign_id}"]
         })
-        assert forbidden_response.status_code==403, (
-            forbidden_response.status_code, forbidden_response.location,
-            forbidden_response.get_data(as_text=True)[:250]
-        )
+        # Giao diện đang bắt 403 và chuyển về trang chủ kèm thông báo từ chối.
+        assert forbidden_response.status_code==302 and forbidden_response.location=="/"
+        with app.app_context():
+            assert CourseVideo.query.filter_by(course_id=foreign_id,video_id=row_video).count()==0
         assert client.post("/videos/assign-course",data={
             "video_selection_mode":"none",
             "qr_course_assignments":[f"{k['video_ids'][0]}:{own_id}"]
