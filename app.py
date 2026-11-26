@@ -1040,6 +1040,7 @@ def ensure_research_comparison_schema():
         "lecturer_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
         "course_name_snapshot": "VARCHAR(255) NOT NULL DEFAULT ''",
         "measurement_started_at": "TIMESTAMP WITH TIME ZONE",
+        "measurement_start_source": "VARCHAR(30)",
         "measurement_finished_at": "TIMESTAMP WITH TIME ZONE",
         "measurement_operations": "INTEGER NOT NULL DEFAULT 0",
         "measurement_single_videos": "INTEGER NOT NULL DEFAULT 0",
@@ -1097,15 +1098,43 @@ def research_saved_qr_ids(pair):
 
 
 def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
-    """Ghi nhận QR mới bất kể nút tạo: phân nhóm CHỈ sau thao tác tải thực tế.
+    """Lưu QR mới đúng môn và giảng viên; giữ phân loại theo cách tải thực tế.
 
-    Không suy ra tạo hàng loạt từ số mục tích chọn hoặc endpoint tạo QR.
-    Cùng một mã chỉ được tính một lần trong phiên đo, đúng học phần được giao.
+    Nếu giao diện chưa khởi động được phiên đo (ví dụ JavaScript bị chặn),
+    ghi nhận dự phòng khi mã QR mới thực sự được tạo. Lượt dự phòng có
+    minh chứng QR nhưng KHÔNG đủ mốc thời gian thao tác để đưa vào tỷ lệ
+    tiết kiệm tự động.
     """
-    if not has_request_context() or not session.get("research_measurement_id"):
+    if not has_request_context() or not qr_id or session.get("user_id") != lecturer_id:
         return
     pair = active_research_measurement(lecturer_id)
-    if not pair or pair.course_id != course_id or not qr_id:
+    if not pair and request.method == "POST" and request.endpoint in {
+        "create_video_qr_from_library", "create_playlist_qr_from_library",
+        "bulk_create_selected_video_qrs", "bulk_create_playlist_qrs_from_library",
+    }:
+        course = db.session.get(Course, course_id)
+        if not course or course.owner_id != lecturer_id or not course.active:
+            return
+        lecturer = db.session.get(User, lecturer_id)
+        # Dự phòng chỉ gắn với mã QR vừa tạo; không tự sinh bản ghi
+        # với nút gán môn hoặc hành động không có QR mới.
+        pair = ResearchComparisonPair(
+            pair_code="TN" + secrets.token_hex(8).upper(),
+            lecturer_id=lecturer_id, course_id=course_id,
+            lecturer_name_snapshot=(lecturer.name or lecturer.email or "")[:255],
+            course_name_snapshot=(course.name or "")[:255],
+            task_kind="QR_TUNG_VIDEO_PLAYLIST", video_count=0,
+            playlist_count=0, playlist_video_count=0, qr_count=0,
+            manual_operations=0, manual_seconds=0.0, auto_discovered=True,
+            measurement_started_at=utcnow(),
+            measurement_start_source="server_fallback",
+            note="Mốc bắt đầu dự phòng tại lúc tạo QR đầu tiên; chưa đủ thời gian toàn quy trình để tính hiệu quả nghiệm thu.",
+        )
+        db.session.add(pair)
+        db.session.flush()
+        session["research_measurement_id"] = pair.id
+        session["research_measurement_nonce"] = secrets.token_hex(12)
+    if not pair or pair.course_id != course_id:
         return
     known = research_created_qr_ids(pair)
     if qr_id in known or (not pair.auto_discovered and len(known) >= pair.qr_count):
@@ -5498,6 +5527,7 @@ def register_routes(app):
                 db.session.add(pair)
                 db.session.flush()
             pair.measurement_started_at = utcnow()
+            pair.measurement_start_source = "ui_preflight"
             pair.measurement_finished_at = None
             pair.measurement_saved_at = None
             pair.measurement_save_method = None
@@ -5673,7 +5703,10 @@ def register_routes(app):
             pair.measurement_finished_at = ended
             pair.measurement_saved_at = ended
             pair.measurement_save_method = pair.measurement_save_method or method
-            pair.measurement_verified = pair.measurement_save_method == "directory_picker"
+            pair.measurement_verified = (
+                pair.measurement_save_method == "directory_picker"
+                and pair.measurement_start_source != "server_fallback"
+            )
             result.update({"seconds": pair.webapp_seconds, "operations": pair.webapp_operations,
                            "verified": pair.measurement_verified})
             session.pop("research_measurement_id", None)
@@ -5782,6 +5815,7 @@ def register_routes(app):
             flash("Vui lòng ghi lý do đặt lại (từ 5 ký tự).", "warning")
             return redirect(url_for("research_page") + "#cap-do-chi-tiet")
         pair.measurement_started_at = None
+        pair.measurement_start_source = None
         pair.measurement_finished_at = None
         pair.measurement_operations = 0
         pair.measurement_single_videos = 0
