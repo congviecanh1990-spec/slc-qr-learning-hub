@@ -72,7 +72,7 @@ s.commit()
 helper_names={
  'filtered_library_playlist_query','ensure_course_playlist_link',
  'reconcile_course_videos_from_playlists','ensure_course_video_link','create_qr_for_course_playlist',
- 'videos_library_return_with_bulk_course',
+ 'visible_playlist_query','videos_library_return_with_bulk_course',
  'course_owned_by_user','videos_library_return',
 }
 route_names={'bulk_assign_filtered_library_playlists','bulk_create_playlist_qrs_from_library'}
@@ -151,53 +151,54 @@ old_link=models.CoursePlaylist.query.filter_by(course_id=c1.id,playlist_id=pls[1
 old_link.qr_id=preexisting.id
 s.commit()
 
-request.form=Form(course_id=str(c1.id),playlist_selection_mode='all',return_query='p_q=Python&p_assignment=unassigned&p_page=2')
+# NEW: no course selected, no checkbox, unmatched search and wrong course_id.
+# All active links owned by lecturer still receive their own QR.
+request.form=Form(course_id=str(c_other.id),playlist_selection_mode='none',
+    selected_playlist_ids=[],p_q='does-not-exist',return_query='p_q=wrong&p_page=2')
 result=scope['bulk_create_playlist_qrs_from_library']()
-assert result.startswith('/videos?')
-qrs=models.QrCode.query.filter_by(course_id=c1.id,target_type='playlist',active=True).all()
-assert len(qrs)==6,len(qrs)
-slugs={q.playlist_id:q.slug for q in qrs}
-assert set(slugs)=={p.id for p in pls[:6]}
-assert slugs[pls[1].id]=='existing-qr-preserved'
-assert models.ExperimentRun.query.filter_by(task_key='TAO_QR_HANG_LOAT').count()==1
+assert result.startswith('/videos?') and '#playlists' in result
+qrs=models.QrCode.query.filter_by(target_type='playlist',active=True).all()
+assert {q.playlist_id for q in qrs if q.course_id==c1.id}=={p.id for p in pls[:6]}
+assert {q.playlist_id for q in qrs if q.course_id==c2.id}=={pls[0].id}
+assert all(q.course_id in {c1.id,c2.id} for q in qrs),qrs
+assert {q.slug for q in qrs if q.playlist_id==pls[1].id and q.course_id==c1.id}=={'existing-qr-preserved'}
+before_qr_ids={q.id for q in qrs}
 scope['bulk_create_playlist_qrs_from_library']()
-qrs=models.QrCode.query.filter_by(course_id=c1.id,target_type='playlist',active=True).all()
-assert {q.playlist_id:q.slug for q in qrs}==slugs
+assert {q.id for q in models.QrCode.query.filter_by(target_type='playlist',active=True).all()}==before_qr_ids
 assert models.FunctionalTestRun.query.filter_by(case_code='QR_PLAYLIST_FILTERED_BULK').count()==2
-assert models.FunctionalTestRun.query.filter_by(case_code='ASSIGN_PLAYLIST_FILTERED_BULK').count()==2
+assert models.ExperimentRun.query.filter_by(task_key='TAO_QR_HANG_LOAT').count()==2
+assert not any(q.course_id==c_other.id for q in qrs)
 
-# Regression: remove two playlist checkmarks across pages; only the selected
-# entries can be linked. An excluded playlist can never receive a bulk QR.
+# Ô tích vẫn điều khiển Gán môn. Nhưng nút Tạo QR mới xử lý tất cả
+# playlist đã gán, kể cả playlist đã bỏ tích hoặc ở trang khác.
 selection_course=models.Course(owner_id=u1.id, code='C-SELECT', name='Chỉ playlist được tích', active=True)
 s.add(selection_course);s.commit()
 excluded_assign={pls[1].id,pls[5].id}
-request.form=Form(course_id=str(selection_course.id),p_q='Python',p_assignment='',playlist_selection_mode='all',
+request.form=Form(course_id=str(selection_course.id),p_q='Python',p_assignment='',
+                  playlist_selection_mode='all',
                   excluded_playlist_ids=[str(i) for i in excluded_assign])
 scope['bulk_assign_filtered_library_playlists']()
 selected_assigned={r.playlist_id for r in models.CoursePlaylist.query.filter_by(
     course_id=selection_course.id,active=True).all()}
-assert selected_assigned == {p.id for p in pls}-excluded_assign, selected_assigned
+assert selected_assigned == {p.id for p in pls}-excluded_assign
 assert models.CoursePlaylist.query.filter_by(course_id=selection_course.id,playlist_id=foreign.id).count()==0
 assert models.CoursePlaylist.query.filter_by(course_id=selection_course.id,playlist_id=uploads.id).count()==0
 
-excluded_qr={pls[0].id}
-request.form=Form(course_id=str(selection_course.id),playlist_selection_mode='all',
-                  excluded_playlist_ids=[str(i) for i in excluded_qr])
+request.form=Form(playlist_selection_mode='none',selected_playlist_ids=[],
+                  excluded_playlist_ids=[str(pls[0].id)],p_q='no-rows')
 scope['bulk_create_playlist_qrs_from_library']()
 selected_qrs={q.playlist_id for q in models.QrCode.query.filter_by(
     course_id=selection_course.id,target_type='playlist',active=True).all()}
-assert selected_qrs=={pls[i].id for i in (2,3,4)},selected_qrs
-assert excluded_qr.isdisjoint(selected_qrs)
-assert excluded_assign.isdisjoint(selected_qrs)
+assert selected_qrs=={pls[i].id for i in (0,2,3,4)},selected_qrs
 assert s.query(models.CourseVideo).count()>=1
 
+# Invalid selection remains rejected for assigning; QR ignores selection only.
 request.form=Form(course_id=str(selection_course.id),p_q='Python',playlist_selection_mode='all',
                   excluded_playlist_ids=['not-a-number'])
 try:scope['bulk_assign_filtered_library_playlists']();assert False
 except PermissionError as e:assert str(e)=='400'
 
-# Bảo vệ thao tác mặc định khi chưa có từ khóa: nếu không chỉ rõ chọn,
-# máy chủ phải không xử lý một playlist nào.
+# No selected playlist: old assign behavior stays unchanged.
 default_none_course=models.Course(owner_id=u1.id,code='C-DEFAULT-NONE',name='Không gán mặc định',active=True)
 s.add(default_none_course);s.commit()
 request.form=Form(course_id=str(default_none_course.id),p_q='')
@@ -206,65 +207,35 @@ assert models.CoursePlaylist.query.filter_by(course_id=default_none_course.id).c
 scope['bulk_create_playlist_qrs_from_library']()
 assert models.QrCode.query.filter_by(course_id=default_none_course.id).count()==0
 
-# Tìm một từ khóa: chỉ tạo QR cho playlist khớp, dù cùng môn đã liên kết
-# thêm playlist khác không khớp từ khóa.
-filtered_course=models.Course(owner_id=u1.id,code='C-QR-FILTER',name='QR theo từ khóa',active=True)
+# Playlist matching a filter and another assigned outside the filter:
+# both must receive QR because "đã gán MH/MĐ" is global.
+filtered_course=models.Course(owner_id=u1.id,code='C-QR-FILTER',name='QR không phụ thuộc lọc',active=True)
 s.add(filtered_course);s.commit()
 request.form=Form(course_id=str(filtered_course.id),p_q='Python 1',playlist_selection_mode='all')
 scope['bulk_assign_filtered_library_playlists']()
-filtered_assigned={row.playlist_id for row in models.CoursePlaylist.query.filter_by(
-    course_id=filtered_course.id,active=True).all()}
-assert filtered_assigned=={pls[0].id},filtered_assigned
+assert {r.playlist_id for r in models.CoursePlaylist.query.filter_by(
+    course_id=filtered_course.id,active=True).all()}=={pls[0].id}
 s.add(models.CoursePlaylist(course_id=filtered_course.id,playlist_id=pls[1].id,added_by=u1.id,active=True));s.commit()
-request.form=Form(course_id=str(filtered_course.id),p_q='Python 1',playlist_selection_mode='all')
 scope['bulk_create_playlist_qrs_from_library']()
-filtered_qrs={row.playlist_id for row in models.QrCode.query.filter_by(
+filtered_qrs={q.playlist_id for q in models.QrCode.query.filter_by(
     course_id=filtered_course.id,target_type='playlist',active=True).all()}
-assert filtered_qrs=={pls[0].id},filtered_qrs
+assert filtered_qrs=={pls[0].id,pls[1].id}
 
-# Header checkbox regression: Bỏ chọn TẤT CẢ trên mọi trang, sau đó tích lại
-# một số playlist rải ở cả trang 1 và trang 2.
-none_course=models.Course(owner_id=u1.id, code='C-NONE', name='Bỏ tất cả rồi chọn lại', active=True)
+# Playlist chỉ có video không nhúng sẽ không có QR dù đã được gán môn.
+none_course=models.Course(owner_id=u1.id,code='C-NONE',name='Bỏ tất cả rồi chọn lại',active=True)
 s.add(none_course);s.commit()
 request.form=Form(course_id=str(none_course.id),p_q='Python',p_assignment='',
     playlist_selection_mode='none',selected_playlist_ids=[str(pls[1].id),str(pls[6].id)])
 scope['bulk_assign_filtered_library_playlists']()
-rows={x.playlist_id for x in models.CoursePlaylist.query.filter_by(course_id=none_course.id,active=True).all()}
-assert rows=={pls[1].id,pls[6].id},rows
-# Không gán bất kỳ playlist không được tích, dù ở trang khác.
-assert all(p.id not in rows for p in pls if p.id not in {pls[1].id,pls[6].id})
-# Chỉ tạo QR cho playlist được tích lại và có video phát được.
-request.form=Form(course_id=str(none_course.id),playlist_selection_mode='none',
-    selected_playlist_ids=[str(pls[1].id)])
-scope['bulk_create_playlist_qrs_from_library']()
-none_qrs={x.playlist_id for x in models.QrCode.query.filter_by(
-    course_id=none_course.id,target_type='playlist',active=True).all()}
-assert none_qrs=={pls[1].id},none_qrs
-# Bỏ chọn tất cả mà không tích lại cái nào: cả hai thao tác là no-op.
-previous_links=models.CoursePlaylist.query.filter_by(course_id=none_course.id).count()
-previous_qrs=models.QrCode.query.filter_by(course_id=none_course.id).count()
-request.form=Form(course_id=str(none_course.id),p_q='Python',
-    playlist_selection_mode='none',selected_playlist_ids=[])
-scope['bulk_assign_filtered_library_playlists']()
-scope['bulk_create_playlist_qrs_from_library']()
-assert models.CoursePlaylist.query.filter_by(course_id=none_course.id).count()==previous_links
-assert models.QrCode.query.filter_by(course_id=none_course.id).count()==previous_qrs
-# Chọn tất cả bằng ô tiêu đề: danh sách chọn lại bị xóa, xử lý mọi kết quả lọc.
-all_course=models.Course(owner_id=u1.id, code='C-ALL', name='Tích tất cả mọi trang', active=True)
-s.add(all_course);s.commit()
-request.form=Form(course_id=str(all_course.id),p_q='Python',p_assignment='',
-    playlist_selection_mode='all',excluded_playlist_ids=[])
-scope['bulk_assign_filtered_library_playlists']()
 assert {x.playlist_id for x in models.CoursePlaylist.query.filter_by(
-    course_id=all_course.id,active=True).all()}=={p.id for p in pls}
-# Trường chọn không hợp lệ không được âm thầm chuyển thành chọn hết.
-request.form=Form(course_id=str(none_course.id),p_q='Python',
-    playlist_selection_mode='invalid',selected_playlist_ids=[])
+    course_id=none_course.id,active=True).all()}=={pls[1].id,pls[6].id}
+scope['bulk_create_playlist_qrs_from_library']()
+assert {q.playlist_id for q in models.QrCode.query.filter_by(
+    course_id=none_course.id,target_type='playlist',active=True).all()}=={pls[1].id}
+
+# Invalid assignment modes still fail.
+request.form=Form(course_id=str(none_course.id),p_q='Python',playlist_selection_mode='invalid')
 try:scope['bulk_assign_filtered_library_playlists']();assert False
-except PermissionError as e:assert str(e)=='400'
-request.form=Form(course_id=str(none_course.id),
-    playlist_selection_mode='none',selected_playlist_ids=['oops'])
-try:scope['bulk_create_playlist_qrs_from_library']();assert False
 except PermissionError as e:assert str(e)=='400'
 
 # Existing single-playlist forms still exist; bulk is a separate, non-nested form.
@@ -277,7 +248,7 @@ assert 'value="{{ playlist_search }}"' in ui
 assert 'value="{{ playlist_assignment }}"' in ui
 assert 'formaction="{{ url_for(\'bulk_create_playlist_qrs_from_library\') }}"' in ui
 assert 'Gán MH cho playlist đã chọn' in ui
-assert 'Tạo QR cho playlist đã chọn' in ui
+assert 'Tạo QR cho playlist đã gán MH/MĐ' in ui
 assert 'playlistBulkActions' in ui and 'data-confirm-bulk' not in ui
 assert 'id="selectAllPlaylists"' in ui
 assert 'excluded_playlist_ids' in ui and 'sessionStorage.setItem' in ui
