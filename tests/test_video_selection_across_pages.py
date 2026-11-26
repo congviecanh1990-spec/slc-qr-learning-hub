@@ -600,6 +600,107 @@ def test_only_row_course_assign_restores_course_picker(configured_app):
 
 
 
+def test_bulk_create_then_all_qr_download_and_row_buttons(configured_app):
+    """Tạo QR mọi môn -> nút dòng sáng -> tải toàn bộ PNG không tích video."""
+    import io
+    import zipfile
+    from bs4 import BeautifulSoup
+    from models import db, Course, CourseVideo, QrCode
+    app, keys, web = configured_app
+    first_id, fourth_id = keys["video_ids"][12], keys["video_ids"][10]
+    with app.app_context():
+        teacher = db.session.get(web.User, keys["teacher"])
+        math = Course(owner_id=teacher.id, name="Toán rời rạc", code="MATH-DOWNLOAD")
+        db.session.add(math)
+        db.session.commit()
+        math_id = math.id
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"] = keys["teacher"]
+        for video_id, course_id in ((first_id, keys["course"]), (fourth_id, math_id)):
+            assigned = client.post("/videos/assign-course", data={
+                "course_id": str(course_id), "video_selection_mode": "none",
+                "selected_video_ids": [str(video_id)], "return_query": "v_page=1"
+            })
+            assert assigned.status_code == 302
+        created = client.post("/videos/qr/bulk-selected", data={
+            "video_selection_mode": "none"
+        })
+        assert created.status_code == 302
+        with app.app_context():
+            assert QrCode.query.filter(QrCode.active.is_(True)).count() == 2
+
+        page = client.get("/videos")
+        assert page.status_code == 200
+        soup = BeautifulSoup(page.data, "html.parser")
+        assert soup.select_one('#assignVideoForm [name="download_scope"]')["value"] == "all_assigned"
+        for video_id, course_id in ((first_id, keys["course"]), (fourth_id, math_id)):
+            row = soup.select_one(f"#video-{video_id}")
+            assert row is not None
+            select = row.select_one(".video-qr-course-select")
+            selected = select.select_one("option[selected]")
+            assert selected and selected["value"] == str(course_id)
+            assert selected.get("data-qr-png")
+            create_button = row.select_one(".video-qr-create")
+            assert create_button is not None and not create_button.has_attr("disabled")
+            assert row.select_one(".video-qr-download")
+
+        response = client.post("/videos/qr/download-selected", data={
+            "download_scope": "all_assigned",
+            "video_selection_mode": "none",
+        }, headers={"Accept": "application/json"})
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["ok"] is True and payload["count"] == 2
+        assert len(payload["files"]) == 2
+        assert all(x["url"].endswith("/png") for x in payload["files"])
+        assert len({x["id"] for x in payload["files"]}) == 2
+
+        # Không cần chọn môn hay tích checkbox để tải ZIP.
+        response = client.post("/videos/qr/download-selected", data={
+            "download_scope": "all_assigned",
+        })
+        assert response.status_code == 200
+        assert response.mimetype == "application/zip"
+        assert "Ma_QR_video_da_tao_tat_ca.zip" in response.headers["Content-Disposition"]
+        with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+            names = archive.namelist()
+            assert len(names) == 2
+            assert all(name.lower().endswith(".png") for name in names)
+            assert all(archive.read(n).startswith(bytes([137, 80, 78, 71, 13, 10, 26, 10]))
+                       for n in names)
+
+        # Bấm tải lại không tạo mã mới.
+        with app.app_context():
+            assert QrCode.query.filter(QrCode.active.is_(True)).count() == 2
+
+
+def test_download_all_qrs_without_created_items_shows_clear_error(configured_app):
+    """Không có QR: trả thông báo rõ thay vì báo sai quyền hoặc im lặng."""
+    app, keys, web = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"] = keys["teacher"]
+        response = client.post("/videos/qr/download-selected", data={
+            "download_scope": "all_assigned"
+        }, headers={"Accept": "application/json"})
+        assert response.status_code == 409
+        result = response.get_json()
+        assert not result["ok"]
+        assert "Chưa có mã QR hợp lệ" in result["message"]
+
+
+def test_download_all_js_has_no_checkbox_or_course_gate():
+    """Luồng chọn thư mục/ZIP phải được chạy với nút Tải QR toàn bộ."""
+    js = (ROOT / "static/research_measurement.js").read_text(encoding="utf-8")
+    html = (ROOT / "templates/videos.html").read_text(encoding="utf-8")
+    assert "form.querySelector('[name=\"download_scope\"]')?.value==='all_assigned'" in js
+    assert "if(!allVideoQrs){" in js
+    assert "else if(!allVideoQrs)window.videoBulkSelection?.appendSelection(form)" in js
+    assert "create.hidden=false;create.disabled=!select.value" in html
+
+
+
 def test_reset_buttons_keep_other_category_filters(configured_app):
     """Bỏ lọc từng danh mục, reset phân trang/chọn xuyên trang, không ảnh hưởng danh mục kia."""
     from bs4 import BeautifulSoup
