@@ -242,6 +242,7 @@
                   {% endfor %}
                   <option value="{{ c.id }}" {{ 'selected' if assigned_video_course.id == c.id else '' }} {% if found.qr %}
                      data-qr-png="{{ url_for('qr_png', qr_id=found.qr.id) }}"
+                     data-qr-filename="{{ v.title }}.png"
                      data-qr-delete="{{ url_for('delete_qr', qr_id=found.qr.id) }}"
                      data-qr-retarget="{{ url_for('qr_retarget', qr_id=found.qr.id) }}"
                      {% endif %}>{{ c.name }}{{ ' – đã có mã QR' if found.qr else '' }}</option>
@@ -358,7 +359,14 @@
     create.hidden=hasQr; create.disabled=!valid || row.dataset.playlistUsable!=='1';
     if(compact) compact.hidden=!hasQr;
     download.hidden=!hasQr;
-    if(hasQr) download.href=option.dataset.qrPng; else download.removeAttribute('href');
+    if(hasQr){
+      download.href=option.dataset.qrPng;
+      download.download=(option.dataset.qrFilename||'Playlist.png').normalize('NFC')
+        .replace(/[\\/:*?"<>|\x00-\x1F]/g,'_').replace(/\s+/g,' ').trim().slice(0,184);
+    }else{
+      download.removeAttribute('href');
+      download.removeAttribute('download');
+    }
     if(remove){remove.hidden=!hasQr;if(hasQr)remove.action=option.dataset.qrDelete;}
     if(toggle){toggle.hidden=!hasQr; if(!hasQr){retarget.hidden=true;toggle.setAttribute('aria-expanded','false');}}
     if(hasQr && retarget)retarget.action=option.dataset.qrRetargetPlaylist;
@@ -376,8 +384,18 @@
     create.hidden=hasQr;create.disabled=!select.value || area.dataset.videoUsable!=='1';
     extra.hidden=!hasQr;
     download.hidden=!hasQr;
-    if(hasQr){download.href=option.dataset.qrPng;remove.action=option.dataset.qrDelete;retarget.action=option.dataset.qrRetarget;}
-    else{download.removeAttribute('href');retarget.hidden=true;toggle.setAttribute('aria-expanded','false');}
+    if(hasQr){
+      download.href=option.dataset.qrPng;
+      download.download=(option.dataset.qrFilename||'Video.png').normalize('NFC')
+        .replace(/[\\/:*?"<>|\x00-\x1F]/g,'_').replace(/\s+/g,' ').trim().slice(0,184);
+      remove.action=option.dataset.qrDelete;
+      retarget.action=option.dataset.qrRetarget;
+    }else{
+      download.removeAttribute('href');
+      download.removeAttribute('download');
+      retarget.hidden=true;
+      toggle.setAttribute('aria-expanded','false');
+    }
     remove.hidden=!hasQr;toggle.hidden=!hasQr;
   }
   function setupQrActions(scope) {
@@ -627,5 +645,6 @@ document.querySelectorAll('.playlist-course-form').forEach(form=>{
 {# Đổi URL để trình duyệt không tiếp tục dùng JS đã cache trước bản sửa cột QR. #}
 <script src="{{ url_for('static', filename='video_selection.js', v='row-mirror-20261126') }}" defer></script>
 <script src="{{ url_for('static', filename='library_filter_reset.js') }}" defer></script>
-<script src="{{ url_for('static', filename='qr_save_picker.js') }}" defer></script>
+{# Tải một QR bằng tính năng download gốc của trình duyệt.
+   Không dùng showSaveFilePicker: server đã trả Content-Disposition đúng tên học liệu. #}
 {% endblock %}
