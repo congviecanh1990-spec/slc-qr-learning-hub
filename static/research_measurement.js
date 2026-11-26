@@ -117,6 +117,11 @@
       await downloadAll(form,event.submitter.formAction);
       return;
     }
+    // Tạo QR cho TẤT CẢ video đã gán môn: không có course_id duy nhất.
+    // Đưa thẳng biểu mẫu đến máy chủ; máy chủ tự ghi nhận lượt tạo QR
+    // cho tất cả môn, tránh chặn thao tác vì phép đo chỉ nhận một môn.
+    if(isVideoBulk(form) &&
+       event.submitter?.formAction?.includes('/videos/qr/bulk-selected'))return;
     if(form.dataset.researchPreflight==='done'){
       delete form.dataset.researchPreflight;
       return; // Rời quyền xử lý cho handler Gán môn / Tạo QR vốn có.
