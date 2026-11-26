@@ -294,6 +294,95 @@ def test_assign_qr_row_course_and_create_all_assigned_without_video_checks(confi
 
 
 
+def test_qr_column_overrides_previous_course_and_selected_bulk_course(configured_app):
+    """Tình huống thực: 1 video đã gán Python -> chọn Toán rời rạc ở cột QR;
+    video khác tích ô -> gán Python. Không cấp trùng và không xóa QR cũ.
+    """
+    from bs4 import BeautifulSoup
+    from models import db, Course, Video, CourseVideo, QrCode
+    app, k, web = configured_app
+    # Video mới nhất nằm ở dòng đầu của trang 1 (sắp xếp Video.id giảm dần).
+    first_video_id = k["local_other"]
+    checked_video_id = k["video_ids"][12]
+    with app.app_context():
+        teacher = db.session.get(web.User, k["teacher"])
+        python_course = db.session.get(Course, k["course"])
+        first_video = db.session.get(Video, first_video_id)
+        math_course = Course(owner_id=teacher.id, name="Toán rời rạc", code="MATH01")
+        db.session.add(math_course)
+        db.session.flush()
+        math_course_id = math_course.id
+        link, _ = web.ensure_course_video_link(python_course, first_video, teacher)
+        qr, was_created = web.create_qr_for_course_video(
+            python_course, first_video, teacher, link
+        )
+        assert was_created
+        old_qr_id = qr.id
+        db.session.commit()
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = k["teacher"]
+        # Không tích video đầu tiên. Môn Toán chọn ở cột QR phải THAY THẾ Python.
+        response = client.post("/videos/assign-course", data={
+            "course_id": str(k["course"]),
+            "video_selection_mode": "none",
+            "selected_video_ids": [str(checked_video_id)],
+            "qr_course_assignments": [f"{first_video_id}:{math_course_id}"],
+            "return_query": "v_page=1",
+        })
+        assert response.status_code == 302
+        with app.app_context():
+            assert CourseVideo.query.filter_by(
+                course_id=k["course"], video_id=checked_video_id
+            ).count() == 1
+            assert CourseVideo.query.filter_by(
+                course_id=k["course"], video_id=first_video_id
+            ).count() == 0, "Video đầu tiên không được giữ gán môn Python"
+            assert CourseVideo.query.filter_by(
+                course_id=math_course_id, video_id=first_video_id
+            ).count() == 1
+            assert CourseVideo.query.filter_by(
+                course_id=math_course_id, video_id=checked_video_id
+            ).count() == 0
+            qr = db.session.get(QrCode, old_qr_id)
+            assert qr.active and qr.course_id == k["course"]
+            assert qr.current_target.video_id == first_video_id
+
+        page = client.get("/videos")
+        assert page.status_code == 200
+        soup = BeautifulSoup(page.data, "html.parser")
+        first = soup.select_one(f"#video-{first_video_id}")
+        selected = soup.select_one(f"#video-{checked_video_id}")
+        assert first is not None and selected is not None
+        assert [node.get_text(" ", strip=True) for node in
+                first.select("td:nth-child(3) .badge")] == ["Toán rời rạc"]
+        assert [node.get_text(" ", strip=True) for node in
+                selected.select("td:nth-child(3) .badge")] == ["Tin học ứng dụng"]
+
+        # Ngay cả khi tích chính video đầu tiên, lựa chọn cột QR vẫn ưu tiên.
+        response = client.post("/videos/assign-course", data={
+            "course_id": str(k["course"]),
+            "video_selection_mode": "none",
+            "selected_video_ids": [str(first_video_id), str(checked_video_id)],
+            "qr_course_assignments": [f"{first_video_id}:{math_course_id}"],
+            "return_query": "v_page=1",
+        })
+        assert response.status_code == 302
+        with app.app_context():
+            assert CourseVideo.query.filter_by(
+                course_id=k["course"], video_id=first_video_id
+            ).count() == 0
+            assert CourseVideo.query.filter_by(
+                course_id=math_course_id, video_id=first_video_id
+            ).count() == 1
+
+
+def test_remove_long_video_library_guide():
+    template = (ROOT / "templates/videos.html").read_text(encoding="utf-8")
+    assert "Ô tích chọn video trên <strong>mọi trang</strong>" not in template
+    assert "Nút <strong>Tạo QR</strong> áp dụng cho tất cả video" not in template
+
+
 def test_reset_buttons_keep_other_category_filters(configured_app):
     """Bỏ lọc từng danh mục, reset phân trang/chọn xuyên trang, không ảnh hưởng danh mục kia."""
     from bs4 import BeautifulSoup
