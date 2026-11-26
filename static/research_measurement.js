@@ -228,7 +228,9 @@
       const match=new URL(rowLink.href,location.href).pathname.match(/\/qr\/(\d+)\/png$/);
       if(match){
         const ids=[Number(match[1])];
-        recordDownload('row',ids,'not_verified').finally(()=>queuePending('row',ids));
+        recordDownload('row',ids,'not_verified').then(result=>{
+          if(result?.matched>0)queuePending('row',ids);
+        });
       }
     }
   },true);
@@ -331,8 +333,10 @@
       // Trình duyệt không báo lại cho web khi người dùng thực sự lưu ZIP:
       // không ghi nhận là tệp PNG đã được xác minh.
       const style=ids.length>=2?'bulk':'row';
-      await recordDownload(style,ids,'not_verified');
-      queuePending(style,ids);
+      const tracked=await recordDownload(style,ids,'not_verified');
+      if(tracked?.matched>0)queuePending(style,ids);
+      else announce('Đã gửi ZIP '+ids.length+' mã QR tới Chrome. '+
+        'Không có QR mới thuộc lượt đo đang mở, nên không cộng vào phép đo tạo QR.');
     }catch(e){announce('Không tải được QR: '+e.message,true);}
   }
 
