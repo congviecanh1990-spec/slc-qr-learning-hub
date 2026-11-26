@@ -470,78 +470,110 @@ def test_first_fourth_row_qr_courses_and_one_checked_video_in_single_post(config
 
 
 
-def test_course_kept_after_assignment_and_qr_bulk_never_redirects_home_when_missing(configured_app):
-    """Bấm Gán môn -> trang giữ lựa chọn -> Tạo QR không tích checkbox."""
-    from urllib.parse import urlsplit, parse_qs
+def test_create_qr_all_assigned_courses_without_course_selection(configured_app):
+    """Lỗi bản TEST: nút Tạo QR không được đòi chọn môn phía trên.
+
+    Xử lý mọi video độc lập đã gán (nhiều môn và nhiều trang),
+    kể cả khi tìm kiếm không khớp, và không tạo mã trùng khi bấm lại.
+    """
+    from urllib.parse import urlsplit
     from bs4 import BeautifulSoup
     from models import db, CourseVideo, QrCode, Course
     app, keys, web = configured_app
-    independent_id = keys["video_ids"][10]
-    course_id = keys["course"]
+    video_python = keys["video_ids"][10]
+    video_math = keys["video_ids"][5]
+    course_python = keys["course"]
+    with app.app_context():
+        user = db.session.get(web.User, keys["teacher"])
+        math = Course(owner_id=user.id, name="Toán rời rạc", code="MATH_ALL")
+        db.session.add(math)
+        db.session.commit()
+        course_math = math.id
+
     with app.test_client() as client:
         with client.session_transaction() as ss:
             ss["user_id"] = keys["teacher"]
-
         response = client.post("/videos/assign-course", data={
-            "course_id": str(course_id),
+            "course_id": str(course_python),
             "video_selection_mode": "none",
-            "selected_video_ids": [str(independent_id)],
-            "return_query": "q=Bài học&v_page=1"
+            "selected_video_ids": [str(video_python)],
+            "return_query": "v_page=1",
         })
         assert response.status_code == 302
-        parts = urlsplit(response.location)
-        assert parts.path == "/videos" and parts.fragment == "videos"
-        assert parse_qs(parts.query)["video_course_id"] == [str(course_id)]
-        page = client.get(response.location)
-        assert page.status_code == 200
-        soup = BeautifulSoup(page.data, "html.parser")
-        bulk_select = soup.select_one('#assignVideoForm select[name="course_id"]')
-        assert bulk_select is not None
-        selected = bulk_select.select_one('option[selected]')
-        assert selected is not None and selected["value"] == str(course_id)
-
-        # Tạo QR không cần tích video và không phụ thuộc tìm kiếm hiện tại.
-        created = client.post("/videos/qr/bulk-selected", data={
-            "course_id": str(course_id),
+        response = client.post("/videos/assign-course", data={
+            "course_id": str(course_math),
             "video_selection_mode": "none",
-            "return_query": "q=khong-khop-video"
+            "selected_video_ids": [str(video_math)],
+            "return_query": "v_page=1",
+        })
+        assert response.status_code == 302
+        with app.app_context():
+            assert CourseVideo.query.filter(
+                CourseVideo.course_id.in_([course_python, course_math])
+            ).count() == 2
+
+        # Không gửi course_id, không tích checkbox, tìm kiếm không có kết quả.
+        created = client.post("/videos/qr/bulk-selected", data={
+            "video_selection_mode": "none",
+            "return_query": "q=khong-khop-video&v_page=1"
         })
         assert created.status_code == 302
-        parts = urlsplit(created.location)
-        assert parts.path == "/videos"
-        assert parse_qs(parts.query)["video_course_id"] == [str(course_id)]
+        assert urlsplit(created.location).path == "/videos"
+        assert urlsplit(created.location).fragment == "videos"
+        page = client.get(created.location)
+        assert page.status_code == 200
+        page_text = page.get_data(as_text=True)
+        assert "tạo 2 mã QR mới" in page_text
+        assert "Bạn không có quyền truy cập chức năng này." not in page_text
         with app.app_context():
-            assert CourseVideo.query.filter_by(
-                course_id=course_id, video_id=independent_id
-            ).count() == 1
-            assert QrCode.query.filter_by(
-                course_id=course_id, active=True
-            ).count() == 1
-
-        # Quên chọn môn sau tải trang: phải cảnh báo tại Kho video,
-        # tuyệt đối không điều hướng về Tổng quan báo "không có quyền".
-        unselected = client.post("/videos/qr/bulk-selected", data={
+            qrs = QrCode.query.filter(QrCode.active.is_(True)).all()
+            assert len(qrs) == 2
+            assert {qr.course_id for qr in qrs} == {course_python, course_math}
+            assert {qr.current_target.video_id for qr in qrs} == {video_python, video_math}
+            ids = {qr.id for qr in qrs}
+        # Bấm lại với môn chọn sai / còn giá trị cũ: vẫn chỉ xử lý dữ liệu
+        # giảng viên được quyền quản lý, không sinh mã QR khác.
+        repeated = client.post("/videos/qr/bulk-selected", data={
+            "course_id": "999999",
             "video_selection_mode": "none"
         })
-        assert unselected.status_code == 302
-        assert unselected.location == "/videos#videos"
-        messages = client.get(unselected.location)
-        assert "Hãy chọn môn học/mô đun phía trên" in messages.get_data(as_text=True)
-        assert "Bạn không có quyền truy cập chức năng này." not in messages.get_data(as_text=True)
+        assert repeated.status_code == 302
+        assert urlsplit(repeated.location).path == "/videos"
+        with app.app_context():
+            assert {q.id for q in QrCode.query.filter(QrCode.active.is_(True)).all()} == ids
+        message = client.get(repeated.location).get_data(as_text=True)
+        assert "2 mã QR đã có" in message
 
-        # Môn của tài khoản khác vẫn phải bị từ chối như cũ.
-        with app.app_context():
-            other = web.User.query.filter(web.User.id != keys["teacher"]).first()
-            foreign = Course(owner_id=other.id, name="Môn ngoài quyền", code="EXT99")
-            db.session.add(foreign)
-            db.session.commit()
-            foreign_id = foreign.id
-        denied = client.post("/videos/qr/bulk-selected", data={
-            "course_id": str(foreign_id)
+
+def test_create_all_qrs_empty_library_warns_instead_of_forbidden(configured_app):
+    """Không có video đã gán: cảnh báo tại Kho video, không về Tổng quan."""
+    app, keys, _ = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+        result = client.post("/videos/qr/bulk-selected", data={
+            "video_selection_mode": "none"
         })
-        assert denied.status_code == 302 and denied.location == "/"
-        with app.app_context():
-            assert QrCode.query.filter_by(course_id=foreign_id).count() == 0
+        assert result.status_code == 302
+        assert result.location == "/videos#videos"
+        response = client.get(result.location)
+        html = response.get_data(as_text=True)
+        assert "Chưa có video độc lập nào được gán môn" in html
+        assert "Bạn không có quyền truy cập chức năng này." not in html
+
+
+def test_create_all_qrs_bypasses_single_course_browser_preflight():
+    js = (ROOT / "static/research_measurement.js").read_text(encoding="utf-8")
+    html = (ROOT / "templates/videos.html").read_text(encoding="utf-8")
+    app_text = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert "event.submitter?.formAction?.includes('/videos/qr/bulk-selected'))return;" in js
+    assert "Môn học/ mô đun áp dụng cho video tích chọn</label>" in html
+    route = app_text.split('@app.post("/videos/qr/bulk-selected")')[1]
+    route = route.split('@app.post("/videos/qr/download-selected")')[0]
+    assert 'Course.owner_id == user.id' in route
+    assert 'Course.active.is_(True)' in route
+    assert 'request.form.get("course_id"' not in route
+
 
 
 def test_only_row_course_assign_restores_course_picker(configured_app):
