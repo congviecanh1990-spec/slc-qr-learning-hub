@@ -5667,6 +5667,14 @@ def register_routes(app):
             and p.measurement_finished_at is not None
             and (p.manual_operations or 0) == 0 and (p.manual_seconds or 0) == 0
         ]
+        # Lượt chốt theo xác nhận của giảng viên: hiển thị riêng, KHÔNG
+        # coi là đã xác minh độc lập và không tính vào tỷ lệ cải thiện.
+        user_confirmed_pairs = [
+            p for p in all_research_pairs if p.active
+            and p.measurement_finished_at is not None
+            and p.measurement_save_method == "manual_confirmed"
+            and not p.measurement_verified
+        ]
         lecturers_for_research = User.query.order_by(User.name, User.email).all()
         courses_for_research = Course.query.filter_by(active=True).order_by(Course.name).all()
 
@@ -5726,6 +5734,7 @@ def register_routes(app):
             comparison_rows=comparison_rows, task_catalog=task_catalog,
             survey_links=survey_links,
             research_pairs=research_pairs, web_only_pairs=web_only_pairs,
+            user_confirmed_count=len(user_confirmed_pairs),
             pending_measurements=pending_measurements,
             paired_groups=paired_groups, paired_totals=paired_totals,
             pair_kinds=RESEARCH_PAIR_KINDS, normalize_pair_kind=normalize_kind,
