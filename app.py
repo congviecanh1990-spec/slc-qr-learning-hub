@@ -2637,8 +2637,8 @@ def register_routes(app):
     def assign_videos_to_course():
         """Gán môn cho video tích xuyên trang + môn chọn ở cột Mã QR của trang này.
 
-        Mỗi dòng tại cột QR có môn riêng; không tự tạo QR ở bước gán môn.
-        Tất cả ID và course_id đều được kiểm tra lại trên máy chủ.
+        Nếu dòng có môn QR riêng, môn này được ưu tiên và thay thế môn cũ.
+        Không tự tạo/hủy QR; kiểm tra ID, phân trang và quyền trên máy chủ.
         """
         user = current_user()
         selected_ids = selected_filtered_library_video_ids(user, request.form)
@@ -2690,20 +2690,40 @@ def register_routes(app):
         }
         if any(cid not in allowed_courses for cid in row_course_ids.values()):
             abort(403)
-        # Có thể gán nhiều môn trên cùng video mà không ghi trùng liên kết.
-        pairs = set()
-        if selected_course:
-            pairs.update((int(video_id), selected_course.id) for video_id in selected_ids)
-        pairs.update((video_id, cid) for video_id, cid in row_course_ids.items())
+        # Môn tại cột QR của một dòng được ƯU TIÊN hơn môn chung phía trên.
+        # Nếu video được tích chọn nhưng có môn QR riêng, chỉ gán môn QR đó.
+        target_by_video = {
+            int(video_id): selected_course.id for video_id in selected_ids
+        } if selected_course else {}
+        target_by_video.update(row_course_ids)
         videos_by_id = {
             v.id: v for v in filtered_library_video_query(user).filter(
-                Video.id.in_({vid for vid, _ in pairs})
+                Video.id.in_(list(target_by_video))
             ).all()
         }
-        if len(videos_by_id) != len({vid for vid, _ in pairs}):
+        if len(videos_by_id) != len(target_by_video):
             abort(403)
+
+        # Khi một dòng chọn môn QR riêng: THAY THẾ môn đã gán trước đó.
+        # Chỉ bỏ liên kết thuộc môn mà giảng viên này quản lý; không xóa QR đã
+        # phát hành, không tác động video/playlist hay liên kết của GV khác.
+        removed = 0
+        for video_id, desired_course_id in sorted(row_course_ids.items()):
+            previous_links = (
+                CourseVideo.query.join(Course, CourseVideo.course_id == Course.id)
+                .filter(
+                    CourseVideo.video_id == video_id,
+                    Course.owner_id == user.id,
+                    CourseVideo.course_id != desired_course_id,
+                ).all()
+            )
+            for link in previous_links:
+                db.session.delete(link)
+                removed += 1
+        db.session.flush()
+
         created = skipped = 0
-        for video_id, course_id in sorted(pairs):
+        for video_id, course_id in sorted(target_by_video.items()):
             _, was_created = ensure_course_video_link(
                 allowed_courses[course_id], videos_by_id[video_id], user
             )
@@ -2714,10 +2734,15 @@ def register_routes(app):
         record_functional_test(
             "ASSIGN_COURSE", "Gán video vào môn học/ mô đun", True, owner_id=user.id,
             note=(f"Video tích chọn: {len(selected_ids)}; video chọn môn ở cột QR: "
-                  f"{len(row_course_ids)}; cặp video-môn mới {created}; đã có {skipped}."),
+                  f"{len(row_course_ids)}; liên kết cũ được thay thế {removed}; "
+                  f"gán mới {created}; đã có {skipped}."),
         )
         db.session.commit()
-        flash(f"Đã gán mới {created} liên kết video–môn học/mô đun; {skipped} liên kết đã có.", "success")
+        flash(
+            f"Đã gán mới {created} liên kết video–môn học/mô đun; "
+            f"thay thế {removed} liên kết môn cũ; {skipped} liên kết đã có.",
+            "success",
+        )
         return redirect(videos_library_return("videos", request.form.get("return_query")))
 
     @app.post("/playlists/assign-course")
