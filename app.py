@@ -3529,35 +3529,42 @@ def register_routes(app):
     @app.post("/videos/qr/bulk-selected")
     @login_required
     def bulk_create_selected_video_qrs():
-        """Tạo QR cho TẤT CẢ video độc lập đã gán vào môn đang chọn.
+        """Tạo QR cho TẤT CẢ video độc lập đã gán môn của giảng viên.
 
-        Không phụ thuộc checkbox, tìm kiếm, trạng thái lọc hoặc phân trang.
-        Không gán môn ngầm; tái sử dụng QR đã có.
+        Nút này không yêu cầu chọn môn phía trên, checkbox, bộ lọc hay trang.
+        Mỗi cặp video–môn hợp lệ có một QR; QR đã có không tạo trùng.
         """
         user = current_user()
-        course_id = request.form.get("course_id", type=int)
-        if not course_id:
+        # Lấy môn học từ những liên kết đã lưu trong CSDL, không tin giá trị
+        # course_id từ thanh Gán môn (có thể trống hoặc còn giá trị cũ).
+        independent_ids = filtered_library_video_query(user).with_entities(Video.id)
+        links = (
+            CourseVideo.query
+            .join(Course, Course.id == CourseVideo.course_id)
+            .filter(
+                Course.owner_id == user.id,
+                Course.active.is_(True),
+                CourseVideo.video_id.in_(independent_ids),
+            )
+            .order_by(CourseVideo.id)
+            .limit(501)
+            .all()
+        )
+        if not links:
             flash(
-                "Hãy chọn môn học/mô đun phía trên trước khi bấm "
-                "Tạo QR cho video đã gán môn.", "warning"
+                "Chưa có video độc lập nào được gán môn học/mô đun trong Kho video "
+                "của bạn. Hãy gán môn cho video trước khi tạo QR.", "warning"
             )
             return redirect(videos_library_return(
                 "videos", request.form.get("return_query", "")))
-        course = db.session.get(Course, course_id)
-        # Giữ nguyên chặn truy cập với ID môn không thuộc giảng viên.
-        if not course or not course.active or not course_owned_by_user(course, user):
-            abort(403)
-        independent_ids = filtered_library_video_query(user).with_entities(Video.id)
-        links = CourseVideo.query.filter(
-            CourseVideo.course_id == course.id,
-            CourseVideo.video_id.in_(independent_ids),
-        ).order_by(CourseVideo.id).limit(501).all()
-        if not links:
-            flash("Môn học/mô đun này chưa có video độc lập nào đã gán để tạo QR.", "warning")
-            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
         if len(links) > 500:
-            flash("Môn học có trên 500 video độc lập đã gán. Giới hạn 500 video mỗi lượt để bảo vệ hệ thống.", "warning")
-            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+            flash(
+                "Có trên 500 liên kết video–môn chưa thể xử lý trong một lượt. "
+                "Hãy liên hệ quản trị viên để xử lý theo đợt.", "warning"
+            )
+            return redirect(videos_library_return(
+                "videos", request.form.get("return_query", "")))
+
         started = time.perf_counter()
         created = existing = skipped = 0
         processing_seconds = 0.0
@@ -3566,34 +3573,38 @@ def register_routes(app):
             if not video_is_usable(video) or not video_accessible_to_lecturer(video, user):
                 skipped += 1
                 continue
-            qr, was_created = create_qr_for_course_video(course, video, user, link)
+            qr, was_created = create_qr_for_course_video(link.course, video, user, link)
             if was_created:
                 created += 1
                 processing_seconds += float(qr.processing_seconds or 0)
             else:
                 existing += 1
+
         record_functional_test(
-            "QR_BULK_SELECTED", "Tạo QR cho toàn bộ video độc lập đã gán môn",
+            "QR_BULK_SELECTED", "Tạo QR cho mọi video độc lập đã gán môn",
             bool(created or existing), owner_id=user.id,
-            note=(f"MH/MĐ: {course.name}; toàn bộ video đã gán {len(links)}; "
-                  f"mới {created}; đã có {existing}; bỏ qua {skipped}."),
+            note=(
+                f"Tất cả môn của giảng viên; liên kết video–môn {len(links)}; "
+                f"QR mới {created}; QR đã có {existing}; bỏ qua {skipped}."
+            ),
         )
-        # Theo dõi lượt tạo QR, kể cả khi không chọn checkbox video.
-        elapsed = time.perf_counter() - started
         record_webapp_experiment(
-            user.id, "TAO_QR_HANG_LOAT", elapsed, operations_count=1,
-            success=bool(created or existing),
-            note=f"Môn: {course.name}; {len(links)} video đã gán; mới {created}; cũ {existing}; bỏ qua {skipped}",
+            user.id, "TAO_QR_HANG_LOAT", time.perf_counter() - started,
+            operations_count=1, success=bool(created or existing),
+            note=(
+                f"Tất cả môn đã gán; {len(links)} liên kết; "
+                f"mới {created}; cũ {existing}; bỏ qua {skipped}"
+            ),
             processing_seconds=processing_seconds,
         )
         db.session.commit()
         flash(
-            f"Đã tạo {created} mã QR mới cho môn “{course.name}”; "
-            f"{existing} mã đã có, {skipped} video không đủ điều kiện.",
-            "success" if created or existing else "warning",
+            f"Đã xử lý {len(links)} liên kết video–môn: tạo {created} mã QR mới, "
+            f"{existing} mã QR đã có, {skipped} video không đủ điều kiện.",
+            "success" if (created or existing) else "warning",
         )
-        return redirect(videos_library_return_with_video_course(
-            request.form.get("return_query", ""), course.id))
+        return redirect(videos_library_return(
+            "videos", request.form.get("return_query", "")))
 
     @app.post("/videos/qr/download-selected")
     @login_required
