@@ -31,7 +31,8 @@ def test_selection_ui_and_scripts_are_consistent():
     assert 'chosenVideos' not in js
     assert 'filtered_library_video_query' in py
     assert 'selected_filtered_library_video_ids(user, request.form)' in py
-    assert 'qr_course_assignments' in py and 'qr_course_assignments' in selection_js
+    assert 'qr_course_assignments' in py and 'qr_course_assignments' in template
+    assert 'data-video-row-assign' in selection_js
     assert 'selectedQrCourseCount' in selection_js
     assert 'data-assigned-video-count' in template
     assert 'dataset.assignedVideoCount' in js
