@@ -103,6 +103,14 @@
     <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">{{ 'Các playlist tìm được đang được chọn.' if playlist_search else 'Chưa chọn playlist nào.' }}</div>
   </form>
 
+  <div class="research-qr-confirmation border rounded bg-light p-2 mb-3 d-flex align-items-center flex-wrap gap-2"
+       data-qr-confirm-location="playlist" aria-label="Xác nhận lưu mã QR">
+    <strong class="small">Xác nhận lưu mã QR:</strong>
+    <button type="button" class="btn btn-success btn-sm research-qr-confirm-button" disabled>Tôi đã lưu đủ tệp QR</button>
+    <button type="button" class="btn btn-outline-secondary btn-sm research-qr-confirm-cancel" hidden>Chưa lưu / Hủy xác nhận</button>
+    <span class="small text-muted research-qr-confirm-state" aria-live="polite">Chưa có lượt tải QR mới cần xác nhận. Nút sẽ bật sau khi tải mã thuộc lượt đo.</span>
+  </div>
+
   <div class="table-responsive playlist-table-wrap">
     <table class="table table-hover align-middle bg-white">
       <thead><tr>
@@ -196,6 +204,14 @@
     </div>
     <div class="small fw-semibold text-primary mt-1 mb-2" id="videoBulkSelectedSummary" aria-live="polite">Chưa chọn video nào.</div>
   </form>
+
+  <div class="research-qr-confirmation border rounded bg-light p-2 mb-3 d-flex align-items-center flex-wrap gap-2"
+       data-qr-confirm-location="video" aria-label="Xác nhận lưu mã QR">
+    <strong class="small">Xác nhận lưu mã QR:</strong>
+    <button type="button" class="btn btn-success btn-sm research-qr-confirm-button" disabled>Tôi đã lưu đủ tệp QR</button>
+    <button type="button" class="btn btn-outline-secondary btn-sm research-qr-confirm-cancel" hidden>Chưa lưu / Hủy xác nhận</button>
+    <span class="small text-muted research-qr-confirm-state" aria-live="polite">Chưa có lượt tải QR mới cần xác nhận. Nút sẽ bật sau khi tải mã thuộc lượt đo.</span>
+  </div>
 
     <div class="table-responsive">
       <table class="table table-hover align-middle bg-white">
