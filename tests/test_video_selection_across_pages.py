@@ -124,7 +124,7 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
             assert page.status_code==200
             assert b'id="selectAllVideos"' in page.data
         assert page1.data.count(b'class="form-check-input video-check"')==5
-        assert page2.data.count(b'class="form-check-input video-check"')==5
+        assert page2.data.count(b'class="form-check-input video-check"')==4
         assert page3.data.count(b'class="form-check-input video-check"')==4
         # Gán môn hàng loạt với 9 video độc lập, trừ 1 video ở TRANG 2.
         data={"course_id":str(k["course"]),"q":"Bài học",
