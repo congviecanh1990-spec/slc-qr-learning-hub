@@ -1328,11 +1328,27 @@ def visible_playlist_query(user: User):
 
 
 def filtered_library_video_query(user, search="", status="", assignment="", playlist_id=None):
-    """Một truy vấn chung cho danh sách video VÀ các lệnh chọn mọi trang.
+    """Video độc lập (chưa thuộc playlist học liệu) và chọn xuyên mọi trang.
 
-    Luôn giới hạn theo tài khoản giảng viên, kể cả khi trình duyệt gửi ID khác.
+    Luôn giới hạn theo tài khoản giảng viên; loại playlist Uploads tự động.
+    Bộ lọc này được dùng chung khi liệt kê và khi xử lý hàng loạt.
     """
-    q = visible_video_query(user)
+    # Kho video chỉ liệt kê video độc lập, chưa thuộc playlist thực tế
+    # của giảng viên. Playlist "Uploads" tự sinh của YouTube không được
+    # xem là playlist học liệu, vì mọi video tải lên có thể nằm trong đó.
+    in_own_playlists = (
+        db.session.query(PlaylistVideo.video_id)
+        .join(Playlist, Playlist.id == PlaylistVideo.playlist_id)
+        .join(YouTubeChannel, YouTubeChannel.id == Playlist.channel_id)
+        .filter(
+            YouTubeChannel.user_id == user.id,
+            or_(
+                YouTubeChannel.uploads_playlist_id.is_(None),
+                Playlist.youtube_playlist_id != YouTubeChannel.uploads_playlist_id,
+            ),
+        )
+    )
+    q = visible_video_query(user).filter(~Video.id.in_(in_own_playlists))
     if status == "private":
         q = q.filter(Video.privacy_status == "private")
     elif status == "noembed":
