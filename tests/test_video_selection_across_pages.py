@@ -383,6 +383,92 @@ def test_remove_long_video_library_guide():
     assert "Nút <strong>Tạo QR</strong> áp dụng cho tất cả video" not in template
 
 
+def test_qr_row_selections_are_native_form_controls_and_cache_busted(configured_app):
+    """HTML thuần phải gửi được môn của từng dòng ngay cả khi submit JS bị chặn."""
+    from bs4 import BeautifulSoup
+    app, keys, _ = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+        response = client.get("/videos")
+        assert response.status_code == 200
+        soup = BeautifulSoup(response.data, "html.parser")
+        rows = soup.select("#videos tr.library-target-row")
+        assert len(rows) == 5
+        for row in rows:
+            select = row.select_one(".video-qr-course-select")
+            mirror = row.select_one("input[data-video-row-assign]")
+            assert select is not None and mirror is not None
+            assert "onchange" in select.attrs
+            assert mirror.get("form") == "assignVideoForm"
+            assert mirror.get("name") == "qr_course_assignments"
+            assert mirror.has_attr("disabled")
+            assert mirror.get("id") in select.get("onchange")
+            assert row["id"].split("-")[-1] == mirror.get("data-video-row-assign")
+        sources = [x.get("src", "") for x in soup.select("script[src]")]
+        assert any("video_selection.js?v=row-mirror-20261126" in x for x in sources)
+
+
+def test_first_fourth_row_qr_courses_and_one_checked_video_in_single_post(configured_app):
+    """Hai dropdown QR (hàng 1,4) cùng chuyển sang Toán, ô tích giữ Python."""
+    from models import db, Course, CourseVideo
+    app, keys, web = configured_app
+    first = keys["local_other"]          # trang 1 hàng 1
+    fourth = keys["video_ids"][10]       # trang 1 hàng 4
+    checked = keys["video_ids"][12]      # trang 1 hàng 2
+    with app.app_context():
+        teacher = db.session.get(web.User, keys["teacher"])
+        python_course = db.session.get(Course, keys["course"])
+        math_course = Course(owner_id=teacher.id, name="Toán rời rạc", code="MATH02")
+        db.session.add(math_course)
+        db.session.flush()
+        math_id = math_course.id
+        for vid in (first, fourth):
+            video = db.session.get(web.Video, vid)
+            web.ensure_course_video_link(python_course, video, teacher)
+        db.session.commit()
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+        response = client.post("/videos/assign-course", data={
+            "course_id": str(keys["course"]),
+            "video_selection_mode": "none",
+            "selected_video_ids": [str(checked)],
+            # Hai input mirror, kèm mô phỏng 2 bản ghi do JS cũ sinh thêm.
+            "qr_course_assignments": [
+                f"{first}:{math_id}", f"{fourth}:{math_id}",
+                f"{first}:{math_id}", f"{fourth}:{math_id}",
+            ],
+            "return_query": "v_page=1",
+        })
+        assert response.status_code == 302
+        with app.app_context():
+            for vid in (first, fourth):
+                assert CourseVideo.query.filter_by(
+                    course_id=math_id, video_id=vid
+                ).count() == 1
+                assert CourseVideo.query.filter_by(
+                    course_id=keys["course"], video_id=vid
+                ).count() == 0
+            assert CourseVideo.query.filter_by(
+                course_id=keys["course"], video_id=checked
+            ).count() == 1
+            assert CourseVideo.query.filter_by(
+                course_id=math_id, video_id=checked
+            ).count() == 0
+
+        # Hai bản ghi cùng video nhưng chọn 2 môn khác nhau phải bị từ chối.
+        response = client.post("/videos/assign-course", data={
+            "course_id": str(keys["course"]),
+            "video_selection_mode": "none",
+            "qr_course_assignments": [
+                f"{first}:{math_id}", f"{first}:{keys['course']}"
+            ],
+        })
+        assert response.status_code == 400
+
+
+
 def test_reset_buttons_keep_other_category_filters(configured_app):
     """Bỏ lọc từng danh mục, reset phân trang/chọn xuyên trang, không ảnh hưởng danh mục kia."""
     from bs4 import BeautifulSoup
