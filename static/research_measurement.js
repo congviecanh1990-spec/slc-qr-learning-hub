@@ -193,23 +193,32 @@
   });
 
   async function downloadAll(form,endpoint){
-    const course=pickCourse(form);
-    if(!course){announce('Hãy chọn môn học/mô đun để tải QR.',true);return;}
-    const n=selectedNumber(form);
-    if(n<1){announce('Hãy tích chọn video hoặc playlist để tải QR.',true);return;}
+    // Kho video: tải TẤT CẢ QR đã tạo cho video đã gán môn, không cần
+    // checkbox hay lựa chọn course_id. Playlist vẫn dùng cơ chế cũ.
+    const allVideoQrs=isVideoBulk(form) &&
+      form.querySelector('[name="download_scope"]')?.value==='all_assigned';
+    if(!allVideoQrs){
+      const course=pickCourse(form);
+      if(!course){announce('Hãy chọn môn học/mô đun để tải QR.',true);return;}
+      const n=selectedNumber(form);
+      if(n<1){announce('Hãy tích chọn video hoặc playlist để tải QR.',true);return;}
+    }
+    announce(allVideoQrs?'Đang chuẩn bị tải tất cả QR đã tạo...':'Đang chuẩn bị mã QR...');
     // Picker phải được gọi trực tiếp trong submit/click của người dùng,
     // trước bất kỳ await nào, nếu không Chrome sẽ chặn quyền chọn thư mục.
     let handle=null;
     if(canWriteDirectory){
       try{handle=await window.showDirectoryPicker({mode:'readwrite'});}
       catch(e){
-        if(e?.name!=='AbortError')announce('Không thể chọn thư mục: '+e.message,true);
+        announce(e?.name==='AbortError'
+          ? 'Bạn đã hủy thao tác chọn thư mục tải QR.'
+          : 'Không thể chọn thư mục: '+e.message,true);
         return;
       }
     }
     try{
       if(isPlaylistBulk(form))window.playlistBulkSelection?.appendSelection(form);
-      else window.videoBulkSelection?.appendSelection(form);
+      else if(!allVideoQrs)window.videoBulkSelection?.appendSelection(form);
       const data=new FormData(form);
       const apiResponse=await fetch(endpoint,{
         method:'POST',body:data,credentials:'same-origin',cache:'no-store',
@@ -249,6 +258,7 @@
         const btn=document.getElementById('playlistBulkDownloadQr');
         if(isPlaylistBulk(form))btn?.dispatchEvent(new CustomEvent(
           'qr-download-complete',{bubbles:true,detail:{method:'directory_picker'}}));
+        announce('Đã lưu '+ids.length+' mã QR PNG vào thư mục bạn chọn.');
       }else{
         // Trình duyệt không hỗ trợ lưu PNG từng tệp vào thư mục:
         // tải ZIP và ghi nhận không tự xác minh, KHÔNG đưa vào tỷ lệ nghiệm thu.
@@ -259,7 +269,8 @@
           throw Error('Không tải được tệp ZIP đã chọn.');
         const blob=await zip.blob(),url=URL.createObjectURL(blob);
         const a=document.createElement('a');
-        a.href=url;a.download='Ma_QR_hoc_lieu_da_chon.zip';
+        a.href=url;a.download=allVideoQrs
+          ?'Ma_QR_video_da_tao_tat_ca.zip':'Ma_QR_hoc_lieu_da_chon.zip';
         document.body.appendChild(a);a.click();a.remove();
         window.setTimeout(()=>URL.revokeObjectURL(url),30000);
         await recordDownload(isBulk?'bulk':'row',ids,'not_verified');
