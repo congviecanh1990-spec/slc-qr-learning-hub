@@ -95,6 +95,8 @@
   }
   document.addEventListener('click',event=>{
     if(event.target.closest('.research-qr-confirm-button')){
+      // Đếm chính nút xác nhận TRƯỚC khi gửi số thao tác chốt lên máy chủ.
+      if(!confirming && pendingDownloads.length && active)addOperation();
       confirmPendingDownloads();
     }else if(event.target.closest('.research-qr-confirm-cancel')){
       cancelPendingDownloads();
@@ -236,7 +238,8 @@
 
   // Chỉ đếm các thao tác trong Web App khi một cặp đo đã được giao và khởi động.
   document.addEventListener('click',event=>{
-    if(active && event.target.closest('main button,main a,main input[type="checkbox"]'))
+    if(active && !event.target.closest('.research-qr-confirm-button') &&
+       event.target.closest('main button,main a,main input[type="checkbox"]'))
       addOperation();
     const rowLink=event.target.closest('a.playlist-qr-download,a.video-qr-download');
     // Tải PNG thành công qua HTTP chưa chứng minh người dùng đã lưu file.
