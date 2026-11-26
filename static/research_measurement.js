@@ -1,15 +1,89 @@
 /* Đo đối chứng ngay trong Kho học liệu.
    Nhiệm vụ được PHÂN LOẠI BẰNG NÚT TẢI QR THỰC TẾ, không bằng checkbox.
    Tải ở từng dòng -> từng QR; lưu tất cả >=2 QR -> hàng loạt.
-   Không đọc/ghi đường dẫn cá nhân. Chỉ chốt "đã xác minh" khi PNG được
-   ghi trực tiếp thành công bằng File System Access API. */
+   Không đọc/ghi đường dẫn cá nhân. Với tải native của Chrome, chỉ chốt
+   sau khi GV xác nhận đã lưu; giữ tách biệt dữ liệu tự xác nhận và
+   dữ liệu hệ thống kiểm chứng độc lập. */
 (() => {
   'use strict';
   const api=window.researchMeasurement;
   if(!api || !document.getElementById('videos'))return;
   const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';
   const status=document.getElementById('researchQrStatus');
-  let active=null,ops=0,lastSent=-1,preflight=null;
+  let active=null,ops=0,lastSent=-1,preflight=null,confirming=false;
+  const pendingKey='slc-qr-pending-confirmations-v2';
+  function readPending(){
+    try{
+      const list=JSON.parse(sessionStorage.getItem(pendingKey)||'[]');
+      if(!Array.isArray(list))return [];
+      return list.filter(item=>
+        ['bulk','row'].includes(item.style) &&
+        Array.isArray(item.ids) && item.ids.length>0 &&
+        item.ids.length<=1000 && item.ids.every(id=>Number.isSafeInteger(id)&&id>0)
+      ).slice(-50);
+    }catch(_){return [];}
+  }
+  let pendingDownloads=readPending();
+  function persistPending(){
+    try{
+      if(pendingDownloads.length)sessionStorage.setItem(pendingKey,JSON.stringify(pendingDownloads));
+      else sessionStorage.removeItem(pendingKey);
+    }catch(_){}
+  }
+  function queuePending(style,ids){
+    if(!ids?.length)return;
+    const key=style+':'+ids.join(',');
+    if(!pendingDownloads.some(item=>item.key===key))
+      pendingDownloads.push({style,ids,key});
+    persistPending();
+    showPendingConfirmation();
+  }
+  function showPendingConfirmation(){
+    if(!pendingDownloads.length||!status)return;
+    const n=pendingDownloads.reduce((sum,item)=>sum+item.ids.length,0);
+    announce('Đã gửi QR tới trình duyệt ('+n+' mã trong '+
+      pendingDownloads.length+' lượt tải). Nếu đã lưu tệp vào máy, '+
+      'hãy xác nhận để chốt số thao tác và thời gian trên Web App.');
+    const confirm=document.createElement('button');
+    confirm.type='button';
+    confirm.className='btn btn-success btn-sm mt-2 me-2';
+    confirm.textContent='Tôi đã lưu đủ tệp QR';
+    confirm.disabled=confirming;
+    confirm.addEventListener('click',async()=>{
+      if(confirming)return;
+      confirming=true;confirm.disabled=true;
+      // Giữ thứ tự: tải từng QR là từng thao tác, ZIP là một lượt hàng loạt.
+      // Không tự xác nhận khi Chrome chỉ nhận tệp mà chưa biết đã lưu chưa.
+      let completed=0;
+      for(const item of [...pendingDownloads]){
+        const result=await recordDownload(item.style,item.ids,'manual_confirmed',true);
+        if(!result?.measured){
+          const msg=result?.message||'Lượt tải chưa khớp với phiên tạo QR mới.';
+          announce('Chưa chốt được lượt đo: '+msg,true);
+          break;
+        }
+        pendingDownloads=pendingDownloads.filter(x=>x.key!==item.key);
+        completed+=1;
+        persistPending();
+      }
+      confirming=false;
+      if(pendingDownloads.length)showPendingConfirmation();
+      else if(completed){
+        announce('Đã ghi nhận xác nhận lưu '+completed+
+          ' lượt tải QR. Thời gian/thao tác được chốt theo xác nhận của GV; '+
+          'không tự động tính là bằng chứng lưu tệp đã xác minh độc lập.');
+      }
+    });
+    const cancel=document.createElement('button');
+    cancel.type='button';
+    cancel.className='btn btn-outline-secondary btn-sm mt-2';
+    cancel.textContent='Chưa lưu / Hủy xác nhận';
+    cancel.addEventListener('click',()=>{
+      pendingDownloads=[];persistPending();
+      announce('Đã bỏ yêu cầu xác nhận. Lượt đo chưa được chốt vì chưa có bằng chứng đã lưu tệp.');
+    });
+    status.append(confirm,cancel);
+  }
   const sessionKey=()=>active?'slc-qr-ops:'+active.id+':'+active.nonce:'';
   const labels={
     QR_TUNG_VIDEO_PLAYLIST:'Tạo QR cho từng video hoặc playlist',
@@ -42,7 +116,7 @@
       if(data.active){
         active=data;
         try{ops=Math.max(data.operations||0,Number(sessionStorage.getItem(sessionKey()))||0);}catch(_){ops=data.operations||0;}
-        if(data.created){
+        if(data.created && !pendingDownloads.length){
           announce('Đang đo tự động: '+data.code+' · đã tạo '+data.created+'/'+data.expected+
             ' QR. Kết quả được phân loại khi bạn tải QR ở từng dòng hoặc tải tất cả.');
         }
@@ -148,11 +222,14 @@
     if(active && event.target.closest('main button,main a,main input[type="checkbox"]'))
       addOperation();
     const rowLink=event.target.closest('a.playlist-qr-download,a.video-qr-download');
-    // Trình duyệt tự xử lý tải PNG. Không gọi API ghi tệp được cấp quyền;
-    // một lần nhấp không đồng nghĩa đã lưu thành công, nên chưa xác minh.
+    // Tải PNG thành công qua HTTP chưa chứng minh người dùng đã lưu file.
+    // Ghi nhận lượt tải rồi đề nghị chính GV xác nhận đã lưu vào máy.
     if(rowLink && rowLink.href && rowLink.getAttribute('href')!=='#'){
       const match=new URL(rowLink.href,location.href).pathname.match(/\/qr\/(\d+)\/png$/);
-      if(match)recordDownload('row',[Number(match[1])],'not_verified');
+      if(match){
+        const ids=[Number(match[1])];
+        recordDownload('row',ids,'not_verified').finally(()=>queuePending('row',ids));
+      }
     }
   },true);
   document.addEventListener('change',event=>{
@@ -161,7 +238,7 @@
   },true);
 
   async function recordDownload(style,ids,method,manual=false){
-    if(!Array.isArray(ids)||!ids.length)return;
+    if(!Array.isArray(ids)||!ids.length)return null;
     const classification=(style==='bulk'&&ids.length>=2)?
       'QR_VIDEO_HANG_LOAT':'QR_TUNG_VIDEO_PLAYLIST';
     try{
@@ -172,9 +249,11 @@
       });
       if(result.measured){
         if(result.completed){
-          announce('Đã hoàn thành đo '+labels[result.kind]+': '+
+          announce('Đã chốt lượt đo '+labels[result.kind]+': '+
             result.seconds+' giây, '+result.operations+' thao tác'+
-            (result.verified?' (đã xác minh tệp PNG).':' (lưu ZIP do người dùng xác nhận).'));
+            (result.verified
+              ?' (tệp PNG được hệ thống xác minh).'
+              :' (GV đã tự xác nhận lưu; chưa kiểm chứng độc lập).'));
           const key=sessionKey();
           active=null;ops=0;lastSent=-1;
           try{sessionStorage.removeItem(key);}catch(_){}
@@ -185,7 +264,11 @@
           'Không có lượt đo đối chứng đã giao cho thao tác này.'));
       }
       if(result.measured&&!result.completed)await refresh();
-    }catch(e){announce('Đã tải mã QR nhưng chưa ghi được phép đo: '+e.message,true);}
+      return result;
+    }catch(e){
+      announce('Chưa ghi được phép đo: '+e.message,true);
+      return {ok:false,message:e.message};
+    }
   }
   document.addEventListener('qr-download-complete',event=>{
     const a=event.target.closest('a.playlist-qr-download,a.video-qr-download');
@@ -247,10 +330,9 @@
       window.setTimeout(()=>URL.revokeObjectURL(url),30000);
       // Trình duyệt không báo lại cho web khi người dùng thực sự lưu ZIP:
       // không ghi nhận là tệp PNG đã được xác minh.
-      await recordDownload(ids.length>=2?'bulk':'row',ids,'not_verified');
-      announce('Đã gửi tệp ZIP gồm '+ids.length+' mã QR để trình duyệt tải xuống. '+
-        'Bạn có thể chọn nơi lưu trong hộp thoại tải xuống của Chrome '+
-        '(nếu đã bật hỏi vị trí lưu).');
+      const style=ids.length>=2?'bulk':'row';
+      await recordDownload(style,ids,'not_verified');
+      queuePending(style,ids);
     }catch(e){announce('Không tải được QR: '+e.message,true);}
   }
 
@@ -274,5 +356,5 @@
     data.set('operations_count',String(ops));
     navigator.sendBeacon?.(api.progressUrl,data);
   });
-  refresh();
+  refresh().finally(()=>{if(pendingDownloads.length)showPendingConfirmation();});
 })();
