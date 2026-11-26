@@ -178,7 +178,7 @@
           <label class="form-label small">Môn học/ mô đun áp dụng cho video tích chọn và tạo QR</label>
           <select class="form-select" name="course_id">
             <option value="">— Chọn môn học/ mô đun —</option>
-            {% for c in courses %}<option value="{{ c.id }}" data-assigned-video-count="{{ (course_assigned_video_counts|default({})).get(c.id, 0) }}">{{ c.name }}</option>{% endfor %}
+            {% for c in courses %}<option value="{{ c.id }}" data-assigned-video-count="{{ (course_assigned_video_counts|default({})).get(c.id, 0) }}" {{ 'selected' if request.args.get('video_course_id', type=int) == c.id else '' }}>{{ c.name }}</option>{% endfor %}
           </select>
         </div>
         <button type="submit" class="btn btn-primary" {{ 'disabled' if not courses else '' }}>Gán môn cho video đã chọn</button>
