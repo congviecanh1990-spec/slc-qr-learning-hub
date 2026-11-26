@@ -36,7 +36,7 @@ def test_selection_ui_and_scripts_are_consistent():
     assert 'library_filter_reset.js' in template
     reset_js=(ROOT/"static/library_filter_reset.js").read_text(encoding="utf-8")
     assert 'slc-playlist-selection-v4:' in reset_js
-    assert 'slc-video-selection-v1:' in reset_js
+    assert 'slc-video-selection-v2:' in reset_js
     assert 'String(scope[0])===String(userId)' in reset_js
 
 
@@ -95,24 +95,24 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
     with app.app_context():
         teacher=db.session.get(web.User,k["teacher"])
         q=web.filtered_library_video_query(teacher,"Bài học")
-        assert q.count()==13, "Không được hiển thị video từ tài khoản khác"
+        assert q.count()==9, "Chỉ hiển thị video độc lập thuộc phạm vi GV, không lấy từ tài khoản khác"
         chosen=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("video_selection_mode","all"),
             ("excluded_video_ids",str(k["video_ids"][8])),
         ]))
-        assert len(chosen)==12 and k["video_ids"][8] not in chosen
+        assert len(chosen)==8 and k["video_ids"][8] not in chosen
         none=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("video_selection_mode","none"),
             ("selected_video_ids",str(k["video_ids"][1])),
             ("selected_video_ids",str(k["video_ids"][11])),
             ("selected_video_ids",str(k["outsider"])),
         ]))
-        assert set(none)=={k["video_ids"][1],k["video_ids"][11]}
+        assert set(none)=={k["video_ids"][11]}
         in_playlist=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("playlist_id",str(k["playlist"])),
             ("video_selection_mode","all"),
         ]))
-        assert len(in_playlist)==4
+        assert len(in_playlist)==0
         with pytest.raises(BadRequest):
             web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
                 ("video_selection_mode","all"),("status","undefined")
@@ -126,9 +126,9 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
             assert page.status_code==200
             assert b'id="selectAllVideos"' in page.data
         assert page1.data.count(b'class="form-check-input video-check"')==5
-        assert page2.data.count(b'class="form-check-input video-check"')==5
-        assert page3.data.count(b'class="form-check-input video-check"')==3
-        # Gán môn hàng loạt với tất cả 13 kết quả tìm kiếm, trừ 1 video ở TRANG 2.
+        assert page2.data.count(b'class="form-check-input video-check"')==4
+        assert page3.data.count(b'class="form-check-input video-check"')==4
+        # Gán môn hàng loạt với 9 video độc lập, trừ 1 video ở TRANG 2.
         data={"course_id":str(k["course"]),"q":"Bài học",
               "video_selection_mode":"all",
               "excluded_video_ids":str(k["video_ids"][8])}
@@ -136,7 +136,7 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
         assert response.status_code==302
         with app.app_context():
             ids={link.video_id for link in CourseVideo.query.filter_by(course_id=k["course"]).all()}
-            assert len(ids)==12 and k["video_ids"][8] not in ids
+            assert len(ids)==8 and k["video_ids"][8] not in ids
             assert k["outsider"] not in ids
         # Lần tạo QR chỉ 2 video trên 2 trang khác nhau, không dùng mọi video đã gán.
         response=client.post("/videos/qr/bulk-selected",data={
@@ -147,9 +147,57 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
         assert response.status_code==302
         with app.app_context():
             qrs=QrCode.query.filter_by(course_id=k["course"],active=True).all()
-            assert len(qrs)==2
+            assert len(qrs)==1
             assert all(q.owner_id==k["teacher"] for q in qrs)
 
+
+
+def test_video_library_reacts_to_playlist_membership(configured_app):
+    """Khi gắn/bỏ liên kết playlist, bảng video và chọn hàng loạt cập nhật tương ứng.
+
+    Playlist Uploads hệ thống được bỏ qua, playlist thuộc kênh khác vẫn có hiệu lực.
+    """
+    from models import db, Playlist, PlaylistVideo, YouTubeChannel
+    app, keys, web = configured_app
+    with app.app_context():
+        teacher = db.session.get(web.User, keys["teacher"])
+        linked_id = keys["video_ids"][0]
+        independent_id = keys["video_ids"][6]
+        playlist_id = keys["playlist"]
+        get_ids = lambda: {v.id for v in web.filtered_library_video_query(teacher).all()}
+        assert linked_id not in get_ids()
+        assert independent_id in get_ids()
+
+        db.session.add(PlaylistVideo(playlist_id=playlist_id, video_id=independent_id))
+        db.session.commit()
+        assert independent_id not in get_ids()
+        PlaylistVideo.query.filter_by(playlist_id=playlist_id, video_id=independent_id).delete()
+        PlaylistVideo.query.filter_by(playlist_id=playlist_id, video_id=linked_id).delete()
+        db.session.commit()
+        assert {linked_id, independent_id} <= get_ids()
+
+        channel = YouTubeChannel.query.filter_by(user_id=teacher.id).first()
+        channel.uploads_playlist_id = "UU_ONLY_SYSTEM"
+        uploads = Playlist(
+            channel_id=channel.id, youtube_playlist_id="UU_ONLY_SYSTEM", title="Uploads"
+        )
+        db.session.add(uploads)
+        db.session.flush()
+        db.session.add(PlaylistVideo(playlist_id=uploads.id, video_id=independent_id))
+        db.session.commit()
+        assert independent_id in get_ids()
+
+        outsider_channel = YouTubeChannel.query.filter(YouTubeChannel.user_id != teacher.id).first()
+        foreign_playlist = Playlist(
+            channel_id=outsider_channel.id,
+            youtube_playlist_id="PL_FOREIGN",
+            title="Playlist kênh khác",
+        )
+        db.session.add(foreign_playlist)
+        db.session.flush()
+        db.session.add(PlaylistVideo(playlist_id=foreign_playlist.id, video_id=independent_id))
+        db.session.commit()
+        assert independent_id not in get_ids()
 
 
 def test_reset_buttons_keep_other_category_filters(configured_app):
@@ -200,7 +248,7 @@ def test_reset_buttons_keep_other_category_filters(configured_app):
         assert vs.select_one('#videoLibraryFilterForm [name="status"] option[selected]') is None
         assert vs.select_one('#videoLibraryFilterForm [name="assignment"] option[selected]') is None
         assert vs.select_one('#videoLibraryFilterForm [name="playlist_id"] option[selected]') is None
-        assert "Có 14 video" in vs.get_text(" ",strip=True)
+        assert "Có 10 video" in vs.get_text(" ",strip=True)
         assert "Có 1 playlist" in ps.get_text(" ",strip=True)
 
 
@@ -262,7 +310,7 @@ def test_video_bulk_three_actions_and_download_only_existing_assigned_qrs(config
         assert len(form.select('button[formaction]')) == 2
         assert "/videos/qr/bulk-selected" in str(form)
         assert "/videos/qr/download-selected" in str(form)
-        chosen = [str(keys["video_ids"][2]), str(keys["video_ids"][10])]
+        chosen = [str(keys["video_ids"][5]), str(keys["video_ids"][10])]
         post_data = {
             "course_id": str(keys["course"]), "q": "Bài học",
             "video_selection_mode": "none", "selected_video_ids": chosen,
