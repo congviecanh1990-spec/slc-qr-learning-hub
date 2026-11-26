@@ -31,6 +31,10 @@ def test_selection_ui_and_scripts_are_consistent():
     assert 'chosenVideos' not in js
     assert 'filtered_library_video_query' in py
     assert 'selected_filtered_library_video_ids(user, request.form)' in py
+    assert 'qr_course_assignments' in py and 'qr_course_assignments' in selection_js
+    assert 'selectedQrCourseCount' in selection_js
+    assert 'data-assigned-video-count' in template
+    assert 'dataset.assignedVideoCount' in js
     assert 'id="resetPlaylistFilters"' in template
     assert 'id="resetVideoFilters"' in template
     assert 'library_filter_reset.js' in template
@@ -147,7 +151,7 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
         assert response.status_code==302
         with app.app_context():
             qrs=QrCode.query.filter_by(course_id=k["course"],active=True).all()
-            assert len(qrs)==1
+            assert len(qrs)==8, "Tạo QR cho toàn bộ video độc lập đã gán môn, không chỉ video tích"
             assert all(q.owner_id==k["teacher"] for q in qrs)
 
 
@@ -198,6 +202,91 @@ def test_video_library_reacts_to_playlist_membership(configured_app):
         db.session.add(PlaylistVideo(playlist_id=foreign_playlist.id, video_id=independent_id))
         db.session.commit()
         assert independent_id not in get_ids()
+
+
+def test_table_columns_and_assignment_label_are_compact(configured_app):
+    """Bảng playlist không có cột Kênh; bảng video bỏ Kênh và Playlist."""
+    from bs4 import BeautifulSoup
+    app, k, _web = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as ss: ss["user_id"] = k["teacher"]
+        response=client.get("/videos")
+        assert response.status_code==200
+        soup=BeautifulSoup(response.data,"html.parser")
+        playlists=soup.select_one("#playlists table")
+        videos=soup.select_one("#videos table")
+        assert playlists and videos
+        pheads=[th.get_text(" ",strip=True) for th in playlists.select("thead th")]
+        vheads=[th.get_text(" ",strip=True) for th in videos.select("thead th")]
+        assert len(pheads)==6 and "Kênh YouTube" not in pheads
+        assert len(vheads)==6 and "Kênh YouTube" not in vheads and "Playlist" not in vheads
+        assert len(playlists.select("tbody > tr:first-child > td"))==6
+        assert len(videos.select("tbody > tr:first-child > td"))==6
+        label=soup.select_one('#videoLibraryFilterForm label.text-nowrap')
+        assert label and label.get_text(" ",strip=True)=="Phân loại môn học/ mô đun"
+
+
+def test_assign_qr_row_course_and_create_all_assigned_without_video_checks(configured_app):
+    """Môn chọn ở cột Mã QR được gán dù không tick; QR tạo cho mọi video đã gán môn."""
+    from models import db,Course,CourseVideo,QrCode
+    app,k,web=configured_app
+    with app.app_context():
+        teacher=db.session.get(web.User,k["teacher"])
+        other=web.User.query.filter(web.User.id != teacher.id).first()
+        special=Course(owner_id=teacher.id,name="Lập trình cơ bản",code="PY02")
+        foreign=Course(owner_id=other.id,name="Môn không thuộc quyền",code="OUT02")
+        db.session.add_all([special,foreign]);db.session.commit()
+        own_id=special.id
+        foreign_id=foreign.id
+    row_video=k["video_ids"][10]  # Dòng video độc lập nằm trên trang đầu.
+    other_video=k["video_ids"][5] # Dòng ở trang sau.
+    with app.test_client() as client:
+        with client.session_transaction() as ss: ss["user_id"]=k["teacher"]
+        # Không tích video, không chọn môn chung: chỉ lấy môn ở cột Mã QR.
+        assigned=client.post("/videos/assign-course",data={
+            "video_selection_mode":"none",
+            "return_query":"v_page=1",
+            "qr_course_assignments":[f"{row_video}:{own_id}"],
+        })
+        assert assigned.status_code==302
+        with app.app_context():
+            assert CourseVideo.query.filter_by(course_id=own_id,video_id=row_video).count()==1
+            assert QrCode.query.filter_by(course_id=own_id).count()==0
+        # Môn chung áp dụng cho checkbox ở mọi trang, nhưng không ghi trùng liên kết.
+        combined=client.post("/videos/assign-course",data={
+            "course_id":str(own_id),"video_selection_mode":"none",
+            "selected_video_ids":[str(other_video),str(row_video)],
+            "qr_course_assignments":[f"{row_video}:{own_id}"],
+        })
+        assert combined.status_code==302
+        with app.app_context():
+            assert CourseVideo.query.filter_by(course_id=own_id).count()==2
+        # Không thể gán giảng viên khác hoặc giả ID video ngoài trang đang xem.
+        assert client.post("/videos/assign-course",data={
+            "video_selection_mode":"none",
+            "qr_course_assignments":[f"{row_video}:{foreign_id}"]
+        }).status_code==403
+        assert client.post("/videos/assign-course",data={
+            "video_selection_mode":"none",
+            "qr_course_assignments":[f"{k['video_ids'][0]}:{own_id}"]
+        }).status_code==400
+
+        # KHÔNG tích bất cứ checkbox video nào; bộ lọc hiện hành có thể rỗng.
+        qr=client.post("/videos/qr/bulk-selected",data={
+            "course_id":str(own_id),"q":"không khớp video nào",
+            "video_selection_mode":"none",
+        })
+        assert qr.status_code==302
+        with app.app_context():
+            qrs=QrCode.query.filter_by(course_id=own_id,active=True).all()
+            assert len(qrs)==2
+            assert {x.current_target.video_id for x in qrs}=={row_video,other_video}
+        # Gọi lại không tạo mã trùng, kể cả khi không có video đang được tick.
+        client.post("/videos/qr/bulk-selected",data={"course_id":str(own_id)})
+        with app.app_context():
+            assert QrCode.query.filter_by(course_id=own_id,active=True).count()==2
+
+
 
 
 def test_reset_buttons_keep_other_category_filters(configured_app):
