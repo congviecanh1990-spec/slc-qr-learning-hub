@@ -214,7 +214,8 @@
             <form method="post" action="{{ url_for('create_video_qr_from_library', video_id=v.id) }}" class="d-flex flex-wrap gap-1 align-items-center library-qr-form video-qr-actions" data-library-qr-form="1" data-video-usable="{{ '1' if v.is_available and v.embeddable is not sameas false and v.privacy_status != 'private' else '0' }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-              <select class="form-select form-select-sm video-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR video" required>
+              <select class="form-select form-select-sm video-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR video" required
+                      onchange="var mirror=document.getElementById('video-course-mirror-{{ v.id }}');if(mirror){mirror.disabled=!this.value;mirror.value=this.value?'{{ v.id }}:'+this.value:'';}">
                 {% if courses|length != 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
                 {% for c in courses %}
                   {% set found = namespace(qr=none) %}
@@ -230,6 +231,10 @@
               </select>
               <button class="btn btn-primary btn-sm video-qr-create" {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
             </form>
+            {# Thuộc form Gán môn ở phía trên dù đang hiển thị trong dòng video:
+               cập nhật NGAY khi chọn môn, không phụ thuộc xử lý sự kiện submit. #}
+            <input type="hidden" id="video-course-mirror-{{ v.id }}" name="qr_course_assignments"
+                   form="assignVideoForm" data-video-row-assign="{{ v.id }}" disabled>
             <div class="d-flex flex-wrap gap-1 align-items-center mt-1 video-qr-extra" data-qr-row="video-{{ v.id }}" hidden>
               <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download qr-save-picker" hidden aria-label="Tải mã QR video">Tải QR</a>
               <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" hidden aria-expanded="false">Đổi đích</button>
@@ -597,7 +602,8 @@ document.querySelectorAll('.playlist-course-form').forEach(form=>{
 
 
 </script>
-<script src="{{ url_for('static', filename='video_selection.js') }}" defer></script>
+{# Đổi URL để trình duyệt không tiếp tục dùng JS đã cache trước bản sửa cột QR. #}
+<script src="{{ url_for('static', filename='video_selection.js', v='row-mirror-20261126') }}" defer></script>
 <script src="{{ url_for('static', filename='library_filter_reset.js') }}" defer></script>
 <script src="{{ url_for('static', filename='qr_save_picker.js') }}" defer></script>
 {% endblock %}
