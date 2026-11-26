@@ -5420,8 +5420,7 @@ def register_routes(app):
     @login_required
     def research_auto_status():
         user = current_user()
-        if user.role == "admin":
-            return jsonify({"active": False})
+        # Quản trị viên kiêm giảng viên vẫn được đo QR của học phần mình sở hữu.
         ensure_research_comparison_schema()
         return jsonify(research_auto_status_payload(active_research_measurement(user.id)))
 
@@ -5430,8 +5429,7 @@ def register_routes(app):
     def research_auto_start():
         """Kích hoạt lúc GV chọn chức năng+môn ở Kho học liệu, không có trang đo."""
         user = current_user()
-        if user.role == "admin":
-            return jsonify({"active": False, "message": "Chủ nhiệm chỉ nhập kết quả thủ công."})
+        # Không loại tài khoản admin: admin có thể đồng thời tạo QR như giảng viên.
         ensure_research_comparison_schema()
         course_id = request.form.get("course_id", type=int)
         kind = (request.form.get("task_kind") or "").strip()
