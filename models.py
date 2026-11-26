@@ -519,6 +519,7 @@ class ResearchComparisonPair(db.Model):
     webapp_seconds = db.Column(db.Float, nullable=True)
     # Ghi nhận tự động khi GV bấm bắt đầu/kết thúc; không cho người nhập tay.
     measurement_started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    measurement_start_source = db.Column(db.String(30), nullable=True)  # ui_preflight | server_fallback
     measurement_finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
     measurement_operations = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     measurement_single_videos = db.Column(db.Integer, nullable=False, default=0, server_default="0")
