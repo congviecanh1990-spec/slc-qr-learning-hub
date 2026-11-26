@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - feature/ban-giao-mh-md-theo-lop-20261118
-      - fix/test-qr-download-all-and-row-button-20261126
   workflow_dispatch:
 jobs:
   research-pairs:
