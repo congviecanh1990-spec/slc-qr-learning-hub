@@ -9,8 +9,6 @@
   if(!api || !document.getElementById('videos'))return;
   const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';
   const status=document.getElementById('researchQrStatus');
-  const canWriteDirectory=Boolean(window.showDirectoryPicker && window.isSecureContext);
-  const canWriteFile=Boolean(window.showSaveFilePicker && window.isSecureContext);
   let active=null,ops=0,lastSent=-1,preflight=null;
   const sessionKey=()=>active?'slc-qr-ops:'+active.id+':'+active.nonce:'';
   const labels={
@@ -150,7 +148,9 @@
     if(active && event.target.closest('main button,main a,main input[type="checkbox"]'))
       addOperation();
     const rowLink=event.target.closest('a.playlist-qr-download,a.video-qr-download');
-    if(rowLink && !canWriteFile){
+    // Trình duyệt tự xử lý tải PNG. Không gọi API ghi tệp được cấp quyền;
+    // một lần nhấp không đồng nghĩa đã lưu thành công, nên chưa xác minh.
+    if(rowLink && rowLink.href && rowLink.getAttribute('href')!=='#'){
       const match=new URL(rowLink.href,location.href).pathname.match(/\/qr\/(\d+)\/png$/);
       if(match)recordDownload('row',[Number(match[1])],'not_verified');
     }
@@ -195,8 +195,10 @@
   });
 
   async function downloadAll(form,endpoint){
-    // Cả Kho video và Playlist đều tải mọi QR đã tạo trong các MH/MĐ đã gán,
-    // không yêu cầu tích checkbox hoặc chọn một môn học duy nhất.
+    // Chrome không cho trang web ghi vào thư mục do người dùng chọn mà không
+    // cấp quyền, đặc biệt là thư mục hệ thống (Downloads, Program Files...).
+    // Vì vậy tải ONE ZIP bằng download thông thường; Chrome có thể hỏi nơi
+    // lưu theo tùy chọn Settings > Downloads > Ask where to save each file.
     const allVideoQrs=isVideoBulk(form) &&
       form.querySelector('[name="download_scope"]')?.value==='all_assigned';
     const allPlaylistQrs=isPlaylistBulk(form) &&
@@ -208,83 +210,47 @@
       const n=selectedNumber(form);
       if(n<1){announce('Hãy tích chọn video hoặc playlist để tải QR.',true);return;}
     }
-    announce(allAssignedQrs?'Đang chuẩn bị tải tất cả QR đã tạo...':'Đang chuẩn bị mã QR...');
-    // Picker phải được gọi trực tiếp trong submit/click của người dùng,
-    // trước bất kỳ await nào, nếu không Chrome sẽ chặn quyền chọn thư mục.
-    let handle=null;
-    if(canWriteDirectory){
-      try{handle=await window.showDirectoryPicker({mode:'readwrite'});}
-      catch(e){
-        announce(e?.name==='AbortError'
-          ? 'Bạn đã hủy thao tác chọn thư mục tải QR.'
-          : 'Không thể chọn thư mục: '+e.message,true);
-        return;
-      }
-    }
+    announce('Đang đóng gói các mã QR thành tệp ZIP...');
     try{
       if(isPlaylistBulk(form) && !allPlaylistQrs)
         window.playlistBulkSelection?.appendSelection(form);
       else if(isVideoBulk(form) && !allVideoQrs)
         window.videoBulkSelection?.appendSelection(form);
       const data=new FormData(form);
+      // Truy vấn danh sách trước để thông báo lỗi và số lượng mã chính xác.
       const apiResponse=await fetch(endpoint,{
         method:'POST',body:data,credentials:'same-origin',cache:'no-store',
         headers:{'Accept':'application/json'}
       });
-      const parsed=await apiResponse.json();
-      if(!apiResponse.ok||!parsed.ok)throw Error(parsed.message||'Không có QR đã tạo để tải.');
-      const files=parsed.files;
-      if(!files?.length)throw Error('Chưa có QR hợp lệ trong các mục đã chọn.');
-      const ids=files.map(f=>Number(f.id));
-      const isBulk=ids.length>=2;
-      if(handle){
-        const names=new Set();
-        for(const file of files){
-          let filename=(file.name||'Ma_QR.png').replace(/[\\/:*?"<>|]/g,'_');
-          if(names.has(filename)){
-            const dot=filename.lastIndexOf('.');
-            filename=filename.slice(0,dot<0?filename.length:dot)+'_qr'+file.id+
-              (dot<0?'':filename.slice(dot));
-          }
-          names.add(filename);
-          try{
-            await handle.getFileHandle(filename,{create:false});
-            const dot=filename.lastIndexOf('.');
-            filename=filename.slice(0,dot<0?filename.length:dot)+'_qr'+file.id+
-              (dot<0?'':filename.slice(dot));
-          }catch(e){if(e.name!=='NotFoundError')throw e;}
-          const qr=await fetch(file.url,{credentials:'same-origin'});
-          if(!qr.ok||!(qr.headers.get('content-type')||'').includes('image/png'))
-            throw Error('Không nhận được ảnh QR hợp lệ: '+file.id);
-          const writer=await (await handle.getFileHandle(filename,{create:true})).createWritable();
-          try{await writer.write(await qr.blob());await writer.close();}
-          catch(e){try{await writer.abort();}catch(_){}throw e;}
-        }
-        addOperation();
-        await recordDownload(isBulk?'bulk':'row',ids,'directory_picker');
-        const btn=document.getElementById('playlistBulkDownloadQr');
-        if(isPlaylistBulk(form))btn?.dispatchEvent(new CustomEvent(
-          'qr-download-complete',{bubbles:true,detail:{method:'directory_picker'}}));
-        announce('Đã lưu '+ids.length+' mã QR PNG vào thư mục bạn chọn.');
-      }else{
-        // Trình duyệt không hỗ trợ lưu PNG từng tệp vào thư mục:
-        // tải ZIP và ghi nhận không tự xác minh, KHÔNG đưa vào tỷ lệ nghiệm thu.
-        const zip=await fetch(endpoint,{
-          method:'POST',body:data,credentials:'same-origin',cache:'no-store'
-        });
-        if(!zip.ok||!(zip.headers.get('content-type')||'').includes('zip'))
-          throw Error('Không tải được tệp ZIP đã chọn.');
-        const blob=await zip.blob(),url=URL.createObjectURL(blob);
-        const a=document.createElement('a');
-        a.href=url;a.download=allVideoQrs
-          ?'Ma_QR_video_da_tao_tat_ca.zip'
-          :(allPlaylistQrs?'Ma_QR_playlist_da_tao_tat_ca.zip':'Ma_QR_hoc_lieu_da_chon.zip');
-        document.body.appendChild(a);a.click();a.remove();
-        window.setTimeout(()=>URL.revokeObjectURL(url),30000);
-        await recordDownload(isBulk?'bulk':'row',ids,'not_verified');
-        announce('Đã tải ZIP ('+ids.length+' QR). Sau khi giải nén và kiểm tra đủ PNG, '+
-          'lượt này chưa được hệ thống xác minh tự động nên không cộng vào tỷ lệ nghiệm thu.');
-      }
+      let parsed={};
+      try{parsed=await apiResponse.json();}catch(_){}
+      if(!apiResponse.ok||!parsed.ok)
+        throw Error(parsed.message||'Không có mã QR đã tạo để tải.');
+      const files=parsed.files||[];
+      if(!files.length)throw Error('Chưa có mã QR hợp lệ để tải.');
+      const ids=files.map(file=>Number(file.id));
+      // Trả lại ZIP chuẩn với mỗi PNG đã được đặt tên theo video/playlist
+      // ở phía máy chủ. Không sử dụng showDirectoryPicker/createWritable.
+      const zip=await fetch(endpoint,{
+        method:'POST',body:data,credentials:'same-origin',cache:'no-store'
+      });
+      if(!zip.ok || !(zip.headers.get('content-type')||'').includes('zip'))
+        throw Error('Máy chủ không trả về tệp ZIP hợp lệ.');
+      const blob=await zip.blob(),url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=allVideoQrs?'Ma_QR_video_da_tao_tat_ca.zip':
+        (allPlaylistQrs?'Ma_QR_playlist_da_tao_tat_ca.zip':'Ma_QR_hoc_lieu_da_chon.zip');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(()=>URL.revokeObjectURL(url),30000);
+      // Trình duyệt không báo lại cho web khi người dùng thực sự lưu ZIP:
+      // không ghi nhận là tệp PNG đã được xác minh.
+      await recordDownload(ids.length>=2?'bulk':'row',ids,'not_verified');
+      announce('Đã gửi tệp ZIP gồm '+ids.length+' mã QR để trình duyệt tải xuống. '+
+        'Bạn có thể chọn nơi lưu trong hộp thoại tải xuống của Chrome '+
+        '(nếu đã bật hỏi vị trí lưu).');
     }catch(e){announce('Không tải được QR: '+e.message,true);}
   }
 
