@@ -2575,6 +2575,17 @@ def register_routes(app):
         playlists = pq.order_by(Playlist.is_available.desc(), Playlist.title).offset((playlist_page-1)*5).limit(5).all()
 
         courses = Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all()
+        # Đếm mọi video độc lập đã gán môn, KHÔNG phụ thuộc trang hay bộ lọc hiện tại.
+        # Cùng phạm vi với lệnh "Tạo QR cho video đã gán môn".
+        all_independent_video_ids = filtered_library_video_query(user).with_entities(Video.id)
+        course_assigned_video_counts = {
+            int(cid): int(total) for cid, total in db.session.query(
+                CourseVideo.course_id, func.count(CourseVideo.video_id)
+            ).filter(
+                CourseVideo.course_id.in_([c.id for c in courses]),
+                CourseVideo.video_id.in_(all_independent_video_ids),
+            ).group_by(CourseVideo.course_id).all()
+        }
         course_qr_counts = {int(course_id): int(amount) for course_id, amount in
             db.session.query(QrCode.course_id, func.count(QrCode.id)).filter(
                 managed_qr_scope(user.id), QrCode.active.is_(True), QrCode.course_id.isnot(None)
@@ -2613,6 +2624,7 @@ def register_routes(app):
                 Video.embeddable.isnot(False)).order_by(Video.title).all(),
             replacement_playlists=available_playlists,
             courses=courses,
+            course_assigned_video_counts=course_assigned_video_counts,
             course_qr_counts=course_qr_counts,
         ))
         # Không dùng HTML cũ trong cache sau khi đổi phân loại playlist/QR.
