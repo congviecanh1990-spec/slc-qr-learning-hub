@@ -12,7 +12,7 @@
   const count=document.getElementById('selectedVideoCount');
   const qrCount=document.getElementById('researchBulkCount');
   if(!form)return;
-  const storagePrefix='slc-video-selection-v1:';
+  const storagePrefix='slc-video-selection-v2:';
   const total=Math.max(0,Number(form.dataset.videoTotal)||0);
   const snapshot={
     q:(form.querySelector('[name="q"]')?.value||'').trim(),
