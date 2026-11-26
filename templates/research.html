@@ -133,8 +133,9 @@
     {% if pending_measurements %}
     <p class="small text-primary mb-2">
       <strong>{{ pending_measurements|length }} lượt Web App đang thực hiện.</strong>
-      Số QR đã tạo được hiển thị ngay trong bảng C; số thao tác và thời gian đang chạy chỉ là tạm tính,
-      chưa được cộng vào tỷ lệ nghiệm thu. Tải và xác minh lưu đủ QR để chốt lượt đo.
+      Số QR đã tạo được hiển thị ngay trong bảng C; số thao tác và thời gian đang chạy chỉ là tạm tính.
+      Sau khi tải PNG/ZIP trên trình duyệt, giảng viên nhấn “Tôi đã lưu đủ tệp QR” ở Kho học liệu để chốt
+      lượt đo theo xác nhận cá nhân. Dữ liệu này chưa được tính vào tỷ lệ nghiệm thu đã kiểm chứng độc lập.
     </p>
     {% endif %}
     <div class="table-responsive mb-3">
@@ -164,7 +165,8 @@
       </table>
     </div>
     <p class="small mb-4"><strong>Lượt Web App đã xác minh:</strong> {{ paired_totals.web_count }};
-      <strong>chờ nhập đối chứng thủ công:</strong> {{ paired_totals.pending_manual }}.
+      <strong>chờ nhập đối chứng thủ công:</strong> {{ paired_totals.pending_manual }};
+      <strong>đã chốt theo xác nhận của giảng viên (chưa xác minh độc lập):</strong> {{ user_confirmed_count }} lượt.
       Chỉ tính tỷ lệ cải thiện từ những cặp đã có đủ hai kết quả.<br>
       <strong>Tổng số cặp hoàn chỉnh:</strong> {{ paired_totals.paired_count }};
       <strong>tổng QR được đối chứng:</strong> {{ paired_totals.qr_count }};
@@ -210,7 +212,11 @@
             <td>
               <strong>{{ p.qr_count }} mã QR</strong>
               {% if p.id in pending_measurements %}
-                <div class="small text-primary">Đã ghi nhận tạo QR; chờ tải và xác minh lưu</div>
+                {% if p.measurement_download_style %}
+                  <div class="small text-primary">Đã ghi nhận tải QR; chờ giảng viên xác nhận đã lưu tệp</div>
+                {% else %}
+                  <div class="small text-primary">Đã ghi nhận tạo QR; chờ tải và lưu tệp</div>
+                {% endif %}
               {% endif %}
               {% if p.video_count %}<div class="small text-muted">{{ p.video_count }} video lẻ</div>{% endif %}
               {% if p.playlist_count %}
@@ -227,8 +233,10 @@
               {% else %}—{% endif %}
               {% if p.measurement_verified and not p.is_paired %}
                 <div class="small text-warning-emphasis">Chờ nhập thủ công</div>
+              {% elif p.measurement_save_method == 'manual_confirmed' and p.webapp_operations is not none %}
+                <div class="small text-warning-emphasis">Đã chốt theo xác nhận giảng viên; chưa được hệ thống kiểm chứng lưu tệp</div>
               {% elif p.measurement_start_source == 'server_fallback' %}
-                <div class="small text-warning-emphasis">Ghi QR dự phòng; cần đo lại toàn bộ thời gian để nghiệm thu</div>
+                <div class="small text-warning-emphasis">Mốc bắt đầu dự phòng; cần đo lại từ đầu để tính KPI</div>
               {% elif p.webapp_operations is not none and not p.measurement_verified %}
                 <div class="small text-muted">Chưa xác minh lưu tệp</div>
               {% endif %}
