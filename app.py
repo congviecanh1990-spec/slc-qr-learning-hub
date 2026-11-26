@@ -1333,22 +1333,21 @@ def filtered_library_video_query(user, search="", status="", assignment="", play
     Luôn giới hạn theo tài khoản giảng viên; loại playlist Uploads tự động.
     Bộ lọc này được dùng chung khi liệt kê và khi xử lý hàng loạt.
     """
-    # Kho video chỉ liệt kê video độc lập, chưa thuộc playlist thực tế
-    # của giảng viên. Playlist "Uploads" tự sinh của YouTube không được
+    # Kho video chỉ liệt kê video độc lập, không thuộc bất kỳ
+    # playlist học liệu nào (kể cả playlist của kênh khác). Playlist "Uploads" tự sinh của YouTube không được
     # xem là playlist học liệu, vì mọi video tải lên có thể nằm trong đó.
-    in_own_playlists = (
+    in_learning_playlists = (
         db.session.query(PlaylistVideo.video_id)
         .join(Playlist, Playlist.id == PlaylistVideo.playlist_id)
         .join(YouTubeChannel, YouTubeChannel.id == Playlist.channel_id)
         .filter(
-            YouTubeChannel.user_id == user.id,
             or_(
                 YouTubeChannel.uploads_playlist_id.is_(None),
                 Playlist.youtube_playlist_id != YouTubeChannel.uploads_playlist_id,
             ),
         )
     )
-    q = visible_video_query(user).filter(~Video.id.in_(in_own_playlists))
+    q = visible_video_query(user).filter(~Video.id.in_(in_learning_playlists))
     if status == "private":
         q = q.filter(Video.privacy_status == "private")
     elif status == "noembed":
