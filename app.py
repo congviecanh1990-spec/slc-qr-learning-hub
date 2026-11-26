@@ -1795,6 +1795,32 @@ def qr_download_name(qr: QrCode) -> str:
     return f"{safe_filename(source_title, qr.slug)}.png"
 
 
+def qr_zip_course_folder(qr: QrCode) -> str:
+    """Tên thư mục trong ZIP theo môn học, tránh trùng và đường dẫn nguy hiểm.
+
+    Giữ tiếng Việt có dấu; ID môn phân biệt những môn cùng tên.
+    """
+    if not qr.course:
+        return "Chua_gan_mon_hoc"
+    readable_name = safe_filename(qr.course.name or "Môn học", "Mon_hoc")[:125].strip(" .")
+    return f"{readable_name} (MH{qr.course.id:06d})"
+
+
+def qr_zip_entry_name(qr: QrCode, used_names: set[str]) -> str:
+    """Đặt PNG trong thư mục môn; tên trùng được nối slug/ID thay vì ghi đè."""
+    folder = qr_zip_course_folder(qr)
+    filename = qr_download_name(qr)
+    name = f"{folder}/{filename}"
+    if name in used_names:
+        stem, ext = os.path.splitext(filename)
+        name = f"{folder}/{stem}_{qr.slug}{ext}"
+    if name in used_names:
+        stem, ext = os.path.splitext(filename)
+        name = f"{folder}/{stem}_qr{qr.id}{ext}"
+    used_names.add(name)
+    return name
+
+
 def normalized_catalog_name(value):
     return re.sub(r"\s+", " ", (value or "").strip())
 
@@ -3574,12 +3600,7 @@ def register_routes(app):
             for qr in qrs:
                 image = io.BytesIO()
                 generate_branded_qr(qr).save(image, format="PNG")
-                name = qr_download_name(qr)
-                if name in names:
-                    root, ext = os.path.splitext(name)
-                    name = f"{root}_{qr.slug}{ext}"
-                names.add(name)
-                archive.writestr(name, image.getvalue())
+                archive.writestr(qr_zip_entry_name(qr, names), image.getvalue())
         bio.seek(0)
         name = ("Ma_QR_playlist_da_tao_tat_ca.zip" if all_assigned
                 else f"Ma_QR_playlist_{safe_filename(course.code)}.zip")
@@ -3763,12 +3784,7 @@ def register_routes(app):
                 img = generate_branded_qr(qr)
                 png = io.BytesIO()
                 img.save(png, format="PNG")
-                name = qr_download_name(qr)
-                if name in used_names:
-                    stem, ext = os.path.splitext(name)
-                    name = f"{stem}_{qr.slug}{ext}"
-                used_names.add(name)
-                zf.writestr(name, png.getvalue())
+                zf.writestr(qr_zip_entry_name(qr, used_names), png.getvalue())
         bio.seek(0)
         download_name = (
             "Ma_QR_video_da_tao_tat_ca.zip" if download_all
