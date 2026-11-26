@@ -262,10 +262,15 @@ def test_assign_qr_row_course_and_create_all_assigned_without_video_checks(confi
         with app.app_context():
             assert CourseVideo.query.filter_by(course_id=own_id).count()==2
         # Không thể gán giảng viên khác hoặc giả ID video ngoài trang đang xem.
-        assert client.post("/videos/assign-course",data={
+        forbidden_response=client.post("/videos/assign-course",data={
             "video_selection_mode":"none",
+            "return_query":"v_page=1",
             "qr_course_assignments":[f"{row_video}:{foreign_id}"]
-        }).status_code==403
+        })
+        assert forbidden_response.status_code==403, (
+            forbidden_response.status_code, forbidden_response.location,
+            forbidden_response.get_data(as_text=True)[:250]
+        )
         assert client.post("/videos/assign-course",data={
             "video_selection_mode":"none",
             "qr_course_assignments":[f"{k['video_ids'][0]}:{own_id}"]
