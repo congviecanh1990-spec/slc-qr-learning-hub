@@ -38,52 +38,69 @@
     persistPending();
     showPendingConfirmation();
   }
+  let idleConfirmationMessage='Chưa có lượt tải QR mới cần xác nhận. Nút sẽ bật sau khi tải mã thuộc lượt đo.';
+  // Hai vị trí cố định trong giao diện: gần playlist và gần danh sách video.
+  // Không tạo nút động trong thông báo, vì nội dung thông báo có thể bị thay thế
+  // khi tải QR hoặc khi bộ đếm đồng bộ làm nút biến mất.
   function showPendingConfirmation(){
-    if(!pendingDownloads.length||!status)return;
-    const n=pendingDownloads.reduce((sum,item)=>sum+item.ids.length,0);
-    announce('Đã gửi QR tới trình duyệt ('+n+' mã trong '+
-      pendingDownloads.length+' lượt tải). Nếu đã lưu tệp vào máy, '+
-      'hãy xác nhận để chốt số thao tác và thời gian trên Web App.');
-    const confirm=document.createElement('button');
-    confirm.type='button';
-    confirm.className='btn btn-success btn-sm mt-2 me-2';
-    confirm.textContent='Tôi đã lưu đủ tệp QR';
-    confirm.disabled=confirming;
-    confirm.addEventListener('click',async()=>{
-      if(confirming)return;
-      confirming=true;confirm.disabled=true;
-      // Giữ thứ tự: tải từng QR là từng thao tác, ZIP là một lượt hàng loạt.
-      // Không tự xác nhận khi Chrome chỉ nhận tệp mà chưa biết đã lưu chưa.
-      let completed=0;
-      for(const item of [...pendingDownloads]){
-        const result=await recordDownload(item.style,item.ids,'manual_confirmed',true);
-        if(!result?.measured){
-          const msg=result?.message||'Lượt tải chưa khớp với phiên tạo QR mới.';
-          announce('Chưa chốt được lượt đo: '+msg,true);
-          break;
-        }
-        pendingDownloads=pendingDownloads.filter(x=>x.key!==item.key);
-        completed+=1;
-        persistPending();
+    const total=pendingDownloads.reduce((n,item)=>n+item.ids.length,0);
+    for(const panel of document.querySelectorAll('.research-qr-confirmation')){
+      const button=panel.querySelector('.research-qr-confirm-button');
+      const cancel=panel.querySelector('.research-qr-confirm-cancel');
+      const state=panel.querySelector('.research-qr-confirm-state');
+      if(button)button.disabled=confirming||pendingDownloads.length===0;
+      if(cancel)cancel.hidden=pendingDownloads.length===0;
+      if(state){
+        state.textContent=pendingDownloads.length
+          ? 'Đã ghi nhận yêu cầu tải '+total+' mã QR trong '+
+            pendingDownloads.length+' lượt. Sau khi kiểm tra tệp đã lưu trên máy, nhấn xác nhận để chốt lượt đo.'
+          : idleConfirmationMessage;
+        state.classList.toggle('text-muted',pendingDownloads.length===0);
+        state.classList.toggle('text-primary',pendingDownloads.length>0);
       }
-      confirming=false;
-      if(pendingDownloads.length)showPendingConfirmation();
-      else if(completed){
-        announce('Đã ghi nhận xác nhận lưu '+completed+
-          ' lượt tải QR. Thời gian/thao tác được chốt theo xác nhận của GV; '+
-          'không tự động tính là bằng chứng lưu tệp đã xác minh độc lập.');
-      }
-    });
-    const cancel=document.createElement('button');
-    cancel.type='button';
-    cancel.className='btn btn-outline-secondary btn-sm mt-2';
-    cancel.textContent='Chưa lưu / Hủy xác nhận';
-    cancel.addEventListener('click',()=>{
-      pendingDownloads=[];persistPending();
-      announce('Đã bỏ yêu cầu xác nhận. Lượt đo chưa được chốt vì chưa có bằng chứng đã lưu tệp.');
-    });
-    status.append(confirm,cancel);
+    }
   }
+  async function confirmPendingDownloads(){
+    if(confirming||!pendingDownloads.length)return;
+    confirming=true;showPendingConfirmation();
+    let completed=0,failedMessage='';
+    for(const item of [...pendingDownloads]){
+      const result=await recordDownload(item.style,item.ids,'manual_confirmed',true);
+      if(!result?.measured){
+        failedMessage=result?.message||'Lượt tải chưa khớp với phiên tạo QR mới.';
+        break;
+      }
+      pendingDownloads=pendingDownloads.filter(x=>x.key!==item.key);
+      completed+=1;
+      persistPending();
+    }
+    confirming=false;
+    if(failedMessage){
+      idleConfirmationMessage='Chưa chốt được: '+failedMessage;
+      announce(idleConfirmationMessage,true);
+    }else if(completed){
+      idleConfirmationMessage='Đã ghi nhận xác nhận lưu '+completed+
+        ' lượt QR. Thời gian và số thao tác được chốt theo xác nhận của giảng viên, '+
+        'chưa phải bằng chứng lưu tệp đã xác minh độc lập.';
+      announce(idleConfirmationMessage);
+    }
+    showPendingConfirmation();
+  }
+  function cancelPendingDownloads(){
+    if(confirming)return;
+    pendingDownloads=[];persistPending();
+    idleConfirmationMessage='Đã hủy yêu cầu xác nhận. Lượt đo chưa được chốt vì chưa xác nhận lưu tệp.';
+    announce(idleConfirmationMessage,true);
+    showPendingConfirmation();
+  }
+  document.addEventListener('click',event=>{
+    if(event.target.closest('.research-qr-confirm-button')){
+      confirmPendingDownloads();
+    }else if(event.target.closest('.research-qr-confirm-cancel')){
+      cancelPendingDownloads();
+    }
+  });
+
   const sessionKey=()=>active?'slc-qr-ops:'+active.id+':'+active.nonce:'';
   const labels={
     QR_TUNG_VIDEO_PLAYLIST:'Tạo QR cho từng video hoặc playlist',
@@ -230,6 +247,11 @@
         const ids=[Number(match[1])];
         recordDownload('row',ids,'not_verified').then(result=>{
           if(result?.matched>0)queuePending('row',ids);
+          else{
+            idleConfirmationMessage='Đã tải QR, nhưng mã này chưa thuộc lượt đo tạo QR mới. '+
+              'Hãy tạo QR trong lượt đo mới để kích hoạt xác nhận.';
+            showPendingConfirmation();
+          }
         });
       }
     }
@@ -335,8 +357,13 @@
       const style=ids.length>=2?'bulk':'row';
       const tracked=await recordDownload(style,ids,'not_verified');
       if(tracked?.matched>0)queuePending(style,ids);
-      else announce('Đã gửi ZIP '+ids.length+' mã QR tới Chrome. '+
-        'Không có QR mới thuộc lượt đo đang mở, nên không cộng vào phép đo tạo QR.');
+      else{
+        idleConfirmationMessage='Đã gửi ZIP '+ids.length+
+          ' mã QR tới Chrome, nhưng chưa có QR mới thuộc lượt đo đang mở. '+
+          'Nút xác nhận chỉ kích hoạt với QR mới của lượt đo.';
+        announce(idleConfirmationMessage);
+        showPendingConfirmation();
+      }
     }catch(e){announce('Không tải được QR: '+e.message,true);}
   }
 
