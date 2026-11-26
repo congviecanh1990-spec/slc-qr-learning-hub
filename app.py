@@ -1477,6 +1477,18 @@ def videos_library_return_with_bulk_course(raw_query: str, course_id: int) -> st
     return f"{path_query}{separator}bulk_course_id={int(course_id)}{hashmark}{fragment}"
 
 
+def videos_library_return_with_video_course(raw_query: str, course_id: int) -> str:
+    """Giữ môn của thanh thao tác VIDEO sau khi POST rồi tải lại trang.
+
+    Chỉ mã môn hợp lệ đã được kiểm tra quyền từ route gán/tạo QR được truyền
+    xuống đây; tham số hiển thị không cấp thêm quyền thao tác ở máy chủ.
+    """
+    target = videos_library_return("videos", raw_query)
+    path_query, hashmark, fragment = target.partition("#")
+    separator = "&" if "?" in path_query else "?"
+    return f"{path_query}{separator}video_course_id={int(course_id)}{hashmark}{fragment}"
+
+
 def filtered_library_playlist_query(user: User, playlist_search: str = "", playlist_assignment: str = ""):
     """Cùng một phạm vi lọc cho danh sách playlist và nút gán hàng loạt.
 
@@ -2750,6 +2762,14 @@ def register_routes(app):
             f"Đã nhận môn chọn riêng tại {len(row_course_ids)} dòng Mã QR.",
             "success",
         )
+        # Giữ môn đã chọn phía trên để nút Tạo QR ngay sau khi gán hoạt động.
+        # Trường hợp chỉ gán theo cột QR: chọn môn đó nếu tất cả dòng cùng môn.
+        chosen_for_bulk = selected_course.id if selected_course else None
+        if chosen_for_bulk is None and len(set(row_course_ids.values())) == 1:
+            chosen_for_bulk = next(iter(row_course_ids.values()))
+        if chosen_for_bulk:
+            return redirect(videos_library_return_with_video_course(
+                request.form.get("return_query", ""), chosen_for_bulk))
         return redirect(videos_library_return("videos", request.form.get("return_query")))
 
     @app.post("/playlists/assign-course")
@@ -3515,7 +3535,16 @@ def register_routes(app):
         Không gán môn ngầm; tái sử dụng QR đã có.
         """
         user = current_user()
-        course = db.session.get(Course, request.form.get("course_id", type=int))
+        course_id = request.form.get("course_id", type=int)
+        if not course_id:
+            flash(
+                "Hãy chọn môn học/mô đun phía trên trước khi bấm "
+                "Tạo QR cho video đã gán môn.", "warning"
+            )
+            return redirect(videos_library_return(
+                "videos", request.form.get("return_query", "")))
+        course = db.session.get(Course, course_id)
+        # Giữ nguyên chặn truy cập với ID môn không thuộc giảng viên.
         if not course or not course.active or not course_owned_by_user(course, user):
             abort(403)
         independent_ids = filtered_library_video_query(user).with_entities(Video.id)
@@ -3563,7 +3592,8 @@ def register_routes(app):
             f"{existing} mã đã có, {skipped} video không đủ điều kiện.",
             "success" if created or existing else "warning",
         )
-        return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+        return redirect(videos_library_return_with_video_course(
+            request.form.get("return_query", ""), course.id))
 
     @app.post("/videos/qr/download-selected")
     @login_required
