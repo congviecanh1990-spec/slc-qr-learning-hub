@@ -183,6 +183,18 @@ def test_library_updates_when_playlist_links_change(configured_app):
         db.session.add(PlaylistVideo(playlist_id=system_playlist.id, video_id=standalone_id))
         db.session.commit()
         assert standalone_id in {v.id for v in web.filtered_library_video_query(teacher).all()}
+        # Playlist thuộc kênh khác cũng là playlist học liệu, không được bỏ sót.
+        other_channel = YouTubeChannel.query.filter(YouTubeChannel.user_id != teacher.id).first()
+        other_playlist = Playlist(
+            channel_id=other_channel.id,
+            youtube_playlist_id="PL_OTHER_CHANNEL",
+            title="Playlist kênh khác",
+        )
+        db.session.add(other_playlist)
+        db.session.flush()
+        db.session.add(PlaylistVideo(playlist_id=other_playlist.id, video_id=standalone_id))
+        db.session.commit()
+        assert standalone_id not in {v.id for v in web.filtered_library_video_query(teacher).all()}
 
 
 
