@@ -929,7 +929,8 @@ def test_qr_downloads_use_original_media_titles_without_browser_write_prompts(co
     assert "window.showSaveFilePicker(" not in js
     assert "const a=document.createElement('a');" in js
     assert "a.download=allVideoQrs?" in js
-    assert "recordDownload(ids.length>=2?'bulk':'row',ids,'not_verified')" in js
+    assert "await recordDownload(style,ids,'not_verified')" in js
+    assert "queuePending(style,ids)" in js
 
 
 
