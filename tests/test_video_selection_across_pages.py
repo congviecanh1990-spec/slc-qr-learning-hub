@@ -93,24 +93,24 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
     with app.app_context():
         teacher=db.session.get(web.User,k["teacher"])
         q=web.filtered_library_video_query(teacher,"Bài học")
-        assert q.count()==13, "Không được hiển thị video từ tài khoản khác"
+        assert q.count()==9, "Chỉ hiện 9 video chưa thuộc playlist của GV, không hiện video người khác"
         chosen=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("video_selection_mode","all"),
             ("excluded_video_ids",str(k["video_ids"][8])),
         ]))
-        assert len(chosen)==12 and k["video_ids"][8] not in chosen
+        assert len(chosen)==8 and k["video_ids"][8] not in chosen
         none=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("video_selection_mode","none"),
             ("selected_video_ids",str(k["video_ids"][1])),
             ("selected_video_ids",str(k["video_ids"][11])),
             ("selected_video_ids",str(k["outsider"])),
         ]))
-        assert set(none)=={k["video_ids"][1],k["video_ids"][11]}
+        assert set(none)=={k["video_ids"][11]}
         in_playlist=web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
             ("q","Bài học"),("playlist_id",str(k["playlist"])),
             ("video_selection_mode","all"),
         ]))
-        assert len(in_playlist)==4
+        assert len(in_playlist)==0
         with pytest.raises(BadRequest):
             web.selected_filtered_library_video_ids(teacher,ImmutableMultiDict([
                 ("video_selection_mode","all"),("status","undefined")
@@ -125,8 +125,8 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
             assert b'id="selectAllVideos"' in page.data
         assert page1.data.count(b'class="form-check-input video-check"')==5
         assert page2.data.count(b'class="form-check-input video-check"')==5
-        assert page3.data.count(b'class="form-check-input video-check"')==3
-        # Gán môn hàng loạt với tất cả 13 kết quả tìm kiếm, trừ 1 video ở TRANG 2.
+        assert page3.data.count(b'class="form-check-input video-check"')==4
+        # Gán môn hàng loạt với 9 video độc lập, trừ 1 video ở TRANG 2.
         data={"course_id":str(k["course"]),"q":"Bài học",
               "video_selection_mode":"all",
               "excluded_video_ids":str(k["video_ids"][8])}
@@ -134,7 +134,7 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
         assert response.status_code==302
         with app.app_context():
             ids={link.video_id for link in CourseVideo.query.filter_by(course_id=k["course"]).all()}
-            assert len(ids)==12 and k["video_ids"][8] not in ids
+            assert len(ids)==8 and k["video_ids"][8] not in ids
             assert k["outsider"] not in ids
         # Lần tạo QR chỉ 2 video trên 2 trang khác nhau, không dùng mọi video đã gán.
         response=client.post("/videos/qr/bulk-selected",data={
@@ -145,8 +145,44 @@ def test_selection_server_filters_and_actions_across_pages(configured_app):
         assert response.status_code==302
         with app.app_context():
             qrs=QrCode.query.filter_by(course_id=k["course"],active=True).all()
-            assert len(qrs)==2
+            assert len(qrs)==1
             assert all(q.owner_id==k["teacher"] for q in qrs)
+
+
+
+def test_library_updates_when_playlist_links_change(configured_app):
+    """Video tự mất khỏi danh sách khi gắn playlist và hiện lại khi bỏ liên kết.
+
+    Uploads kỹ thuật của YouTube không tính là playlist học liệu.
+    """
+    from models import db, Playlist, PlaylistVideo, YouTubeChannel
+    app, keys, web = configured_app
+    with app.app_context():
+        teacher = db.session.get(web.User, keys["teacher"])
+        standalone_id = keys["video_ids"][6]
+        attached_id = keys["video_ids"][0]
+        playlist_id = keys["playlist"]
+        assert attached_id not in {v.id for v in web.filtered_library_video_query(teacher).all()}
+        assert standalone_id in {v.id for v in web.filtered_library_video_query(teacher).all()}
+        db.session.add(PlaylistVideo(playlist_id=playlist_id, video_id=standalone_id))
+        db.session.commit()
+        assert standalone_id not in {v.id for v in web.filtered_library_video_query(teacher).all()}
+        PlaylistVideo.query.filter_by(playlist_id=playlist_id, video_id=standalone_id).delete()
+        PlaylistVideo.query.filter_by(playlist_id=playlist_id, video_id=attached_id).delete()
+        db.session.commit()
+        assert {standalone_id, attached_id} <= {
+            v.id for v in web.filtered_library_video_query(teacher).all()
+        }
+        ch = YouTubeChannel.query.filter_by(user_id=teacher.id).first()
+        ch.uploads_playlist_id = "UU_AUTO_UPLOADS"
+        system_playlist = Playlist(
+            channel_id=ch.id, youtube_playlist_id="UU_AUTO_UPLOADS", title="Uploads"
+        )
+        db.session.add(system_playlist)
+        db.session.flush()
+        db.session.add(PlaylistVideo(playlist_id=system_playlist.id, video_id=standalone_id))
+        db.session.commit()
+        assert standalone_id in {v.id for v in web.filtered_library_video_query(teacher).all()}
 
 
 
@@ -198,7 +234,7 @@ def test_reset_buttons_keep_other_category_filters(configured_app):
         assert vs.select_one('#videoLibraryFilterForm [name="status"] option[selected]') is None
         assert vs.select_one('#videoLibraryFilterForm [name="assignment"] option[selected]') is None
         assert vs.select_one('#videoLibraryFilterForm [name="playlist_id"] option[selected]') is None
-        assert "Có 14 video" in vs.get_text(" ",strip=True)
+        assert "Có 10 video" in vs.get_text(" ",strip=True)
         assert "Có 1 playlist" in ps.get_text(" ",strip=True)
 
 
@@ -260,7 +296,7 @@ def test_video_bulk_three_actions_and_download_only_existing_assigned_qrs(config
         assert len(form.select('button[formaction]')) == 2
         assert "/videos/qr/bulk-selected" in str(form)
         assert "/videos/qr/download-selected" in str(form)
-        chosen = [str(keys["video_ids"][2]), str(keys["video_ids"][10])]
+        chosen = [str(keys["video_ids"][5]), str(keys["video_ids"][10])]
         post_data = {
             "course_id": str(keys["course"]), "q": "Bài học",
             "video_selection_mode": "none", "selected_video_ids": chosen,
