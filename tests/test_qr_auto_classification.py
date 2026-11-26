@@ -296,7 +296,7 @@ def test_browser_download_requires_explicit_save_confirmation():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
     script = (root / "static/research_measurement.js").read_text(encoding="utf-8")
-    assert "Tôi đã lưu đủ tệp QR" in script
+    assert "function confirmPendingDownloads()" in script
     assert "manual_confirmed',true" in script
     assert "await recordDownload(style,ids,'not_verified')" in script
     assert "queuePending(style,ids)" in script
@@ -304,3 +304,35 @@ def test_browser_download_requires_explicit_save_confirmation():
     assert "measurement_verified" not in script
     report = (root / "templates/research.html").read_text(encoding="utf-8")
     assert "Đã ghi nhận tải QR; chờ giảng viên xác nhận đã lưu tệp" in report
+
+
+def test_download_confirmation_controls_are_always_visible_in_both_lists(configured_app):
+    """Giảng viên thấy sẵn nút tại playlist và video, không phụ thuộc tải QR."""
+    from bs4 import BeautifulSoup
+    from pathlib import Path
+    app, keys, _ = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+        page = client.get("/videos")
+        assert page.status_code == 200
+        soup = BeautifulSoup(page.get_data(as_text=True), "html.parser")
+        controls = soup.select(".research-qr-confirmation")
+        assert len(controls) == 2
+        assert {p["data-qr-confirm-location"] for p in controls} == {"video", "playlist"}
+        for panel in controls:
+            button=panel.select_one(".research-qr-confirm-button")
+            assert button is not None
+            assert button.get_text(strip=True) == "Tôi đã lưu đủ tệp QR"
+            assert button.has_attr("disabled")
+            assert panel.select_one(".research-qr-confirm-state") is not None
+        assert soup.select('script[src*="research_measurement.js?v=confirm-visible-20261126"]')
+    script = (Path(__file__).resolve().parents[1] / "static/research_measurement.js").read_text(encoding="utf-8")
+    assert "document.querySelectorAll('.research-qr-confirmation')" in script
+    assert "button.disabled=confirming||pendingDownloads.length===0" in script
+    assert "cancel.hidden=pendingDownloads.length===0" in script
+    assert "queuePending('row',ids)" in script
+    assert "queuePending(style,ids)" in script
+    assert "async function confirmPendingDownloads()" in script
+    assert "function cancelPendingDownloads()" in script
+    assert "status.append(confirm,cancel)" not in script
