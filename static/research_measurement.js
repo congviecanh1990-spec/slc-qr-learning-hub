@@ -91,9 +91,19 @@
   const isVideoBulk=form=>form.id==='assignVideoForm';
   const isDownloadButton=button=>Boolean(button?.matches(
     '#assignVideoForm button[formaction*="/videos/qr/download-selected"]'));
-  function selectedNumber(form){
+  function selectedNumber(form,submitter=null){
     if(isPlaylistBulk(form))return window.playlistBulkSelection?.selectedCount()||0;
-    if(isVideoBulk(form))return window.videoBulkSelection?.selectedCount()||0;
+    if(isVideoBulk(form)){
+      // QR theo môn áp dụng cho mọi video độc lập đã gán môn trên mọi trang.
+      if(submitter?.formAction?.includes('/videos/qr/bulk-selected')){
+        const choice=form.querySelector('[name="course_id"]')?.selectedOptions?.[0];
+        return Math.max(0,Number(choice?.dataset.assignedVideoCount)||0);
+      }
+      const checked=window.videoBulkSelection?.selectedCount()||0;
+      if(submitter?.formAction?.includes('/videos/qr/download-selected'))return checked;
+      // Nút Gán môn còn áp dụng cho môn được chọn ở cột QR từng dòng.
+      return checked+(window.videoBulkSelection?.selectedQrCourseCount?.()||0);
+    }
     return 1;
   }
   // Khởi động trước POST gán môn/tạo QR để thời gian chạy trên máy chủ bao gồm
@@ -115,7 +125,7 @@
     if(!course)return;
     event.preventDefault();event.stopImmediatePropagation();
     const btn=event.submitter;
-    const n=selectedNumber(form);
+    const n=selectedNumber(form,event.submitter);
     if(n<1 && (isPlaylistBulk(form)||isVideoBulk(form))){
       announce('Chưa chọn video hoặc playlist; không khởi động lượt đo đối chứng.',true);
       return;
