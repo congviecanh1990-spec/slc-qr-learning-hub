@@ -701,6 +701,140 @@ def test_download_all_js_has_no_checkbox_or_course_gate():
 
 
 
+def test_playlist_bulk_qr_all_assigned_shows_three_actions_and_downloads_zip(configured_app):
+    """Playlist như video: tạo mọi QR đã gán môn, nút Tạo ẩn và tải tất cả PNG."""
+    import io
+    import zipfile
+    from bs4 import BeautifulSoup
+    from models import db, Course, Playlist, PlaylistVideo, CoursePlaylist, QrCode, YouTubeChannel
+    app, keys, web = configured_app
+    first_playlist_id = keys["playlist"]
+    with app.app_context():
+        user = db.session.get(web.User, keys["teacher"])
+        channel = YouTubeChannel.query.filter_by(user_id=user.id).first()
+        math = Course(owner_id=user.id, name="Toán rời rạc", code="MATH-PL-ALL")
+        second = Playlist(
+            channel_id=channel.id, youtube_playlist_id="PL_SECOND",
+            title="Playlist thứ hai", is_available=True
+        )
+        db.session.add_all([math, second])
+        db.session.flush()
+        db.session.add(PlaylistVideo(
+            playlist_id=second.id, video_id=keys["video_ids"][1], position=0
+        ))
+        db.session.add_all([
+            CoursePlaylist(course_id=keys["course"], playlist_id=first_playlist_id,
+                           added_by=user.id, active=True),
+            CoursePlaylist(course_id=math.id, playlist_id=second.id,
+                           added_by=user.id, active=True),
+        ])
+        other = web.User.query.filter(web.User.id != user.id).first()
+        foreign_channel = YouTubeChannel.query.filter_by(user_id=other.id).first()
+        foreign_course = Course(owner_id=other.id, name="Môn người khác", code="EXT-PL")
+        foreign_playlist = Playlist(
+            channel_id=foreign_channel.id, youtube_playlist_id="PL_FOREIGN",
+            title="Playlist người khác", is_available=True
+        )
+        db.session.add_all([foreign_course, foreign_playlist])
+        db.session.flush()
+        db.session.add_all([
+            PlaylistVideo(playlist_id=foreign_playlist.id, video_id=keys["video_ids"][2], position=0),
+            CoursePlaylist(course_id=foreign_course.id,
+                           playlist_id=foreign_playlist.id,
+                           added_by=other.id, active=True),
+        ])
+        db.session.commit()
+        second_playlist_id = second.id
+        math_id = math.id
+        foreign_course_id = foreign_course.id
+
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"] = keys["teacher"]
+        response = client.post("/playlists/bulk-create-course-qrs", data={
+            "course_id": str(foreign_course_id),
+            "p_q": "không có kết quả",
+            "playlist_selection_mode": "none",
+            "selected_playlist_ids": [],
+        })
+        assert response.status_code == 302
+        assert response.location.startswith("/videos") and "#playlists" in response.location
+        with app.app_context():
+            qrs = QrCode.query.filter_by(target_type="playlist", active=True).all()
+            assert len(qrs) == 2
+            assert {(q.course_id, q.playlist_id) for q in qrs} == {
+                (keys["course"], first_playlist_id), (math_id, second_playlist_id)}
+            original_ids = {q.id for q in qrs}
+        # Bấm lại không tạo trùng, dù filter/ô tích hoặc course_id khác.
+        client.post("/playlists/bulk-create-course-qrs", data={
+            "playlist_selection_mode": "none"
+        })
+        with app.app_context():
+            assert {q.id for q in QrCode.query.filter_by(
+                target_type="playlist", active=True).all()} == original_ids
+
+        page = client.get("/videos")
+        assert page.status_code == 200
+        soup = BeautifulSoup(page.data, "html.parser")
+        assert soup.select_one('#playlistBulkActions [name="download_scope"]')["value"] == "all_assigned"
+        create_btn = soup.select_one('#playlistBulkActions button[formaction*="bulk-create-course-qrs"]')
+        assert "Tạo QR cho playlist đã gán MH/MĐ" in create_btn.get_text(" ", strip=True)
+        assert create_btn.has_attr("formnovalidate")
+        for playlist_id in (first_playlist_id, second_playlist_id):
+            row = soup.select_one(f"#playlist-{playlist_id}")
+            assert row is not None
+            option = row.select_one(".playlist-qr-course-select option[selected]")
+            assert option and option.get("data-qr-png")
+            assert row.select_one(".playlist-qr-create").has_attr("hidden")
+            assert row.select_one(".playlist-qr-download") is not None
+            assert row.select_one(".playlist-qr-retarget-toggle") is not None
+            assert row.select_one(".playlist-qr-delete-form") is not None
+
+        json_response = client.post("/playlists/qr/download-selected", data={
+            "download_scope": "all_assigned", "playlist_selection_mode": "none"
+        }, headers={"Accept": "application/json"})
+        assert json_response.status_code == 200
+        payload = json_response.get_json()
+        assert payload["ok"] and payload["count"] == 2
+        assert len({item["id"] for item in payload["files"]}) == 2
+        assert all(item["url"].endswith("/png") for item in payload["files"])
+        zip_response = client.post("/playlists/qr/download-selected", data={
+            "download_scope": "all_assigned"
+        })
+        assert zip_response.status_code == 200
+        assert zip_response.mimetype == "application/zip"
+        assert "Ma_QR_playlist_da_tao_tat_ca.zip" in zip_response.headers["Content-Disposition"]
+        with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
+            assert len(archive.namelist()) == 2
+            for name in archive.namelist():
+                assert name.endswith(".png")
+                assert archive.read(name).startswith(bytes([137,80,78,71,13,10,26,10]))
+
+
+def test_playlist_all_download_empty_returns_error_and_qr_ui_matches_video(configured_app):
+    """Không có QR: trả lời rõ; nút Tạo video đã có QR tự ẩn."""
+    app, keys, web = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"] = keys["teacher"]
+        response = client.post("/playlists/qr/download-selected", data={
+            "download_scope": "all_assigned"
+        }, headers={"Accept": "application/json"})
+        assert response.status_code == 409
+        assert "Chưa có QR hợp lệ" in response.get_json()["message"]
+    html = (ROOT / "templates/videos.html").read_text(encoding="utf-8")
+    js = (ROOT / "static/research_measurement.js").read_text(encoding="utf-8")
+    playlist_row = (ROOT / "templates/_playlist_library_row.html").read_text(encoding="utf-8")
+    assert "create.hidden=hasQr;create.disabled=!select.value" in html
+    assert "'hidden' if vqr.assigned_qr" in html
+    assert "'hidden' if chosen_playlist_course.has_qr" in playlist_row
+    assert "formnovalidate" in html
+    assert "allPlaylistQrs=isPlaylistBulk(form)" in js
+    assert "event.submitter?.formAction?.includes('/playlists/bulk-create-course-qrs')" in js
+
+
+
+
 def test_reset_buttons_keep_other_category_filters(configured_app):
     """Bỏ lọc từng danh mục, reset phân trang/chọn xuyên trang, không ảnh hưởng danh mục kia."""
     from bs4 import BeautifulSoup
