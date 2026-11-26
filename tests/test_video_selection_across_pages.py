@@ -34,7 +34,7 @@ def test_selection_ui_and_scripts_are_consistent():
     assert 'library_filter_reset.js' in template
     reset_js=(ROOT/"static/library_filter_reset.js").read_text(encoding="utf-8")
     assert 'slc-playlist-selection-v4:' in reset_js
-    assert 'slc-video-selection-v1:' in reset_js
+    assert 'slc-video-selection-v2:' in reset_js
     assert 'String(scope[0])===String(userId)' in reset_js
 
 
