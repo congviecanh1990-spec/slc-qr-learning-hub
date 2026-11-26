@@ -31,7 +31,7 @@
   <div class="fw-bold mb-1">Hướng dẫn gán học liệu vào môn học/ mô đun</div>
   <div>
     <div>• Nếu kênh YouTube đã tổ chức video theo <strong>playlist</strong>, ưu tiên <strong>gán playlist cho môn học/ mô đun</strong>. Khi đó, các video trong playlist sẽ tự động được gán vào môn học/ mô đun tương ứng.</div>
-    <div class="mt-1">• Nếu <strong>không muốn gán toàn bộ video trong playlist</strong> cho môn học/ mô đun, hãy thực hiện <strong>chọn từng video cần sử dụng và gán video đó vào môn học/ mô đun tương ứng</strong>.</div>
+    <div class="mt-1">• <strong>Danh sách video</strong> bên dưới chỉ hiển thị các video độc lập, chưa nằm trong playlist học liệu. Video đã thuộc playlist được quản lý tại <strong>Danh sách playlist</strong>.</div>
   </div>
 </div>
 
@@ -173,7 +173,7 @@
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
     <div>
       <h4 class="mb-0">2. Danh sách video</h4>
-      <div class="text-muted small">Chỉ gán riêng khi video chưa được xử lý qua playlist hoặc khi bạn không muốn dùng toàn bộ playlist cho môn học/ mô đun.</div>
+      <div class="text-muted small">Chỉ hiển thị video chưa thuộc playlist học liệu; video đã nằm trong playlist được quản lý ở danh sách phía trên.</div>
     </div>
     <span class="text-muted small">Có {{ video_total|default(videos|length) }} video · Trang {{ video_page|default(1) }}/{{ video_pages|default(1) }} · 5 dòng/trang</span>
   </div>
@@ -201,15 +201,6 @@
           <option value="">Tất cả</option>
           <option value="unassigned" {{ 'selected' if assignment=='unassigned' else '' }}>Chưa gán môn học/ mô đun</option>
           <option value="assigned" {{ 'selected' if assignment=='assigned' else '' }}>Đã gán môn học/ mô đun</option>
-        </select>
-      </div>
-      <div class="col-xl-3 col-lg-6">
-        <label class="form-label small">Playlist</label>
-        <select class="form-select" name="playlist_id">
-          <option value="">Tất cả playlist</option>
-          {% for p in available_playlists %}
-            <option value="{{ p.id }}" {{ 'selected' if playlist_filter_id == p.id else '' }}>{{ p.title }}</option>
-          {% endfor %}
         </select>
       </div>
       <div class="col-xl-2 d-flex flex-wrap gap-2">
