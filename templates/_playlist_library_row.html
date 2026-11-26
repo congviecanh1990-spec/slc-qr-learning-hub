@@ -12,7 +12,6 @@
           <td>
             <div class="fw-semibold">{{ p.title }}</div>{% if not p.is_available %}<span class="badge text-bg-warning">Playlist không còn trên YouTube</span><div class="small text-muted">QR cũ được giữ để tra cứu lịch sử; có thể ngừng sử dụng QR.</div>{% endif %}
           </td>
-          <td>{{ p.channel.title }}</td>
           <td>{{ p.video_links|length }}</td>
           <td>
             <form method="post" action="{{ url_for('set_playlist_course_assignments', playlist_id=p.id) }}" class="playlist-course-form" data-playlist-id="{{ p.id }}">
