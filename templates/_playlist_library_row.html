@@ -70,6 +70,7 @@
                     <option value="{{ l.course.id }}" {{ 'selected' if chosen_playlist_course.id == l.course_id else '' }}
                       {% if l.qr and l.qr.active %}
                       data-qr-png="{{ url_for('qr_png', qr_id=l.qr.id) }}"
+                      data-qr-filename="{{ p.title }}.png"
                       data-qr-delete="{{ url_for('delete_qr', qr_id=l.qr.id) }}"
                       data-qr-retarget-playlist="{{ url_for('qr_retarget_playlist', qr_id=l.qr.id) }}"
                       {% endif %}>{{ l.course.name }}{{ ' – đã có mã QR' if l.qr and l.qr.active else '' }}</option>
