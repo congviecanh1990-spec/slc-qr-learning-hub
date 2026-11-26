@@ -100,7 +100,7 @@
         return Math.max(0,Number(choice?.dataset.assignedVideoCount)||0);
       }
       const checked=window.videoBulkSelection?.selectedCount()||0;
-      if(submitter?.formAction?.includes('/videos/qr/download-selected'))return checked;
+      if(!submitter || submitter.formAction?.includes('/videos/qr/download-selected'))return checked;
       // Nút Gán môn còn áp dụng cho môn được chọn ở cột QR từng dòng.
       return checked+(window.videoBulkSelection?.selectedQrCourseCount?.()||0);
     }
