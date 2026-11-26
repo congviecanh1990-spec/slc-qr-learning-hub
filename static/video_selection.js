@@ -98,23 +98,18 @@
       hidden(mode==='all'?'excluded_video_ids':'selected_video_ids',id);
     }
   }
-  // Môn học tại cột Mã QR được chọn độc lập cho từng video đang hiện trên trang.
-  // Chỉ đưa lựa chọn lên máy chủ khi nhấn nút Gán môn, không tự gán khi đổi select.
+  // Mỗi lựa chọn ở cột Mã QR được lưu ngay trong input hidden form-associated
+  // ở chính dòng đó. Không đợi tới sự kiện submit (có thể bị preflight chặn).
+  // Chỉ gửi các dòng mà giảng viên chủ động đổi môn; không áp dụng lựa chọn
+  // mặc định khi chưa hề thay đổi.
   function qrCourseSelections(){
-    return [...document.querySelectorAll('#videos tr.library-target-row')].flatMap(row=>{
-      const id=Number(row.id.replace(/^video-/,'')),course=Number(
-        row.querySelector('.video-qr-course-select')?.value||0);
-      return Number.isSafeInteger(id)&&id>0&&Number.isSafeInteger(course)&&course>0
-        ?[`${id}:${course}`]:[];
-    });
+    return [...document.querySelectorAll('input[data-video-row-assign]')]
+      .filter(input=>!input.disabled && input.value).map(input=>input.value);
   }
   function appendRowCourseAssignments(target){
+    // Bản mới đã dùng form="assignVideoForm": input hidden tự tham gia POST.
+    // Xóa các phần tử sinh từ phiên bản JS cũ để không gửi bản ghi trùng.
     target.querySelectorAll('[data-video-qr-assignment]').forEach(el=>el.remove());
-    for(const item of qrCourseSelections()){
-      const hidden=document.createElement('input');
-      hidden.type='hidden';hidden.name='qr_course_assignments';hidden.value=item;
-      hidden.dataset.videoQrAssignment='1';target.append(hidden);
-    }
   }
   const api={
     selectedCount,refresh,
