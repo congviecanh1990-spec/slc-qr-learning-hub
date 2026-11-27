@@ -37,6 +37,16 @@
   <h3 class="h4 mb-0">Kho mã QR <span class="text-muted fs-6 fw-normal">({{ filtered_qr_count }} mã đang hiển thị)</span></h3>
   <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-outline-secondary btn-sm qr-save-picker {{ 'disabled' if not qrs else '' }}" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}" title="{{ 'Tải tất cả mã QR thuộc môn học/mô đun đang lọc' if selected_course_id is not none else 'Tải tất cả mã QR, sắp xếp theo thư mục môn học/mô đun' }}">Tải tất cả mã QR</a>
+    {% if selected_course %}
+    <form method="post" action="{{ url_for('delete_course_qrs', course_id=selected_course.id) }}"
+          data-confirm-message="Xóa vĩnh viễn toàn bộ mã QR của môn {{ selected_course.name }} ({{ filtered_qr_count }} mã đang hoạt động, cùng các mã cũ nếu có), lịch sử quét/xem và lượt đo liên quan? Các môn khác không bị ảnh hưởng. Không thể hoàn tác."
+          onsubmit="return confirm(this.dataset.confirmMessage);">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-outline-danger btn-sm">Xóa QR theo môn học</button>
+    </form>
+    {% else %}
+    <button type="button" class="btn btn-outline-danger btn-sm" disabled title="Hãy lọc một môn học/mô đun cụ thể trước">Xóa QR theo môn học</button>
+    {% endif %}
     <form method="post" action="{{ url_for('delete_all_qrs') }}" onsubmit="return confirm('Xóa vĩnh viễn toàn bộ mã QR thuộc phạm vi quản lý, kể cả mã cũ, cùng lịch sử quét/xem và các lượt đo liên quan? Không thể hoàn tác.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-outline-danger btn-sm" title="Xóa tất cả QR và số đo liên quan, kể cả dữ liệu cũ, không phụ thuộc bộ lọc">Xóa tất cả mã QR</button>
