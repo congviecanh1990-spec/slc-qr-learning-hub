@@ -48,12 +48,14 @@
       const button=panel.querySelector('.research-qr-confirm-button');
       const cancel=panel.querySelector('.research-qr-confirm-cancel');
       const state=panel.querySelector('.research-qr-confirm-state');
+      const emphasis=panel.querySelector('.research-qr-confirm-emphasis');
       if(button)button.disabled=confirming||pendingDownloads.length===0;
       if(cancel)cancel.hidden=pendingDownloads.length===0;
+      if(emphasis)emphasis.hidden=pendingDownloads.length===0;
       if(state){
         state.textContent=pendingDownloads.length
           ? 'Đã ghi nhận yêu cầu tải '+total+' mã QR trong '+
-            pendingDownloads.length+' lượt. Sau khi kiểm tra tệp đã lưu trên máy, nhấn xác nhận để chốt lượt đo.'
+            pendingDownloads.length+' lượt. Sau khi kiểm tra tệp đã lưu trên máy,'
           : idleConfirmationMessage;
         state.classList.toggle('text-muted',pendingDownloads.length===0);
         state.classList.toggle('text-primary',pendingDownloads.length>0);
@@ -63,25 +65,31 @@
   async function confirmPendingDownloads(){
     if(confirming||!pendingDownloads.length)return;
     confirming=true;showPendingConfirmation();
-    let completed=0,failedMessage='';
+    let confirmedRequests=0,failedMessage='',lastResult=null;
     for(const item of [...pendingDownloads]){
       const result=await recordDownload(item.style,item.ids,'manual_confirmed',true);
       if(!result?.measured){
         failedMessage=result?.message||'Lượt tải chưa khớp với phiên tạo QR mới.';
         break;
       }
+      lastResult=result;
       pendingDownloads=pendingDownloads.filter(x=>x.key!==item.key);
-      completed+=1;
+      confirmedRequests+=1;
       persistPending();
     }
     confirming=false;
     if(failedMessage){
       idleConfirmationMessage='Chưa chốt được: '+failedMessage;
       announce(idleConfirmationMessage,true);
-    }else if(completed){
-      idleConfirmationMessage='Đã ghi nhận xác nhận lưu '+completed+
-        ' lượt QR. Thời gian và số thao tác được chốt theo xác nhận của giảng viên, '+
-        'chưa phải bằng chứng lưu tệp đã xác minh độc lập.';
+    }else if(confirmedRequests && lastResult){
+      if(lastResult.completed){
+        idleConfirmationMessage='Đã chốt lượt đo: lưu đủ '+lastResult.expected+
+          ' mã QR theo xác nhận của giảng viên. Kết quả chưa được kiểm chứng độc lập.';
+      }else{
+        idleConfirmationMessage='Đã xác nhận lưu '+lastResult.saved+'/'+
+          lastResult.expected+' mã QR. Còn '+lastResult.remaining+
+          ' mã chưa được xác nhận; hãy tải/lưu các mã còn lại để chốt lượt đo.';
+      }
       announce(idleConfirmationMessage);
     }
     showPendingConfirmation();
@@ -135,10 +143,16 @@
       if(data.active){
         active=data;
         try{ops=Math.max(data.operations||0,Number(sessionStorage.getItem(sessionKey()))||0);}catch(_){ops=data.operations||0;}
-        if(data.created && !pendingDownloads.length){
+        if(data.saved>0 && !pendingDownloads.length){
+          idleConfirmationMessage='Đã xác nhận lưu '+data.saved+'/'+data.expected+
+            ' mã QR. Còn '+data.remaining+
+            ' mã chưa được xác nhận; tải/lưu phần còn lại để chốt lượt đo.';
+          announce(idleConfirmationMessage);
+        }else if(data.created && !pendingDownloads.length){
           announce('Đang đo tự động: '+data.code+' · đã tạo '+data.created+'/'+data.expected+
             ' QR. Kết quả được phân loại khi bạn tải QR ở từng dòng hoặc tải tất cả.');
         }
+        showPendingConfirmation();
       }else active=null;
     }catch(_){}
   }
@@ -284,8 +298,9 @@
           const key=sessionKey();
           active=null;ops=0;lastSent=-1;
           try{sessionStorage.removeItem(key);}catch(_){}
-        }else announce('Đã ghi nhận '+labels[result.kind]+': lưu '+result.saved+
-          '/'+result.expected+' QR của lượt đo.');
+        }else announce('Đã xác nhận lưu '+result.saved+'/'+result.expected+
+          ' QR của lượt đo; còn '+result.remaining+
+          ' mã chưa xác nhận. Thời gian và thao tác vẫn tạm tính.');
       }else{
         announce(labels[classification]+'. '+(result.message||
           'Không có lượt đo đối chứng đã giao cho thao tác này.'));
