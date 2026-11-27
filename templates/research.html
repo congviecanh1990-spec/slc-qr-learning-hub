@@ -130,7 +130,7 @@
     </form>
 
     <h5 class="mb-2">B. Tổng hợp kết quả đối chứng theo loại nhiệm vụ tạo mã QR</h5>
-    <p class="small text-muted mb-2">Tự động tổng hợp các lượt còn hiệu lực từ cùng nguồn dữ liệu của mục C, kể cả lượt đang đo hoặc đã chốt theo xác nhận của giảng viên. Dấu — biểu thị chưa có dữ liệu.</p>
+    <p class="small text-muted mb-2">Tự động tổng hợp các lượt còn hiệu lực từ cùng nguồn dữ liệu của mục C, kể cả lượt đang đo hoặc đã chốt theo xác nhận của giảng viên. Lượt xác nhận lưu đủ tệp của giảng viên được tính là hợp lệ; xác nhận này không đồng nghĩa với kiểm chứng độc lập. Dấu — biểu thị chưa có dữ liệu.</p>
     {% if pending_measurements %}
     <p class="small text-primary mb-2"><strong>{{ pending_measurements|length }} lượt Web App đang thực hiện.</strong> Tổng thao tác và thời gian có bao gồm số liệu tạm tính tại thời điểm mở trang; chưa dùng để tính tỷ lệ cải thiện.</p>
     {% endif %}
@@ -149,7 +149,7 @@
           ('pending_count', 'Số lượt đang đo', false),
           ('finished_count', 'Số lượt đã hoàn thành', false),
           ('self_confirmed_count', 'Số lượt chốt theo xác nhận giảng viên', false),
-          ('verified_count', 'Số lượt đã xác minh độc lập', false),
+          ('verified_count', 'Số lượt Web App đã xác nhận hợp lệ', false),
           ('manual_ops', 'Tổng số thao tác thủ công', false),
           ('app_ops', 'Tổng số thao tác Web App', false),
           ('manual_time', 'Tổng thời gian thủ công (giây)', true),
@@ -165,7 +165,7 @@
             </td>
           {% endfor %}</tr>
         {% endfor %}
-          <tr class="table-light"><th colspan="3">So sánh trên cùng tập cặp đối chứng hợp lệ, đã xác minh độc lập</th></tr>
+          <tr class="table-light"><th colspan="3">So sánh trên cùng tập cặp đối chứng hợp lệ</th></tr>
         {% for key, label, fmt in [
           ('paired_count', 'Số cặp đủ đối chứng', 'int'),
           ('matched_qrs', 'Số lượng mã QR được đối chứng', 'int'),
@@ -189,17 +189,6 @@
         </tbody>
       </table>
     </div>
-    <p class="small mb-4"><strong>Tổng số cặp đối chứng hợp lệ:</strong> {{ paired_totals.paired_count }};
-      <strong>tổng QR được đối chứng:</strong> {{ paired_totals.qr_count }};
-      <strong>tổng video học liệu:</strong> {{ paired_totals.video_coverage }}.
-      {% if paired_totals.time_reduction is not none %}
-      Mức giảm thời gian gộp: <strong>{{ paired_totals.time_reduction }}%</strong>;
-      giảm thao tác: <strong>{{ paired_totals.ops_reduction }}%</strong>.
-      {% else %}
-      Chưa đủ cặp đối chứng hợp lệ để tính mức giảm chung.
-      {% endif %}
-      <br>Chỉ tính tỷ lệ trên cùng tập cặp đủ hai phương pháp và đã xác minh độc lập. Lượt tự xác nhận lưu tệp vẫn được tổng hợp ở phần thực hiện, không tự động đưa vào KPI nghiệm thu.
-    </p>
     <h5 class="mb-2" id="cap-do-chi-tiet">C. Nhật ký đối chứng theo giảng viên và học phần</h5>
     <div class="table-responsive">
       <table class="table table-bordered table-sm align-middle">
