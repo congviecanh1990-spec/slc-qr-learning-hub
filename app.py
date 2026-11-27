@@ -40,7 +40,7 @@ from analytics_excel import make_analytics_workbook
 from lecturer_usage import lecturer_usage_rows
 from research_comparison import (
     RESEARCH_PAIR_KINDS, RESEARCH_PAIR_KIND_NAMES, validate_pair_form,
-    normalize_kind, pair_metrics, video_coverage,
+    normalize_kind, pair_metrics, video_coverage, accepted_webapp_measurement,
 )
 from services.error_reporting import login_failure_reason, safe_error_diagnostic
 from services.google_permissions import (
@@ -5716,10 +5716,7 @@ def register_routes(app):
             manual = [p for p in rows if (p.manual_operations or 0) > 0 and (p.manual_seconds or 0) > 0]
             valid_groups, _ = pair_metrics(rows)
             valid = next((g for g in valid_groups if g["key"] == kind), {})
-            matched = [p for p in finished if p.measurement_verified
-                       and p.measurement_save_method == "directory_picker"
-                       and p.measurement_saved_at is not None
-                       and p.qr_count > 0 and video_coverage(p) > 0 and p in manual]
+            matched = [p for p in finished if accepted_webapp_measurement(p) and p in manual]
             summary_groups.append(dict(
                 label=label, web_count=len(observed), qr_count=sum(p.qr_count or 0 for p in observed),
                 pending_count=len(pending), finished_count=len(finished),
@@ -5744,7 +5741,7 @@ def register_routes(app):
             and (p.manual_operations or 0) == 0 and (p.manual_seconds or 0) == 0
         ]
         # Lượt chốt theo xác nhận của giảng viên: hiển thị riêng, KHÔNG
-        # coi là đã xác minh độc lập và không tính vào tỷ lệ cải thiện.
+        # coi là đã xác minh độc lập; vẫn được chấp nhận đối chứng theo xác nhận.
         user_confirmed_pairs = [
             p for p in all_research_pairs if p.active
             and p.measurement_finished_at is not None
