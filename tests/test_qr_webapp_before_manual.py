@@ -179,7 +179,7 @@ def test_admin_lecturer_qr_create_immediately_appears_in_acceptance(configured_a
         assert report.status_code == 200
         html = report.get_data(as_text=True)
         assert "1 lượt Web App đang thực hiện" in html
-        assert "Đã ghi nhận tạo QR; chờ tải và xác minh lưu" in html
+        assert "Đã ghi nhận tạo QR; chờ tải và lưu tệp" in html
         assert "Đang chạy – chưa chốt" in html
         assert "Tin học ứng dụng" in html
 
@@ -228,8 +228,8 @@ def test_backend_qr_creation_survives_missing_javascript_start(configured_app):
 
         report = client.get("/research")
         assert report.status_code == 200
-        assert "Đã ghi nhận tạo QR; chờ tải và xác minh lưu" in report.get_data(as_text=True)
-        assert "Ghi QR dự phòng; cần đo lại toàn bộ thời gian" in report.get_data(as_text=True)
+        assert "Đã ghi nhận tạo QR; chờ tải và lưu tệp" in report.get_data(as_text=True)
+        assert "Mốc bắt đầu dự phòng; cần đo lại từ đầu để tính KPI" in report.get_data(as_text=True)
 
         saved = client.post("/research/auto/download-saved", data={
             "download_style": "row", "qr_ids": json.dumps([qr_id]),
