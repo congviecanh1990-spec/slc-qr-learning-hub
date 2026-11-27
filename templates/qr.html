@@ -37,13 +37,18 @@
   <h3 class="h4 mb-0">Kho mã QR <span class="text-muted fs-6 fw-normal">({{ filtered_qr_count }} mã đang hiển thị)</span></h3>
   <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-outline-secondary btn-sm qr-save-picker {{ 'disabled' if not qrs else '' }}" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}" title="{{ 'Tải tất cả mã QR thuộc môn học/mô đun đang lọc' if selected_course_id is not none else 'Tải tất cả mã QR, sắp xếp theo thư mục môn học/mô đun' }}">Tải tất cả mã QR</a>
-    <form method="post" action="{{ url_for('delete_all_qrs') }}" onsubmit="return confirm('Xóa toàn bộ mã QR đã tạo của tài khoản này? Các mã QR đã in sẽ ngừng hoạt động, nhưng lịch sử quét/xem trước đây vẫn được giữ lại.');">
+    <form method="post" action="{{ url_for('delete_all_qrs') }}" onsubmit="return confirm('Xóa vĩnh viễn toàn bộ mã QR thuộc phạm vi quản lý, kể cả mã cũ, cùng lịch sử quét/xem và các lượt đo liên quan? Không thể hoàn tác.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-outline-danger btn-sm" {{ 'disabled' if not total_qrs else '' }} title="Xóa tất cả mã QR thuộc phạm vi quản lý, không phụ thuộc bộ lọc hiện tại">Xóa tất cả mã QR</button>
+      <button class="btn btn-outline-danger btn-sm" title="Xóa tất cả QR và số đo liên quan, kể cả dữ liệu cũ, không phụ thuộc bộ lọc">Xóa tất cả mã QR</button>
     </form>
   </div>
 </div>
 
+<div id="researchQrStatus" class="alert alert-info d-none" role="status"></div>
+<div class="research-qr-confirmation border rounded bg-light p-3 mb-3 d-flex align-items-center flex-wrap gap-3">
+  <div class="flex-grow-1" style="font-size:16px"><span class="research-qr-confirm-state">Chưa có lượt tải QR mới cần xác nhận.</span><strong class="research-qr-confirm-emphasis text-primary" hidden> Nhấn xác nhận để chốt lượt đo.</strong></div>
+  <div class="d-flex gap-2 ms-auto"><button type="button" class="btn btn-success research-qr-confirm-button" disabled>Tôi đã lưu đủ tệp QR</button><button type="button" class="btn btn-outline-secondary research-qr-confirm-cancel" hidden>Chưa lưu / Hủy xác nhận</button></div>
+</div>
 <div class="card shadow-sm mb-4">
   <div class="table-responsive">
     <table class="table table-hover table-sm align-middle mb-0 qr-inventory-table">
