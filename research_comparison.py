@@ -87,6 +87,26 @@ def video_coverage(pair):
     return max(0, (pair.video_count or 0) + (pair.playlist_video_count or 0))
 
 
+def accepted_webapp_measurement(p):
+    """Accept a completed measurement confirmed by the lecturer or the system.
+
+    Keep measurement_verified as the independent-verification flag; manual
+    confirmation is a separate, explicit acceptance method.
+    """
+    method = getattr(p, "measurement_save_method", None)
+    accepted = method == "manual_confirmed" or (
+        method == "directory_picker" and getattr(p, "measurement_verified", False))
+    return bool(
+        p.active and accepted
+        and getattr(p, "measurement_saved_at", None) is not None
+        and getattr(p, "measurement_finished_at", None) is not None
+        and p.webapp_operations is not None and p.webapp_operations > 0
+        and p.webapp_seconds is not None and math.isfinite(p.webapp_seconds)
+        and p.webapp_seconds > 0
+        and video_coverage(p) > 0 and p.qr_count > 0
+    )
+
+
 def pair_metrics(pairs):
     """Hiển thị thống kê Web App ngay cả khi chưa nhập đối chứng thủ công.
 
@@ -94,13 +114,7 @@ def pair_metrics(pairs):
     vế đo, cùng khối lượng. Số đo Web App chưa đối chứng hiển thị riêng,
     tuyệt đối không suy ra % cải thiện từ số liệu chưa đầy đủ.
     """
-    web = [
-        p for p in pairs if p.active and getattr(p, "measurement_verified", False)
-        and getattr(p, "measurement_save_method", None) == "directory_picker"
-        and getattr(p, "measurement_saved_at", None) is not None
-        and p.webapp_operations is not None and p.webapp_seconds is not None
-        and video_coverage(p) > 0 and p.qr_count > 0
-    ]
+    web = [p for p in pairs if accepted_webapp_measurement(p)]
     paired = [
         p for p in web if (p.manual_seconds or 0) > 0
         and (p.manual_operations or 0) > 0
