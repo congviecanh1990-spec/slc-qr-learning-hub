@@ -911,7 +911,7 @@ def test_qr_downloads_use_original_media_titles_without_browser_write_prompts(co
         assert opt_video["data-qr-filename"] == "Tiếng Việt: Bài 4 / Lập trình.png"
         assert opt_playlist["data-qr-filename"] == "Playlist: Học Python / Cơ bản.png"
         assert not soup.select('script[src*="qr_save_picker.js"]')
-        assert soup.select('script[src*="research_measurement.js?v=native-zip-20261126"]')
+        assert soup.select('script[src*="research_measurement.js?v=confirm-progress-20261127"]')
         for qr_id, expected in (
             (video_id, "Tiếng Việt_ Bài 4 _ Lập trình.png"),
             (playlist_id, "Playlist_ Học Python _ Cơ bản.png"),
@@ -929,7 +929,8 @@ def test_qr_downloads_use_original_media_titles_without_browser_write_prompts(co
     assert "window.showSaveFilePicker(" not in js
     assert "const a=document.createElement('a');" in js
     assert "a.download=allVideoQrs?" in js
-    assert "recordDownload(ids.length>=2?'bulk':'row',ids,'not_verified')" in js
+    assert "await recordDownload(style,ids,'not_verified')" in js
+    assert "queuePending(style,ids)" in js
 
 
 
