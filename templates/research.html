@@ -51,28 +51,10 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-bold">1. Hiệu quả quy trình – đo đối chứng theo từng cặp</div>
   <div class="card-body">
-    <h5 class="mb-3">A. Nhập kết quả đối chứng thủ công (có thể nhập sau khi Web App đã đo)</h5>
+    <h5 class="mb-3">A. Nhập kết quả đối chứng thủ công</h5>
     <form method="post" id="researchPairCreateForm" class="border rounded p-3 mb-4" action="{{ url_for('research_page') }}#cap-do-chi-tiet">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="form_type" value="pair_create">
-      <div class="mb-3">
-        <label for="existingResearchPair" class="form-label fw-semibold">Ghép vào lượt Web App đã đo (nếu có)</label>
-        <select id="existingResearchPair" name="existing_pair_id" class="form-select">
-          <option value="">— Tự tìm lượt phù hợp hoặc lưu kết quả thủ công mới —</option>
-          {% for p in web_only_pairs %}
-          <option value="{{ p.id }}"
-            data-lecturer="{{ p.lecturer_id or '' }}" data-course="{{ p.course_id or '' }}"
-            data-kind="{{ normalize_pair_kind(p.task_kind) }}"
-            data-videos="{{ p.video_count }}" data-playlists="{{ p.playlist_count }}"
-            data-playlist-videos="{{ p.playlist_video_count }}">
-            {{ p.pair_code }} – {{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}
-            – {{ p.course.name if p.course else p.course_name_snapshot }}
-            – {{ p.qr_count }} QR – {{ p.measurement_finished_at.strftime('%d/%m/%Y %H:%M') }}
-          </option>
-          {% endfor %}
-        </select>
-        <div class="form-text">Có thể tạo và đo QR trước. Sau khi Web App ghi lượt đo, chọn đúng lượt ở đây và chỉ nhập số thao tác, thời gian thủ công. Các thông tin khác tự điền để đối chiếu.</div>
-      </div>
       <div class="row g-3">
         <div class="col-lg-3 col-md-6">
           <label class="form-label fw-semibold">Giảng viên thực nghiệm *</label>
@@ -130,10 +112,6 @@
     </form>
 
     <h5 class="mb-2">B. Tổng hợp kết quả đối chứng theo loại nhiệm vụ tạo mã QR</h5>
-    <p class="small text-muted mb-2">Tự động tổng hợp các lượt còn hiệu lực từ cùng nguồn dữ liệu của mục C, kể cả lượt đang đo hoặc đã chốt theo xác nhận của giảng viên. Lượt xác nhận lưu đủ tệp của giảng viên được tính là hợp lệ; xác nhận này không đồng nghĩa với kiểm chứng độc lập. Dấu — biểu thị chưa có dữ liệu.</p>
-    {% if pending_measurements %}
-    <p class="small text-primary mb-2"><strong>{{ pending_measurements|length }} lượt Web App đang thực hiện.</strong> Tổng thao tác và thời gian có bao gồm số liệu tạm tính tại thời điểm mở trang; chưa dùng để tính tỷ lệ cải thiện.</p>
-    {% endif %}
     <div class="table-responsive mb-3">
       <table class="table table-bordered table-sm align-middle">
         <thead class="table-light"><tr>
@@ -272,21 +250,6 @@
 (() => {
   const button = document.getElementById('clearResearchPairForm');
   const form = document.getElementById('researchPairCreateForm');
-  const existing = document.getElementById('existingResearchPair');
-  existing?.addEventListener('change',()=>{
-    const o=existing.selectedOptions[0];
-    if(!o?.value||!form)return;
-    const fields={
-      lecturer_id:o.dataset.lecturer,course_id:o.dataset.course,
-      task_kind:o.dataset.kind,video_count:o.dataset.videos,
-      playlist_count:o.dataset.playlists,playlist_video_count:o.dataset.playlistVideos
-    };
-    for(const [name,value] of Object.entries(fields)){
-      const el=form.querySelector('[name="'+name+'"]');
-      if(el&&value!==undefined)el.value=value;
-    }
-    form.querySelector('[name="manual_operations"]')?.focus();
-  });
   button?.addEventListener('click', () => {
     if (!form) return;
     for (const field of form.querySelectorAll('input:not([type="hidden"]), select, textarea')) {
