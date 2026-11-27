@@ -57,15 +57,12 @@
                 {% set chosen_playlist_course.has_qr = true %}
               {% endif %}
             {% endfor %}
-            {% if chosen_playlist_course.id is none and active_links %}
-              {% set chosen_playlist_course.id = active_links[0].course_id %}
-            {% endif %}
             {% if active_course_ids %}
               <form method="post" action="{{ url_for('create_playlist_qr_from_library', playlist_id=p.id) }}" class="d-flex gap-1 flex-wrap playlist-qr-actions align-items-center library-qr-form" data-library-qr-form="1">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="return_query" value="{{ library_return_query }}">
                 <select class="form-select form-select-sm playlist-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR playlist" required>
-                  {% if active_course_ids|length > 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
+                  <option value="" {{ 'selected' if chosen_playlist_course.id is none else '' }}>Chọn môn học/mô đun</option>
                   {% for l in active_links if l.course.owner_id == me.id and l.course.active %}
                     <option value="{{ l.course.id }}" {{ 'selected' if chosen_playlist_course.id == l.course_id else '' }}
                       {% if l.qr and l.qr.active %}
@@ -78,7 +75,7 @@
                 </select>
                 <button class="btn btn-primary btn-sm playlist-qr-create"
                         {{ 'hidden' if chosen_playlist_course.has_qr else '' }}
-                        {{ 'disabled' if not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
+                        {{ 'disabled' if chosen_playlist_course.id is none or not p.is_available or usable.count == 0 else '' }}>Tạo mã QR</button>
               </form>
               <div class="playlist-qr-compact-actions d-flex align-items-center flex-wrap gap-1 mt-1" hidden>
                 <a class="btn btn-outline-secondary btn-sm playlist-qr-download qr-save-picker" hidden href="#" aria-label="Tải mã QR playlist">Tải QR</a>
