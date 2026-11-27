@@ -4245,20 +4245,53 @@ def register_routes(app):
     @login_required
     def delete_all_qrs():
         user = current_user()
-        qrs = QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True)).all()
-        if not qrs:
-            flash("Không có mã QR nào để xóa.", "info")
-            return redirect(url_for("qr_page"))
+        # Reset toàn bộ QR và số đo liên quan trong phạm vi quản lý hiện tại,
+        # kể cả QR đã ngừng hoạt động từ các lần xóa trước.
+        ensure_research_comparison_schema()
+        qrs = QrCode.query.filter(managed_qr_scope(user.id)).all()
         qr_ids = [q.id for q in qrs]
-        for q in qrs:
-            q.active = False
+        qr_set = set(qr_ids)
+        course_ids = {r[0] for r in db.session.query(Course.id).filter(
+            Course.owner_id == user.id).all()}
+        pairs = ResearchComparisonPair.query.filter(or_(
+            ResearchComparisonPair.lecturer_id == user.id,
+            ResearchComparisonPair.course_id.in_(course_ids),
+        )).all()
+        removed_pairs = 0
+        for pair in pairs:
+            linked = set(research_created_qr_ids(pair)) | set(research_saved_qr_ids(pair))
+            if linked.intersection(qr_set) or (
+                pair.lecturer_id == user.id and pair.course_id in course_ids
+                and (pair.measurement_started_at is not None
+                     or pair.webapp_operations is not None
+                     or pair.webapp_seconds is not None)
+            ):
+                db.session.delete(pair)
+                removed_pairs += 1
         if qr_ids:
-            for link in CourseVideo.query.filter(CourseVideo.qr_id.in_(qr_ids)).all():
-                link.qr_id = None
-            for link in CoursePlaylist.query.filter(CoursePlaylist.qr_id.in_(qr_ids)).all():
-                link.qr_id = None
+            watch_ids = [r[0] for r in db.session.query(WatchSession.id).filter(
+                WatchSession.qr_id.in_(qr_ids)).all()]
+            if watch_ids:
+                WatchEvent.query.filter(WatchEvent.watch_session_id.in_(watch_ids)).delete(
+                    synchronize_session=False)
+            WatchSession.query.filter(WatchSession.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            ScanLog.query.filter(ScanLog.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            QrTargetHistory.query.filter(QrTargetHistory.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            CourseVideo.query.filter(CourseVideo.qr_id.in_(qr_ids)).update(
+                {CourseVideo.qr_id: None}, synchronize_session=False)
+            CoursePlaylist.query.filter(CoursePlaylist.qr_id.in_(qr_ids)).update(
+                {CoursePlaylist.qr_id: None}, synchronize_session=False)
+            QrCode.query.filter(QrCode.id.in_(qr_ids)).delete(synchronize_session=False)
+        # Bản ghi tổng hợp cũ không có QR ID; chỉ xóa số đo QR của tài khoản này.
+        ExperimentRun.query.filter(
+            ExperimentRun.owner_id == user.id,
+            ExperimentRun.mode == "webapp",
+            ExperimentRun.task_key.in_(list(RESEARCH_COMPARISON_TASK_MAP)),
+        ).delete(synchronize_session=False)
         db.session.commit()
-        flash(f"Đã xóa {len(qrs)} mã QR khỏi danh sách sử dụng. Lịch sử quét/xem trước đây vẫn được giữ lại.", "success")
+        session.pop("research_measurement_id", None)
+        session.pop("research_measurement_nonce", None)
+        flash(f"Đã xóa {len(qr_ids)} mã QR (kể cả mã cũ) và {removed_pairs} lượt đo liên quan. Có thể bắt đầu đo lại.", "success")
         return redirect(url_for("qr_page"))
 
     @app.get("/qr/<int:qr_id>/png")
