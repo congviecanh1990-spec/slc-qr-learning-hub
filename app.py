@@ -5658,9 +5658,14 @@ def register_routes(app):
                 started = item.measurement_started_at
                 if started.tzinfo is None:
                     started = started.replace(tzinfo=timezone.utc)
+                created_qrs = set(research_created_qr_ids(item))
+                confirmed_qrs = created_qrs.intersection(research_saved_qr_ids(item))
                 pending_measurements[item.id] = {
                     "seconds": round(max(0, (observation_now-started).total_seconds()), 1),
                     "operations": item.measurement_operations or 0,
+                    "confirmed": len(confirmed_qrs),
+                    "expected": item.qr_count,
+                    "remaining": max(0, item.qr_count - len(confirmed_qrs)),
                 }
         web_only_pairs = [
             p for p in all_research_pairs if p.active
@@ -5752,11 +5757,15 @@ def register_routes(app):
         if not pair:
             return {"active": False}
         complete = research_measurement_complete_qrs(pair)
+        created_qrs = set(research_created_qr_ids(pair))
+        confirmed_count = len(created_qrs.intersection(research_saved_qr_ids(pair)))
         return {
             "active": True, "id": pair.id, "code": pair.pair_code,
             "nonce": session.get("research_measurement_nonce", ""),
             "course_id": pair.course_id, "kind": normalize_kind(pair.task_kind),
-            "expected": pair.qr_count, "created": len(research_created_qr_ids(pair)),
+            "expected": pair.qr_count, "created": len(created_qrs),
+            "saved": confirmed_count,
+            "remaining": max(0, pair.qr_count - confirmed_count),
             "ready_to_save": complete, "operations": pair.measurement_operations,
             "video_count": pair.video_count, "playlist_count": pair.playlist_count,
         }
@@ -6041,6 +6050,7 @@ def register_routes(app):
         pair.updated_at = utcnow()
         complete = set(saved) == set(created)
         result.update({"measured": True, "saved": len(saved), "expected": len(created),
+                       "remaining": max(0, len(created) - len(saved)),
                        "completed": complete, "confirmation_method": method})
         if complete:
             ended = utcnow()
