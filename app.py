@@ -3051,6 +3051,31 @@ def register_routes(app):
             return playlist_library_row_json(playlist.id, user)
         return redirect(videos_library_return(f"playlist-{playlist.id}", request.form.get("return_query", "")))
 
+    @app.post("/videos/<int:video_id>/set-courses")
+    @login_required
+    def set_video_course_assignments(video_id):
+        """Save the full set of courses for one independent library video."""
+        user = current_user()
+        video = filtered_library_video_query(user).filter(Video.id == video_id).first_or_404()
+        raw_ids = request.form.getlist("course_ids")
+        if any(not x.isascii() or not x.isdigit() or int(x) <= 0 for x in raw_ids):
+            abort(400)
+        selected = {int(x) for x in raw_ids}
+        owned = {c.id: c for c in Course.query.filter_by(owner_id=user.id, active=True).all()}
+        if not selected.issubset(owned):
+            abort(403)
+        existing = CourseVideo.query.filter(CourseVideo.video_id == video.id,
+                                           CourseVideo.course_id.in_(owned)).all()
+        for link in existing:
+            if link.course_id not in selected:
+                db.session.delete(link)
+        db.session.flush()
+        for cid in sorted(selected):
+            ensure_course_video_link(owned[cid], video, user, manual=True)
+        db.session.commit()
+        flash("Đã lưu môn học/mô đun áp dụng cho video.", "success")
+        return redirect(videos_library_return(f"video-{video.id}", request.form.get("return_query", "")))
+
     @app.post("/videos/<int:video_id>/qr")
     @login_required
     def create_video_qr_from_library(video_id):

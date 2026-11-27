@@ -124,7 +124,7 @@
         <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllPlaylists" {{ 'checked' if playlist_search else '' }}
             aria-label="Chọn tất cả hoặc bỏ chọn tất cả playlist ở mọi trang"
             title="Chọn tất cả / Bỏ chọn tất cả playlist trên mọi trang, không chỉ trang đang xem"></th>
-        <th>Playlist</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
+        <th>Playlist</th><th>Số video</th><th style="min-width:300px">Môn học/ mô đun áp dụng</th><th>Trạng thái</th><th style="min-width:210px">Thao tác với mã QR</th>
       </tr></thead>
       <tbody>
       {% for p in playlists %}
@@ -233,81 +233,86 @@
           <th style="width:48px"><input class="form-check-input" type="checkbox" id="selectAllVideos" {{ 'checked' if search else '' }}
              aria-label="Chọn tất cả hoặc bỏ chọn tất cả video trong kết quả lọc trên mọi trang"
              title="Chọn tất cả / Bỏ chọn tất cả video trong kết quả lọc trên mọi trang"></th>
-          <th>Video học liệu</th><th>Môn học/ mô đun đã gán</th><th>Khả năng phát</th><th>Trạng thái</th><th style="min-width:210px">Mã QR</th>
+          <th>Video học liệu</th><th>Môn học/ mô đun áp dụng</th><th>Khả năng phát</th><th>Trạng thái</th><th style="min-width:210px">Thao tác với mã QR</th>
         </tr></thead>
         <tbody>
         {% for v in videos %}<tr id="video-{{ v.id }}" class="library-target-row">
           <td><input class="form-check-input video-check" type="checkbox" form="assignVideoForm" name="video_ids" value="{{ v.id }}"></td>
           <td><div class="d-flex gap-2 align-items-center">{% if v.thumbnail_url %}<img class="thumb" src="{{ v.thumbnail_url }}" alt="">{% endif %}<div><div class="fw-semibold">{{ v.title }}</div><div class="small text-muted">{{ v.youtube_video_id }}</div></div></div></td>
-          <td>{% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}<span class="badge text-bg-light border me-1 mb-1">{{ link.course.name }}</span>{% else %}<span class="text-muted small">Chưa gán</span>{% endfor %}</td>
+          <td>
+            {% set active_course_ids = v.course_links | selectattr('course.active') | selectattr('course.owner_id', 'equalto', me.id) | map(attribute='course_id') | list %}
+            <form method="post" action="{{ url_for('set_video_course_assignments', video_id=v.id) }}" class="video-course-form" data-video-id="{{ v.id }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="return_query" value="{{ library_return_query }}">
+              {% if courses %}
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="dropdown course-picker" data-bs-auto-close="outside">
+                  <button class="btn btn-outline-secondary dropdown-toggle course-picker-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="course-picker-label">
+                      {% if active_course_ids|length == 0 %}Chọn môn học/ mô đun{% else %}Đã chọn {{ active_course_ids|length }} môn học/ mô đun{% endif %}
+                    </span>
+                  </button>
+                  <div class="dropdown-menu p-2 shadow course-picker-menu">
+                    <div class="small fw-bold px-2 pt-1 pb-2">Chọn một hoặc nhiều môn học/ mô đun</div>
+                    {% for c in courses %}
+                      <label class="dropdown-item d-flex align-items-start gap-2 py-2 mb-0" for="vi{{ v.id }}-c{{ c.id }}">
+                        <input class="form-check-input mt-1 video-course-check" type="checkbox" name="course_ids" value="{{ c.id }}" id="vi{{ v.id }}-c{{ c.id }}" {{ 'checked' if c.id in active_course_ids else '' }}>
+                        <span>{{ c.name }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm">Lưu</button>
+              </div>
+              <div class="form-text mt-1 course-picker-summary" {{ 'hidden' if active_course_ids else '' }}>{% if not active_course_ids %}Chưa gán môn học/ mô đun.{% endif %}</div>
+              {% else %}
+                <div class="text-muted small">Chưa có môn học/ mô đun. Hãy tạo môn học/ mô đun trước.</div>
+              {% endif %}
+            </form>
+          </td>
           <td>{{ 'Có thể phát' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'Cần kiểm tra' }}</td>
           <td><span class="badge {{ 'text-bg-success' if v.is_available and v.embeddable is not false and v.privacy_status != 'private' else 'text-bg-warning' }}">{{ v.status_label }}</span></td>
           <td>
-            {% set vqr = namespace(assigned_qr=none) %}
-            {# Mặc định chọn môn mà video đã được gán để nút Tạo QR sáng ngay. #}
-            {% set assigned_video_course = namespace(id=none) %}
-            {# Khi video nằm trong nhiều môn: ưu tiên hiện môn đã có QR,
-               tránh nút Tạo QR xuất hiện trong khi mã thực tế đã được tạo. #}
-            {% for link in v.course_links if link.course.owner_id == me.id and link.course.active and link.qr and link.qr.active %}
-              {% if assigned_video_course.id is none %}
-                {% set assigned_video_course.id = link.course_id %}
-                {% set vqr.assigned_qr = link.qr %}
-              {% endif %}
+            {% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}
+              <div class="qr-course-actions border-bottom pb-2 mb-2">
+                {% if active_course_ids|length > 1 %}<div class="small fw-semibold mb-1">{{ link.course.name }}</div>{% endif %}
+                {% if link.qr and link.qr.active %}
+                  <div class="d-flex flex-wrap gap-1 align-items-center">
+                    <a class="btn btn-outline-secondary btn-sm video-qr-download qr-save-picker" href="{{ url_for('qr_png', qr_id=link.qr.id) }}" data-filename="{{ v.title }}.png" download>Tải QR</a>
+                    <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" aria-expanded="false">Đổi đích</button>
+                    <form method="post" action="{{ url_for('delete_qr', qr_id=link.qr.id) }}" class="library-qr-form" data-library-qr-form="1" onsubmit="return confirm('Xóa mã QR này?');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_query" value="{{ library_return_query }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="library_row" value="video-{{ v.id }}">
+                      <button type="submit" class="btn btn-outline-danger btn-sm">Xóa QR</button>
+                    </form>
+                  </div>
+                  <form method="post" action="{{ url_for('qr_retarget', qr_id=link.qr.id) }}" class="video-qr-retarget library-qr-form mt-1" data-library-qr-form="1" hidden>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_query" value="{{ library_return_query }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="library_row" value="video-{{ v.id }}">
+                    <select class="form-select form-select-sm" name="video_id" required aria-label="Chọn video đích">
+                      <option value="">Chọn video đích mới</option>
+                      {% for new_v in retarget_videos|default([]) %}<option value="{{ new_v.id }}">{{ new_v.title }}</option>{% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-warning btn-sm mt-1">Lưu video đích</button>
+                  </form>
+                {% else %}
+                  <form method="post" action="{{ url_for('create_video_qr_from_library', video_id=v.id) }}" class="video-qr-actions library-qr-form" data-library-qr-form="1">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="return_query" value="{{ library_return_query }}">
+                <input type="hidden" name="return_to" value="videos">
+                <input type="hidden" name="library_row" value="video-{{ v.id }}">
+                    <input type="hidden" name="course_id" value="{{ link.course_id }}">
+                    <button type="submit" class="btn btn-primary btn-sm video-qr-create" {{ 'disabled' if not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
+                  </form>
+                {% endif %}
+              </div>
+            {% else %}
+              <button type="button" class="btn btn-primary btn-sm" disabled>Tạo mã QR</button>
             {% endfor %}
-            {% if assigned_video_course.id is none %}
-              {% for link in v.course_links if link.course.owner_id == me.id and link.course.active %}
-                {% if assigned_video_course.id is none %}{% set assigned_video_course.id = link.course_id %}{% endif %}
-              {% endfor %}
-            {% endif %}
-            <form method="post" action="{{ url_for('create_video_qr_from_library', video_id=v.id) }}" class="d-flex flex-wrap gap-1 align-items-center library-qr-form video-qr-actions" data-library-qr-form="1" data-video-usable="{{ '1' if v.is_available and v.embeddable is not sameas false and v.privacy_status != 'private' else '0' }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-              <select class="form-select form-select-sm video-qr-course-select" name="course_id" aria-label="Chọn môn học/mô đun cho mã QR video" required
-                      onchange="var mirror=document.getElementById('video-course-mirror-{{ v.id }}');if(mirror){mirror.disabled=!this.value;mirror.value=this.value?'{{ v.id }}:'+this.value:'';}">
-                {% if courses|length != 1 %}<option value="">Chọn môn học/mô đun</option>{% endif %}
-                {% for c in courses %}
-                  {% set found = namespace(qr=none) %}
-                  {% for link in v.course_links if link.course_id == c.id %}
-                    {% if link.qr and link.qr.active %}{% set found.qr=link.qr %}{% endif %}
-                  {% endfor %}
-                  <option value="{{ c.id }}" {{ 'selected' if assigned_video_course.id == c.id else '' }} {% if found.qr %}
-                     data-qr-png="{{ url_for('qr_png', qr_id=found.qr.id) }}"
-                     data-qr-filename="{{ v.title }}.png"
-                     data-qr-delete="{{ url_for('delete_qr', qr_id=found.qr.id) }}"
-                     data-qr-retarget="{{ url_for('qr_retarget', qr_id=found.qr.id) }}"
-                     {% endif %}>{{ c.name }}{{ ' – đã có mã QR' if found.qr else '' }}</option>
-                {% endfor %}
-              </select>
-              <button class="btn btn-primary btn-sm video-qr-create"
-                {{ 'hidden' if vqr.assigned_qr else '' }}
-                {{ 'disabled' if not courses or not v.is_available or v.embeddable is sameas false or v.privacy_status == 'private' else '' }}>Tạo mã QR</button>
-            </form>
-            {# Thuộc form Gán môn ở phía trên dù đang hiển thị trong dòng video:
-               cập nhật NGAY khi chọn môn, không phụ thuộc xử lý sự kiện submit. #}
-            <input type="hidden" id="video-course-mirror-{{ v.id }}" name="qr_course_assignments"
-                   form="assignVideoForm" data-video-row-assign="{{ v.id }}" disabled>
-            <div class="d-flex flex-wrap gap-1 align-items-center mt-1 video-qr-extra" data-qr-row="video-{{ v.id }}" hidden>
-              <a href="#" class="btn btn-outline-secondary btn-sm video-qr-download qr-save-picker" hidden aria-label="Tải mã QR video">Tải QR</a>
-              <button type="button" class="btn btn-outline-warning btn-sm video-qr-retarget-toggle" hidden aria-expanded="false">Đổi đích</button>
-              <form method="post" action="#" class="video-qr-delete library-qr-form" data-library-qr-form="1" hidden onsubmit="return confirm('Xóa mã QR này? Mã đã in sẽ ngừng hoạt động nhưng lịch sử vẫn được giữ lại.');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="return_to" value="videos">
-                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-                <input type="hidden" name="library_row" value="video-{{ v.id }}">
-                <button type="submit" class="btn btn-outline-danger btn-sm">Xóa QR</button>
-              </form>
-              <form method="post" action="#" class="video-qr-retarget library-qr-form mt-1 w-100" data-library-qr-form="1" hidden>
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="return_to" value="videos">
-                <input type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
-                <input type="hidden" name="library_row" value="video-{{ v.id }}">
-                <select class="form-select form-select-sm" name="video_id" required aria-label="Chọn video đích">
-                  <option value="">Chọn video đích mới</option>
-                  {% for new_v in retarget_videos|default([]) %}<option value="{{ new_v.id }}">{{ new_v.title }}</option>{% endfor %}
-                </select>
-                <button type="submit" class="btn btn-warning btn-sm mt-1">Lưu video đích</button>
-              </form>
-            </div>
           </td>
         </tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Không có video phù hợp bộ lọc.</td></tr>{% endfor %}
         </tbody>
@@ -354,7 +359,7 @@
       // máy chủ sẽ xét lại bộ lọc trên dữ liệu đã lưu và loại playlist đã gán.
       const newForm = newRow.querySelector('.playlist-course-form');
       if (newForm) {
-        newForm.querySelectorAll('.playlist-course-check').forEach(check =>
+        newForm.querySelectorAll('.playlist-course-check, .video-course-check').forEach(check =>
           check.addEventListener('change', () => updateCoursePicker(newForm)));
         updateCoursePicker(newForm);
       }
@@ -434,7 +439,7 @@
   }
   document.addEventListener('click',event=>{
     const b=event.target.closest('.video-qr-retarget-toggle, .playlist-qr-retarget-toggle');if(!b)return;
-    const row=b.closest('tr.library-target-row');
+    const row=b.closest('.qr-course-actions') || b.closest('tr.library-target-row');
     const form=row?.querySelector(b.matches('.video-qr-retarget-toggle') ? '.video-qr-retarget' : '.playlist-qr-retarget');
     if(!form)return;
     form.hidden=!form.hidden;b.setAttribute('aria-expanded', String(!form.hidden));
@@ -473,7 +478,7 @@
        window.syncPlaylistBulkSelection?.();
         window.syncVideoBulkSelection?.();
         const picker=newRow.querySelector('.playlist-course-form');
-        if(picker)picker.querySelectorAll('.playlist-course-check').forEach(c=>c.addEventListener('change',()=>updateCoursePicker(picker)));
+        if(picker)picker.querySelectorAll('.playlist-course-check, .video-course-check').forEach(c=>c.addEventListener('change',()=>updateCoursePicker(picker)));
         setupQrActions(newRow);
       }
       window.scrollTo(originalX,originalY);
@@ -485,6 +490,7 @@
     }finally{form.dataset.busy='0';}
   });
   document.addEventListener('change', function (event) {
+    if (event.target.matches('.video-course-check')) updateCoursePicker(event.target.closest('.video-course-form'));
     if (event.target.matches('.playlist-qr-course-select')) updatePlaylistQrActions(event.target);
     if (event.target.matches('.video-qr-course-select')) updateVideoQrActions(event.target);
   });
@@ -654,7 +660,7 @@ bulkDownload?.addEventListener('qr-download-complete',resetBulkCourseAfterDownlo
 </script>
 <script>
 function updateCoursePicker(form){
-  const checks=[...form.querySelectorAll('.playlist-course-check')];
+  const checks=[...form.querySelectorAll('.playlist-course-check, .video-course-check')];
   const selected=checks.filter(x=>x.checked);
   const label=form.querySelector('.course-picker-label');
   const summary=form.querySelector('.course-picker-summary');
@@ -666,7 +672,7 @@ function updateCoursePicker(form){
 }
 
 document.querySelectorAll('.playlist-course-form').forEach(form=>{
-  form.querySelectorAll('.playlist-course-check').forEach(check=>check.addEventListener('change',()=>updateCoursePicker(form)));
+  form.querySelectorAll('.playlist-course-check, .video-course-check').forEach(check=>check.addEventListener('change',()=>updateCoursePicker(form)));
   updateCoursePicker(form);
 });
 
