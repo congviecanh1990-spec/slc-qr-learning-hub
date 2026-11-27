@@ -5685,7 +5685,7 @@ def register_routes(app):
         all_research_pairs = ResearchComparisonPair.query.order_by(
             ResearchComparisonPair.created_at.desc(), ResearchComparisonPair.id.desc()).all()
         paired_groups, paired_totals = pair_metrics(all_research_pairs)
-        research_pairs = all_research_pairs[:120]
+        research_pairs = all_research_pairs
         # Trong khi chưa tải/lưu đủ QR, bảng vẫn phải hiện rõ lượt vừa
         # tạo; thời gian tạm tính KHÔNG được dùng trong KPI nghiệm thu.
         observation_now = utcnow()
@@ -5704,6 +5704,40 @@ def register_routes(app):
                     "expected": item.qr_count,
                     "remaining": max(0, item.qr_count - len(confirmed_qrs)),
                 }
+        # B and C use the same snapshot and scope, excluding voided rows.
+        # Keep provisional / self-confirmed observations separate from verified KPI.
+        summary_groups = []
+        for kind, label in RESEARCH_PAIR_KINDS:
+            rows = [p for p in research_pairs if p.active and normalize_kind(p.task_kind) == kind]
+            pending = [p for p in rows if p.id in pending_measurements]
+            finished = [p for p in rows if p.measurement_finished_at is not None
+                        and p.webapp_operations is not None and p.webapp_seconds is not None]
+            observed = [p for p in rows if p.id in pending_measurements or p in finished]
+            manual = [p for p in rows if (p.manual_operations or 0) > 0 and (p.manual_seconds or 0) > 0]
+            valid_groups, _ = pair_metrics(rows)
+            valid = next((g for g in valid_groups if g["key"] == kind), {})
+            matched = [p for p in finished if p.measurement_verified
+                       and p.measurement_save_method == "directory_picker"
+                       and p.measurement_saved_at is not None
+                       and p.qr_count > 0 and video_coverage(p) > 0 and p in manual]
+            summary_groups.append(dict(
+                label=label, web_count=len(observed), qr_count=sum(p.qr_count or 0 for p in observed),
+                pending_count=len(pending), finished_count=len(finished),
+                self_confirmed_count=sum(p.measurement_save_method == "manual_confirmed" for p in finished),
+                verified_count=valid.get("web_count", 0), paired_count=len(matched),
+                manual_ops=sum(p.manual_operations for p in manual) if manual else None,
+                manual_time=sum(p.manual_seconds for p in manual) if manual else None,
+                app_ops=(sum(p.webapp_operations for p in finished) +
+                         sum(pending_measurements[p.id]["operations"] for p in pending)) if observed else None,
+                app_time=(sum(p.webapp_seconds for p in finished) +
+                          sum(pending_measurements[p.id]["seconds"] for p in pending)) if observed else None,
+                matched_qrs=sum(p.qr_count for p in matched),
+                matched_manual_ops=sum(p.manual_operations for p in matched) if matched else None,
+                matched_app_ops=sum(p.webapp_operations for p in matched) if matched else None,
+                matched_manual_time=sum(p.manual_seconds for p in matched) if matched else None,
+                matched_app_time=sum(p.webapp_seconds for p in matched) if matched else None,
+                time_reduction=valid.get("time_reduction"), ops_reduction=valid.get("ops_reduction"),
+            ))
         web_only_pairs = [
             p for p in all_research_pairs if p.active
             and p.measurement_finished_at is not None
@@ -5779,6 +5813,7 @@ def register_routes(app):
             user_confirmed_count=len(user_confirmed_pairs),
             pending_measurements=pending_measurements,
             paired_groups=paired_groups, paired_totals=paired_totals,
+            summary_groups=summary_groups,
             pair_kinds=RESEARCH_PAIR_KINDS, normalize_pair_kind=normalize_kind,
             lecturers_for_research=lecturers_for_research,
             courses_for_research=courses_for_research,
