@@ -187,7 +187,7 @@
             <th rowspan="2" scope="col" class="align-middle text-start">Giảng viên</th>
             <th rowspan="2" scope="col" class="align-middle text-start">Học phần/mô đun</th>
             <th rowspan="2" scope="col" class="align-middle text-start">Loại QR</th>
-            <th rowspan="2" scope="col" class="align-middle text-start">Số lượng</th>
+            <th rowspan="2" scope="col" class="align-middle text-center">Số lượng mã QR</th>
             <th colspan="2" scope="colgroup">Số thao tác</th>
             <th colspan="2" scope="colgroup">Tổng thời gian (giây)</th>
           </tr>
@@ -209,42 +209,12 @@
                 <div class="small text-primary">Đang đo – loại nhiệm vụ chỉ chốt khi tải QR</div>
               {% endif %}
             </td>
-            <td>
-              <strong>{{ p.qr_count }} mã QR</strong>
-              {% if p.id in pending_measurements %}
-                {% set progress = pending_measurements[p.id] %}
-                {% if progress.confirmed > 0 %}
-                  <div class="small text-primary fw-semibold">Đã xác nhận lưu {{ progress.confirmed }}/{{ progress.expected }} mã QR;
-                    còn {{ progress.remaining }} mã chưa xác nhận.</div>
-                  <div class="small text-muted">Lượt đo chỉ chốt khi tất cả mã QR mới được xác nhận lưu.</div>
-                {% elif p.measurement_download_style %}
-                  <div class="small text-primary">Đã ghi nhận yêu cầu tải QR; chờ giảng viên xác nhận đã lưu tệp</div>
-                {% else %}
-                  <div class="small text-primary">Đã ghi nhận tạo QR; chờ tải và lưu tệp</div>
-                {% endif %}
-              {% endif %}
-              {% if p.video_count %}<div class="small text-muted">{{ p.video_count }} video lẻ</div>{% endif %}
-              {% if p.playlist_count %}
-                <div class="small text-muted">{{ p.playlist_count }} playlist ({{ p.playlist_video_count }} video trong playlist)</div>
-              {% endif %}
-            </td>
+            <td class="text-center">{{ p.qr_count }}</td>
             <td class="text-center text-nowrap">{{ p.manual_operations if (p.manual_operations or 0) > 0 else '—' }}</td>
             <td class="text-center text-nowrap">
-              {% if p.webapp_operations is not none %}
-                {{ p.webapp_operations }}
-              {% elif p.id in pending_measurements %}
-                {{ pending_measurements[p.id].operations }}
-                <div class="small text-muted">Tạm tính – đang đo</div>
+              {% if p.webapp_operations is not none %}{{ p.webapp_operations }}
+              {% elif p.id in pending_measurements %}{{ pending_measurements[p.id].operations }}
               {% else %}—{% endif %}
-              {% if p.measurement_verified and not p.is_paired %}
-                <div class="small text-warning-emphasis">Chờ nhập thủ công</div>
-              {% elif p.measurement_save_method == 'manual_confirmed' and p.webapp_operations is not none %}
-                <div class="small text-warning-emphasis">Đã chốt theo xác nhận giảng viên; chưa được hệ thống kiểm chứng lưu tệp</div>
-              {% elif p.measurement_start_source == 'server_fallback' %}
-                <div class="small text-warning-emphasis">Mốc bắt đầu dự phòng; cần đo lại từ đầu để tính KPI</div>
-              {% elif p.webapp_operations is not none and not p.measurement_verified %}
-                <div class="small text-muted">Chưa xác minh lưu tệp</div>
-              {% endif %}
             </td>
             <td class="text-center text-nowrap">{{ '%.2f'|format(p.manual_seconds) if (p.manual_seconds or 0) > 0 else '—' }}</td>
             <td class="text-center text-nowrap">
