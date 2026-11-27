@@ -129,55 +129,76 @@
       </div>
     </form>
 
-    <h5 class="mb-2">B. Kết quả đối chứng theo từng loại học liệu</h5>
+    <h5 class="mb-2">B. Tổng hợp kết quả đối chứng theo loại nhiệm vụ tạo mã QR</h5>
+    <p class="small text-muted mb-2">Tự động tổng hợp các lượt còn hiệu lực từ cùng nguồn dữ liệu của mục C, kể cả lượt đang đo hoặc đã chốt theo xác nhận của giảng viên. Dấu — biểu thị chưa có dữ liệu.</p>
     {% if pending_measurements %}
-    <p class="small text-primary mb-2">
-      <strong>{{ pending_measurements|length }} lượt Web App đang thực hiện.</strong>
-      Số QR đã tạo được hiển thị ngay trong bảng C; số thao tác và thời gian đang chạy chỉ là tạm tính.
-      Sau khi tải PNG/ZIP trên trình duyệt, giảng viên nhấn “Tôi đã lưu đủ tệp QR” ở Kho học liệu để chốt
-      lượt đo theo xác nhận cá nhân. Dữ liệu này chưa được tính vào tỷ lệ nghiệm thu đã kiểm chứng độc lập.
-    </p>
+    <p class="small text-primary mb-2"><strong>{{ pending_measurements|length }} lượt Web App đang thực hiện.</strong> Tổng thao tác và thời gian có bao gồm số liệu tạm tính tại thời điểm mở trang; chưa dùng để tính tỷ lệ cải thiện.</p>
     {% endif %}
     <div class="table-responsive mb-3">
       <table class="table table-bordered table-sm align-middle">
         <thead class="table-light"><tr>
-          <th>Loại nhiệm vụ</th><th>Lượt Web App / Cặp đối chứng</th><th>Số QR</th><th>Video học liệu</th>
-          <th>Thủ công (giây/video)</th><th>Web App (giây/video)</th>
-          <th>Thao tác/QR (thủ công → Web App)</th>
-          <th>Giảm thời gian</th><th>Giảm thao tác</th>
+          <th scope="col">Chỉ tiêu đánh giá</th>
+          {% for g in summary_groups %}
+            <th scope="col" class="text-center">{{ 'Tạo QR riêng lẻ' if loop.first else 'Tạo QR hàng loạt' }}</th>
+          {% endfor %}
         </tr></thead>
         <tbody>
-        {% for g in paired_groups %}
-          <tr>
-            <td>{{ g.label }}</td>
-            <td>{{ g.web_count }} lượt Web App / {{ g.n }} cặp đủ đối chứng</td>
-            <td>{{ g.qr_count }}</td><td>{{ g.video_coverage }}</td>
-            <td>{{ '%.2f'|format(g.manual_per_video) if g.manual_per_video is not none else '—' }}</td>
-            <td>{{ '%.2f'|format(g.app_per_video) }}</td>
-            <td>{{ '%.2f'|format(g.manual_ops_per_qr) if g.manual_ops_per_qr is not none else '—' }} → {{ '%.2f'|format(g.app_ops_per_qr) }}</td>
-            <td>{{ (g.time_reduction|string) ~ '%' if g.time_reduction is not none else '—' }}</td>
-            <td>{{ (g.ops_reduction|string) ~ '%' if g.ops_reduction is not none else '—' }}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="9" class="text-center text-muted">Chưa có lượt đo Web App đã xác minh. Dữ liệu Web App sẽ tự hiển thị sau khi tạo và lưu QR.</td></tr>
+        {% for key, label, is_time in [
+          ('web_count', 'Số lượt đo Web App', false),
+          ('qr_count', 'Số lượng mã QR', false),
+          ('pending_count', 'Số lượt đang đo', false),
+          ('finished_count', 'Số lượt đã hoàn thành', false),
+          ('self_confirmed_count', 'Số lượt chốt theo xác nhận giảng viên', false),
+          ('verified_count', 'Số lượt đã xác minh độc lập', false),
+          ('manual_ops', 'Tổng số thao tác thủ công', false),
+          ('app_ops', 'Tổng số thao tác Web App', false),
+          ('manual_time', 'Tổng thời gian thủ công (giây)', true),
+          ('app_time', 'Tổng thời gian Web App (giây)', true)
+        ] %}
+          <tr><th scope="row" class="fw-normal">{{ label }}</th>
+          {% for g in summary_groups %}
+            <td class="text-center">
+              {% if g[key] is none %}—
+              {% elif is_time %}{{ '%.2f'|format(g[key]) }}
+              {% else %}{{ g[key] }}{% endif %}
+              {% if key in ('app_ops', 'app_time') and g.pending_count %}<span class="small text-muted">(tạm tính)</span>{% endif %}
+            </td>
+          {% endfor %}</tr>
+        {% endfor %}
+          <tr class="table-light"><th colspan="3">So sánh trên cùng tập cặp đối chứng hợp lệ, đã xác minh độc lập</th></tr>
+        {% for key, label, fmt in [
+          ('paired_count', 'Số cặp đủ đối chứng', 'int'),
+          ('matched_qrs', 'Số lượng mã QR được đối chứng', 'int'),
+          ('matched_manual_ops', 'Số thao tác thủ công (cặp hợp lệ)', 'int'),
+          ('matched_app_ops', 'Số thao tác Web App (cặp hợp lệ)', 'int'),
+          ('matched_manual_time', 'Thời gian thủ công (giây, cặp hợp lệ)', 'time'),
+          ('matched_app_time', 'Thời gian Web App (giây, cặp hợp lệ)', 'time'),
+          ('ops_reduction', 'Tỷ lệ giảm thao tác (%)', 'percent'),
+          ('time_reduction', 'Tỷ lệ giảm thời gian (%)', 'percent')
+        ] %}
+          <tr><th scope="row" class="{{ 'fw-bold' if fmt == 'percent' else 'fw-normal' }}">{{ label }}</th>
+          {% for g in summary_groups %}
+            <td class="text-center {{ 'fw-bold' if fmt == 'percent' else '' }}">
+              {% if g[key] is none %}—
+              {% elif fmt == 'time' %}{{ '%.2f'|format(g[key]) }}
+              {% elif fmt == 'percent' %}{{ '%.1f'|format(g[key]) }}%
+              {% else %}{{ g[key] }}{% endif %}
+            </td>
+          {% endfor %}</tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
-    <p class="small mb-4"><strong>Lượt Web App đã xác minh:</strong> {{ paired_totals.web_count }};
-      <strong>chờ nhập đối chứng thủ công:</strong> {{ paired_totals.pending_manual }};
-      <strong>đã chốt theo xác nhận của giảng viên (chưa xác minh độc lập):</strong> {{ user_confirmed_count }} lượt.
-      Chỉ tính tỷ lệ cải thiện từ những cặp đã có đủ hai kết quả.<br>
-      <strong>Tổng số cặp hoàn chỉnh:</strong> {{ paired_totals.paired_count }};
+    <p class="small mb-4"><strong>Tổng số cặp đối chứng hợp lệ:</strong> {{ paired_totals.paired_count }};
       <strong>tổng QR được đối chứng:</strong> {{ paired_totals.qr_count }};
       <strong>tổng video học liệu:</strong> {{ paired_totals.video_coverage }}.
       {% if paired_totals.time_reduction is not none %}
-      Mức giảm thời gian gộp các cặp đã hoàn thành: <strong>{{ paired_totals.time_reduction }}%</strong>;
+      Mức giảm thời gian gộp: <strong>{{ paired_totals.time_reduction }}%</strong>;
       giảm thao tác: <strong>{{ paired_totals.ops_reduction }}%</strong>.
-      Đây là tổng thời gian/thao tác trên đúng các cặp đo, không phải trung bình chênh lệch giữa các giảng viên.
       {% else %}
-      Chưa đủ cặp đo để tính mức giảm chung.
+      Chưa đủ cặp đối chứng hợp lệ để tính mức giảm chung.
       {% endif %}
+      <br>Chỉ tính tỷ lệ trên cùng tập cặp đủ hai phương pháp và đã xác minh độc lập. Lượt tự xác nhận lưu tệp vẫn được tổng hợp ở phần thực hiện, không tự động đưa vào KPI nghiệm thu.
     </p>
     <h5 class="mb-2" id="cap-do-chi-tiet">C. Nhật ký đối chứng theo giảng viên và học phần</h5>
     <div class="table-responsive">
