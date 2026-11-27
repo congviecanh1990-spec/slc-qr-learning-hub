@@ -7,11 +7,11 @@
 (() => {
   'use strict';
   const api=window.researchMeasurement;
-  if(!api || !document.getElementById('videos'))return;
+  if(!api || (!document.getElementById('videos') && !document.getElementById('qr-course-filter')))return;
   const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';
   const status=document.getElementById('researchQrStatus');
   let active=null,ops=0,lastSent=-1,preflight=null,confirming=false;
-  const pendingKey='slc-qr-pending-confirmations-v2';
+  const pendingKey='slc-qr-pending-confirmations-v3';
   function readPending(){
     try{
       const list=JSON.parse(sessionStorage.getItem(pendingKey)||'[]');
@@ -68,6 +68,9 @@
     let confirmedRequests=0,failedMessage='',lastResult=null;
     for(const item of [...pendingDownloads]){
       const result=await recordDownload(item.style,item.ids,'manual_confirmed',true);
+      if(!result?.measured && result?.matched===0){
+        pendingDownloads=pendingDownloads.filter(x=>x.key!==item.key);persistPending();continue;
+      }
       if(!result?.measured){
         failedMessage=result?.message||'Lượt tải chưa khớp với phiên tạo QR mới.';
         break;
@@ -111,6 +114,11 @@
     }
   });
 
+  document.addEventListener('submit',event=>{
+    if(event.target.matches('form[action$="/qr/delete-all"]') && !event.defaultPrevented){
+      pendingDownloads=[];persistPending();
+    }
+  });
   const sessionKey=()=>active?'slc-qr-ops:'+active.id+':'+active.nonce:'';
   const labels={
     QR_TUNG_VIDEO_PLAYLIST:'Tạo QR cho từng video hoặc playlist',
@@ -255,13 +263,14 @@
     if(active && !event.target.closest('.research-qr-confirm-button') &&
        event.target.closest('main button,main a,main input[type="checkbox"]'))
       addOperation();
-    const rowLink=event.target.closest('a.playlist-qr-download,a.video-qr-download');
+    const rowLink=event.target.closest('a.playlist-qr-download,a.video-qr-download,a.qr-save-picker');
     // Tải PNG thành công qua HTTP chưa chứng minh người dùng đã lưu file.
     // Ghi nhận lượt tải rồi đề nghị chính GV xác nhận đã lưu vào máy.
     if(rowLink && rowLink.href && rowLink.getAttribute('href')!=='#'){
       const match=new URL(rowLink.href,location.href).pathname.match(/\/qr\/(\d+)\/png$/);
       if(match){
         const ids=[Number(match[1])];
+        if(rowLink.matches('.qr-save-picker') && typeof window.showSaveFilePicker==='function' && window.isSecureContext)return;
         recordDownload('row',ids,'not_verified').then(result=>{
           if(result?.matched>0)queuePending('row',ids);
           else{
@@ -313,10 +322,10 @@
     }
   }
   document.addEventListener('qr-download-complete',event=>{
-    const a=event.target.closest('a.playlist-qr-download,a.video-qr-download');
+    const a=event.target.closest('a.playlist-qr-download,a.video-qr-download,a.qr-save-picker');
     if(!a)return;
     const match=new URL(a.href,location.href).pathname.match(/\/qr\/(\d+)\/png$/);
-    if(match)recordDownload('row',[Number(match[1])],'directory_picker');
+    if(match)recordDownload('row',[Number(match[1])],'directory_picker').then(result=>{if(result?.measured){idleConfirmationMessage='Đã lưu QR vào máy. '+(result.completed?'Đã chốt lượt đo.':'Còn '+result.remaining+' mã chưa lưu.');showPendingConfirmation();}});
   });
 
   async function downloadAll(form,endpoint){
