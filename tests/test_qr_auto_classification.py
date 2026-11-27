@@ -198,3 +198,252 @@ def test_playlist_bulk_download_returns_only_selected_qrs_not_entire_course(conf
             headers={"Accept":"application/json"})
         assert excluded.status_code == 200
         assert {row["id"] for row in excluded.json["files"]} == {qr_ids[0],qr_ids[2]}
+
+
+def test_zip_mixed_old_qrs_manual_confirmation_finishes_only_new_qrs(configured_app):
+    """ZIP tải nhiều môn có QR cũ: không mắc kẹt ở trạng thái tạm tính."""
+    from models import db, User, Course, QrCode, ResearchComparisonPair
+    from research_comparison import pair_metrics
+    app, keys, _ = configured_app
+    pid, created = prepare_pairs(
+        app, keys, "QR_VIDEO_HANG_LOAT", video_count=2, playlist_count=0)
+    with app.app_context():
+        teacher = db.session.get(User, keys["teacher"])
+        other_course = Course(name="Toán rời rạc", code="EXTRA-DOWNLOAD",
+                              owner_id=teacher.id)
+        db.session.add(other_course)
+        db.session.flush()
+        old_qr = QrCode(owner_id=teacher.id, course_id=other_course.id,
+                        title="QR có sẵn môn khác", slug="old-other-course-qr",
+                        target_type="video")
+        db.session.add(old_qr); db.session.commit()
+        all_ids = [*created, old_qr.id]
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+            ss["research_measurement_id"] = pid
+        pending = client.post("/research/auto/download-saved", data={
+            "download_style": "bulk", "qr_ids": json.dumps(all_ids),
+            "save_method": "not_verified", "operations_count": "7"})
+        assert pending.status_code == 200
+        assert pending.json["matched"] == 2
+        assert pending.json["downloaded"] == 3
+        assert pending.json["measured"] is False
+        with app.app_context():
+            p = db.session.get(ResearchComparisonPair, pid)
+            assert p.measurement_finished_at is None
+            assert p.measurement_operations == 7
+            assert p.measurement_download_style == "bulk"
+            assert p.measurement_verified is False
+
+        confirmed = client.post("/research/auto/download-saved", data={
+            "download_style": "bulk", "qr_ids": json.dumps(all_ids),
+            "save_method": "manual_confirmed", "user_confirmed": "yes",
+            "operations_count": "9"})
+        assert confirmed.status_code == 200
+        assert confirmed.json["measured"] is True
+        assert confirmed.json["completed"] is True
+        assert confirmed.json["verified"] is False
+        assert confirmed.json["saved"] == 2
+        assert confirmed.json["expected"] == 2
+        with app.app_context():
+            p = db.session.get(ResearchComparisonPair, pid)
+            assert json.loads(p.measurement_saved_qr_ids) == created
+            assert p.webapp_operations == 9 and p.webapp_seconds > 0
+            assert p.measurement_finished_at is not None
+            assert p.measurement_save_method == "manual_confirmed"
+            assert not p.measurement_verified
+            assert pair_metrics([p])[1]["web_count"] == 0
+            teacher = db.session.get(User, keys["teacher"])
+            teacher.role = "admin"
+            db.session.commit()
+        report = client.get("/research")
+        assert report.status_code == 200
+        content = report.get_data(as_text=True)
+        assert "Đã chốt theo xác nhận giảng viên" in content
+        assert "chưa xác minh độc lập" in content
+        assert "1 lượt" in content
+        assert "Tạm tính – đang đo" not in content
+
+
+def test_qr_download_measurement_reopens_only_unique_owned_pending_pair(configured_app):
+    """Phiên tạo QR bị mất khỏi session vẫn được nối lại nếu khớp duy nhất."""
+    from models import db, ResearchComparisonPair, User, QrCode
+    app, keys, _ = configured_app
+    pid, created = prepare_pairs(
+        app, keys, "QR_TUNG_VIDEO_PLAYLIST", video_count=1, playlist_count=0)
+    with app.test_client() as client:
+        with client.session_transaction() as ss: ss["user_id"] = keys["teacher"]
+        restored = client.post("/research/auto/download-saved", data={
+            "download_style": "row", "qr_ids": json.dumps(created),
+            "save_method": "not_verified", "operations_count": "2"})
+        assert restored.status_code == 200
+        assert restored.json["matched"] == 1
+        with client.session_transaction() as ss:
+            assert ss["research_measurement_id"] == pid
+        saved = client.post("/research/auto/download-saved", data={
+            "download_style": "row", "qr_ids": json.dumps(created),
+            "save_method": "manual_confirmed", "user_confirmed": "yes",
+            "operations_count": "3"})
+        assert saved.json["completed"] is True
+        assert saved.json["verified"] is False
+        with app.app_context():
+            assert db.session.get(ResearchComparisonPair, pid).webapp_operations == 3
+
+
+def test_browser_download_requires_explicit_save_confirmation():
+    """Không tự khẳng định đã lưu khi Chrome chỉ bắt đầu tải tệp."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "static/research_measurement.js").read_text(encoding="utf-8")
+    assert "function confirmPendingDownloads()" in script
+    assert "manual_confirmed',true" in script
+    assert "await recordDownload(style,ids,'not_verified')" in script
+    assert "queuePending(style,ids)" in script
+    assert "sessionStorage.setItem(pendingKey" in script
+    assert "measurement_verified" not in script
+    report = (root / "templates/research.html").read_text(encoding="utf-8")
+    assert "Đã ghi nhận yêu cầu tải QR; chờ giảng viên xác nhận đã lưu tệp" in report
+
+
+def test_download_confirmation_controls_are_always_visible_in_both_lists(configured_app):
+    """Giảng viên thấy sẵn nút tại playlist và video, không phụ thuộc tải QR."""
+    from bs4 import BeautifulSoup
+    from pathlib import Path
+    app, keys, _ = configured_app
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+        page = client.get("/videos")
+        assert page.status_code == 200
+        soup = BeautifulSoup(page.get_data(as_text=True), "html.parser")
+        controls = soup.select(".research-qr-confirmation")
+        assert len(controls) == 2
+        assert {p["data-qr-confirm-location"] for p in controls} == {"video", "playlist"}
+        for panel in controls:
+            button=panel.select_one(".research-qr-confirm-button")
+            assert button is not None
+            assert button.get_text(strip=True) == "Tôi đã lưu đủ tệp QR"
+            assert button.has_attr("disabled")
+            assert panel.select_one(".research-qr-confirm-state") is not None
+        assert soup.select('script[src*="research_measurement.js?v=confirm-progress-20261127"]')
+        for panel in controls:
+            content=panel.select_one('.research-qr-confirm-message')
+            actions=panel.select_one('.research-qr-confirm-actions')
+            assert content is not None and actions is not None
+            assert content.select_one('.research-qr-confirm-state') is not None
+            emphasis=content.select_one('.research-qr-confirm-emphasis')
+            assert emphasis is not None
+            assert emphasis.has_attr("hidden")
+            assert "Nhấn xác nhận để chốt lượt đo" in emphasis.get_text()
+            assert "fs-6" in content.select_one('.research-qr-confirm-state').parent.get('class',[])
+            assert "ms-auto" in actions.get('class',[])
+            assert len(actions.select('button')) == 2
+    script = (Path(__file__).resolve().parents[1] / "static/research_measurement.js").read_text(encoding="utf-8")
+    assert "document.querySelectorAll('.research-qr-confirmation')" in script
+    assert "button.disabled=confirming||pendingDownloads.length===0" in script
+    assert "cancel.hidden=pendingDownloads.length===0" in script
+    assert "queuePending('row',ids)" in script
+    assert "queuePending(style,ids)" in script
+    assert "async function confirmPendingDownloads()" in script
+    assert "function cancelPendingDownloads()" in script
+    assert "status.append(confirm,cancel)" not in script
+
+
+def test_partial_four_of_thirty_qrs_must_show_progress_and_wait_for_remaining(configured_app):
+    """Xác nhận 4/30 không được báo chốt, nhưng phải hiện 4/30 ở nghiệm thu.
+
+    Tải tiếp 26 QR còn thiếu và xác nhận đủ mới được chốt thời gian/thao tác.
+    """
+    from models import db, User, ResearchComparisonPair
+    app, keys, _ = configured_app
+    pid, qrs = prepare_pairs(
+        app, keys, "QR_VIDEO_HANG_LOAT", video_count=6, playlist_count=24
+    )
+    with app.test_client() as client:
+        with client.session_transaction() as ss:
+            ss["user_id"] = keys["teacher"]
+            ss["research_measurement_id"] = pid
+        response = client.post("/research/auto/download-saved", data={
+            "download_style": "bulk",
+            "qr_ids": json.dumps(qrs[:4]),
+            "save_method": "not_verified",
+            "operations_count": "139",
+        })
+        assert response.status_code == 200
+        assert response.json["matched"] == 4
+        confirmed = client.post("/research/auto/download-saved", data={
+            "download_style": "bulk",
+            "qr_ids": json.dumps(qrs[:4]),
+            "save_method": "manual_confirmed",
+            "user_confirmed": "yes",
+            "operations_count": "140",
+        })
+        assert confirmed.status_code == 200
+        assert confirmed.json["measured"] is True
+        assert confirmed.json["saved"] == 4
+        assert confirmed.json["expected"] == 30
+        assert confirmed.json["remaining"] == 26
+        assert confirmed.json["completed"] is False
+        status = client.get("/research/auto/status")
+        assert status.status_code == 200
+        assert status.json["active"] is True
+        assert status.json["saved"] == 4
+        assert status.json["remaining"] == 26
+        with app.app_context():
+            pair = db.session.get(ResearchComparisonPair, pid)
+            assert pair.measurement_finished_at is None
+            assert pair.webapp_seconds is None
+            assert pair.webapp_operations is None
+            assert set(json.loads(pair.measurement_saved_qr_ids)) == set(qrs[:4])
+            teacher = db.session.get(User, keys["teacher"])
+            teacher.role = "admin"
+            db.session.commit()
+        report = client.get("/research")
+        assert report.status_code == 200
+        html = report.get_data(as_text=True)
+        assert "Đã xác nhận lưu 4/30 mã QR;" in html
+        assert "còn 26 mã chưa xác nhận" in html
+        assert "Tạm tính – đang đo" in html
+        assert "Đã chốt theo xác nhận giảng viên" not in html
+
+        client.post("/research/auto/download-saved", data={
+            "download_style": "bulk",
+            "qr_ids": json.dumps(qrs[4:]),
+            "save_method": "not_verified",
+            "operations_count": "141",
+        })
+        final = client.post("/research/auto/download-saved", data={
+            "download_style": "bulk",
+            "qr_ids": json.dumps(qrs[4:]),
+            "save_method": "manual_confirmed",
+            "user_confirmed": "yes",
+            "operations_count": "142",
+        })
+        assert final.status_code == 200
+        assert final.json["measured"] is True
+        assert final.json["saved"] == 30
+        assert final.json["expected"] == 30
+        assert final.json["remaining"] == 0
+        assert final.json["completed"] is True
+        assert final.json["verified"] is False
+        with app.app_context():
+            pair = db.session.get(ResearchComparisonPair, pid)
+            assert pair.measurement_finished_at is not None
+            assert pair.webapp_operations >= 142
+            assert pair.webapp_seconds > 0
+        report = client.get("/research").get_data(as_text=True)
+        assert "Đã chốt theo xác nhận giảng viên" in report
+
+
+def test_partial_confirmation_client_never_claims_measurement_done_early():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "static/research_measurement.js").read_text(encoding="utf-8")
+    assert "if(lastResult.completed){" in script
+    assert "lastResult.remaining" in script
+    assert "data.saved>0 && !pendingDownloads.length" in script
+    assert "data.remaining" in script
+    assert "emphasis.hidden=pendingDownloads.length===0" in script
+    assert "Đã ghi nhận yêu cầu tải " in script
+    assert "Thời gian và thao tác vẫn tạm tính." in script
