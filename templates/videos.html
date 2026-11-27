@@ -103,12 +103,19 @@
     <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">{{ 'Các playlist tìm được đang được chọn.' if playlist_search else 'Chưa chọn playlist nào.' }}</div>
   </form>
 
-  <div class="research-qr-confirmation border rounded bg-light p-2 mb-3 d-flex align-items-center flex-wrap gap-2"
+  <div class="research-qr-confirmation border rounded bg-light p-3 mb-3 d-flex align-items-center flex-wrap gap-3"
        data-qr-confirm-location="playlist" aria-label="Xác nhận lưu mã QR">
-    <strong class="small">Xác nhận lưu mã QR:</strong>
-    <button type="button" class="btn btn-success btn-sm research-qr-confirm-button" disabled>Tôi đã lưu đủ tệp QR</button>
-    <button type="button" class="btn btn-outline-secondary btn-sm research-qr-confirm-cancel" hidden>Chưa lưu / Hủy xác nhận</button>
-    <span class="small text-muted research-qr-confirm-state" aria-live="polite">Chưa có lượt tải QR mới cần xác nhận. Nút sẽ bật sau khi tải mã thuộc lượt đo.</span>
+    <div class="research-qr-confirm-message flex-grow-1" style="min-width:260px; flex-basis:420px">
+      <div class="fw-semibold mb-1">Xác nhận lưu mã QR</div>
+      <div class="fs-6 lh-base" aria-live="polite">
+        <span class="research-qr-confirm-state text-muted">Chưa có lượt tải QR mới cần xác nhận. Nút sẽ bật sau khi tải mã thuộc lượt đo.</span>
+        <strong class="research-qr-confirm-emphasis text-primary" hidden> Nhấn xác nhận để chốt lượt đo.</strong>
+      </div>
+    </div>
+    <div class="research-qr-confirm-actions d-flex align-items-center flex-wrap gap-2 ms-auto">
+      <button type="button" class="btn btn-success research-qr-confirm-button" disabled>Tôi đã lưu đủ tệp QR</button>
+      <button type="button" class="btn btn-outline-secondary research-qr-confirm-cancel" hidden>Chưa lưu / Hủy xác nhận</button>
+    </div>
   </div>
 
   <div class="table-responsive playlist-table-wrap">
@@ -205,12 +212,19 @@
     <div class="small fw-semibold text-primary mt-1 mb-2" id="videoBulkSelectedSummary" aria-live="polite">Chưa chọn video nào.</div>
   </form>
 
-  <div class="research-qr-confirmation border rounded bg-light p-2 mb-3 d-flex align-items-center flex-wrap gap-2"
+  <div class="research-qr-confirmation border rounded bg-light p-3 mb-3 d-flex align-items-center flex-wrap gap-3"
        data-qr-confirm-location="video" aria-label="Xác nhận lưu mã QR">
-    <strong class="small">Xác nhận lưu mã QR:</strong>
-    <button type="button" class="btn btn-success btn-sm research-qr-confirm-button" disabled>Tôi đã lưu đủ tệp QR</button>
-    <button type="button" class="btn btn-outline-secondary btn-sm research-qr-confirm-cancel" hidden>Chưa lưu / Hủy xác nhận</button>
-    <span class="small text-muted research-qr-confirm-state" aria-live="polite">Chưa có lượt tải QR mới cần xác nhận. Nút sẽ bật sau khi tải mã thuộc lượt đo.</span>
+    <div class="research-qr-confirm-message flex-grow-1" style="min-width:260px; flex-basis:420px">
+      <div class="fw-semibold mb-1">Xác nhận lưu mã QR</div>
+      <div class="fs-6 lh-base" aria-live="polite">
+        <span class="research-qr-confirm-state text-muted">Chưa có lượt tải QR mới cần xác nhận. Nút sẽ bật sau khi tải mã thuộc lượt đo.</span>
+        <strong class="research-qr-confirm-emphasis text-primary" hidden> Nhấn xác nhận để chốt lượt đo.</strong>
+      </div>
+    </div>
+    <div class="research-qr-confirm-actions d-flex align-items-center flex-wrap gap-2 ms-auto">
+      <button type="button" class="btn btn-success research-qr-confirm-button" disabled>Tôi đã lưu đủ tệp QR</button>
+      <button type="button" class="btn btn-outline-secondary research-qr-confirm-cancel" hidden>Chưa lưu / Hủy xác nhận</button>
+    </div>
   </div>
 
     <div class="table-responsive">
