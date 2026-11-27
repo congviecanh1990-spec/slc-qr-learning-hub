@@ -212,8 +212,13 @@
             <td>
               <strong>{{ p.qr_count }} mã QR</strong>
               {% if p.id in pending_measurements %}
-                {% if p.measurement_download_style %}
-                  <div class="small text-primary">Đã ghi nhận tải QR; chờ giảng viên xác nhận đã lưu tệp</div>
+                {% set progress = pending_measurements[p.id] %}
+                {% if progress.confirmed > 0 %}
+                  <div class="small text-primary fw-semibold">Đã xác nhận lưu {{ progress.confirmed }}/{{ progress.expected }} mã QR;
+                    còn {{ progress.remaining }} mã chưa xác nhận.</div>
+                  <div class="small text-muted">Lượt đo chỉ chốt khi tất cả mã QR mới được xác nhận lưu.</div>
+                {% elif p.measurement_download_style %}
+                  <div class="small text-primary">Đã ghi nhận yêu cầu tải QR; chờ giảng viên xác nhận đã lưu tệp</div>
                 {% else %}
                   <div class="small text-primary">Đã ghi nhận tạo QR; chờ tải và lưu tệp</div>
                 {% endif %}
