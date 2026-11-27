@@ -542,7 +542,8 @@ class ResearchComparisonPair(db.Model):
 
     @property
     def is_paired(self):
-        return (self.active and self.measurement_verified and
+        from research_comparison import accepted_webapp_measurement
+        return (accepted_webapp_measurement(self) and
                 self.webapp_operations is not None and self.webapp_seconds is not None
                 and self.manual_operations is not None and self.manual_seconds is not None
                 and self.manual_operations > 0 and self.manual_seconds > 0)
