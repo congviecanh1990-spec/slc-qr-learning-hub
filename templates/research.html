@@ -203,6 +203,14 @@
               {% if p.webapp_operations is not none %}{{ p.webapp_operations }}
               {% elif p.id in pending_measurements %}{{ pending_measurements[p.id].operations }}
               {% else %}—{% endif %}
+              {% if action_logs.get(p.id) %}
+              <details class="small text-start text-wrap mt-1">
+                <summary>Chi tiết thao tác</summary>
+                <ol class="ps-3 mb-0">
+                {% for item in action_logs[p.id] %}<li>{{ item.label }} <span class="text-muted">(+{{ '%.2f'|format((item.at-action_logs[p.id][0].at)/1000) }} giây)</span></li>{% endfor %}
+                </ol>
+              </details>
+              {% endif %}
             </td>
             <td class="text-center text-nowrap">{{ '%.2f'|format(p.manual_seconds) if (p.manual_seconds or 0) > 0 else '—' }}</td>
             <td class="text-center text-nowrap">
