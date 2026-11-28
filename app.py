@@ -1049,6 +1049,7 @@ def ensure_research_comparison_schema():
         "measurement_verified": "BOOLEAN NOT NULL DEFAULT FALSE",
         "measurement_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_saved_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
+        "measurement_pending_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_download_style": "VARCHAR(20)",
         "auto_discovered": "BOOLEAN NOT NULL DEFAULT FALSE",
         "measurement_save_method": "VARCHAR(32)",
@@ -1095,6 +1096,14 @@ def research_saved_qr_ids(pair):
         return [int(v) for v in values if isinstance(v, int) and v > 0] if isinstance(values, list) else []
     except (ValueError, TypeError):
         return []
+
+
+def research_pending_qr_ids(pair):
+    try:
+        values = json.loads(pair.measurement_pending_qr_ids or "[]")
+        return {v for v in values if type(v) is int and v > 0} if isinstance(values, list) else set()
+    except (ValueError, TypeError):
+        return set()
 
 
 def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
@@ -4417,6 +4426,8 @@ def register_routes(app):
         if selected is not None:
             qry = qry.filter(QrCode.course_id == selected if selected > 0 else QrCode.course_id.is_(None))
         qrs = qry.order_by(QrCode.course_id, QrCode.created_at, QrCode.id).all()
+        if request.headers.get("Accept") == "application/json":
+            return jsonify({"ok": True, "files": [{"id": q.id} for q in qrs]})
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -5926,7 +5937,38 @@ def register_routes(app):
         user = current_user()
         # Quản trị viên kiêm giảng viên vẫn được đo QR của học phần mình sở hữu.
         ensure_research_comparison_schema()
-        return jsonify(research_auto_status_payload(active_research_measurement(user.id)))
+        payload = research_auto_status_payload(active_research_measurement(user.id))
+        payload["pending"] = research_pending_payload(user)
+        return jsonify(payload)
+
+    def research_pending_payload(user):
+        pairs = ResearchComparisonPair.query.filter_by(
+            lecturer_id=user.id, active=True, measurement_finished_at=None
+        ).filter(ResearchComparisonPair.measurement_started_at.isnot(None)).all()
+        active_ids = {q.id: q.course_id for q in QrCode.query.filter(
+            managed_qr_scope(user.id), QrCode.active.is_(True)).all()}
+        pending = {"bulk": set(), "row": set()}
+        for pair in pairs:
+            style = pair.measurement_download_style
+            if style not in pending:
+                continue
+            ids = research_pending_qr_ids(pair) & set(research_created_qr_ids(pair))
+            ids -= set(research_saved_qr_ids(pair))
+            pending[style].update(i for i in ids if i in active_ids and active_ids[i] == pair.course_id)
+        bulk = sorted(pending["bulk"])
+        items = [{"style": "bulk", "ids": bulk[i:i+1000]} for i in range(0, len(bulk), 1000)]
+        items.extend({"style": "row", "ids": [i]} for i in sorted(pending["row"] - pending["bulk"]))
+        return items
+
+    @app.post("/research/auto/cancel-pending")
+    @login_required
+    def research_auto_cancel_pending():
+        user = current_user()
+        ResearchComparisonPair.query.filter_by(
+            lecturer_id=user.id, active=True, measurement_finished_at=None
+        ).update({ResearchComparisonPair.measurement_pending_qr_ids: "[]"}, synchronize_session=False)
+        db.session.commit()
+        return jsonify({"ok": True, "pending": []})
 
     @app.post("/research/auto/start")
     @login_required
@@ -5999,6 +6041,7 @@ def register_routes(app):
             pair.measurement_bulk_videos = 0
             pair.measurement_qr_ids = "[]"
             pair.measurement_saved_qr_ids = "[]"
+            pair.measurement_pending_qr_ids = "[]"
             pair.measurement_download_style = None
             pair.measurement_verified = False
             db.session.commit()
@@ -6055,24 +6098,24 @@ def register_routes(app):
         # sau khi kiểm tra quyền của TOÀN BỘ danh sách được gửi.
         qr_map = {q.id: q for q in QrCode.query.filter(
             QrCode.id.in_(posted), QrCode.active.is_(True)).all()}
-        if len(qr_map) != len(posted):
-            return jsonify({
-                "ok": True, "measured": False, "matched": 0 if not qr_map else None,
-                "message": "Danh sách tải chứa QR không tồn tại hoặc đã ngừng hoạt động."
-            })
-        if not all(qr_managed_by_user(qr_map[qid], user) for qid in posted):
+        if not qr_map:
+            return jsonify({"ok": True, "measured": False, "matched": 0,
+                            "message": "Không còn mã QR hoạt động trong lượt tải."})
+        if not all(qr_managed_by_user(qr, user) for qr in qr_map.values()):
             abort(403)
         candidates = ResearchComparisonPair.query.filter(
             ResearchComparisonPair.lecturer_id == user.id,
             ResearchComparisonPair.active.is_(True),
             ResearchComparisonPair.measurement_started_at.isnot(None),
             ResearchComparisonPair.measurement_finished_at.is_(None),
-        ).order_by(ResearchComparisonPair.id.desc()).all()
+        ).order_by(ResearchComparisonPair.id.desc()).with_for_update().all()
         groups = []
         claimed = set()
         for pair in candidates:
             created = research_created_qr_ids(pair)
+            saved = set(research_saved_qr_ids(pair))
             matched = [qid for qid in posted if qid in created and qid not in claimed
+                       and qid not in saved and qid in qr_map
                        and qr_map[qid].course_id == pair.course_id]
             if matched:
                 groups.append((pair, created, matched))
@@ -6113,7 +6156,7 @@ def register_routes(app):
         })
 
     def apply_research_download(pair, created, matched, style, method, user, downloaded):
-        task_kind = "QR_VIDEO_HANG_LOAT" if style == "bulk" and downloaded >= 2 else "QR_TUNG_VIDEO_PLAYLIST"
+        task_kind = "QR_VIDEO_HANG_LOAT" if style == "bulk" else "QR_TUNG_VIDEO_PLAYLIST"
         result = {"ok": True, "kind": task_kind, "measured": False,
                   "matched": len(matched), "downloaded": downloaded}
         # Không được đổi kiểu khi đã có mã QR được ghi là đã tải theo
@@ -6156,10 +6199,12 @@ def register_routes(app):
             equivalent.measurement_single_playlists = pair.measurement_single_playlists
             equivalent.measurement_bulk_videos = pair.measurement_bulk_videos
             equivalent.measurement_saved_qr_ids = pair.measurement_saved_qr_ids or "[]"
+            equivalent.measurement_pending_qr_ids = pair.measurement_pending_qr_ids or "[]"
             # Reset hoàn toàn cặp ban đầu: được sử dụng cho lần đo khác.
             pair.measurement_started_at = None
             pair.measurement_qr_ids = "[]"
             pair.measurement_saved_qr_ids = "[]"
+            pair.measurement_pending_qr_ids = "[]"
             pair.measurement_download_style = None
             pair.measurement_operations = 0
             pair.measurement_single_videos = 0
@@ -6174,6 +6219,7 @@ def register_routes(app):
             }
         pair.measurement_download_style = style
         if method == "not_verified":
+            pair.measurement_pending_qr_ids = json.dumps(sorted(research_pending_qr_ids(pair) | set(matched)))
             reported_ops = request.form.get("operations_count", type=int)
             if reported_ops is not None and 0 < reported_ops <= 100000:
                 pair.measurement_operations = max(
@@ -6194,6 +6240,7 @@ def register_routes(app):
             if qr_id not in saved:
                 saved.append(qr_id)
         pair.measurement_saved_qr_ids = json.dumps(saved)
+        pair.measurement_pending_qr_ids = json.dumps(sorted(research_pending_qr_ids(pair) - set(saved)))
         if method == "manual_confirmed":
             pair.measurement_save_method = "manual_confirmed"
         reported_ops = request.form.get("operations_count", type=int)
@@ -6227,7 +6274,6 @@ def register_routes(app):
             if session.get("research_measurement_id") == pair.id:
                 session.pop("research_measurement_id", None)
                 session.pop("research_measurement_nonce", None)
-        db.session.commit()
         return result
 
     @app.get("/research/auto/files")
@@ -6340,6 +6386,7 @@ def register_routes(app):
         pair.measurement_verified = False
         pair.measurement_qr_ids = "[]"
         pair.measurement_saved_qr_ids = "[]"
+        pair.measurement_pending_qr_ids = "[]"
         pair.measurement_download_style = None
         pair.measurement_save_method = None
         pair.measurement_saved_at = None
