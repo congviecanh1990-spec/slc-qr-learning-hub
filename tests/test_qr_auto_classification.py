@@ -326,7 +326,7 @@ def test_download_confirmation_controls_are_always_visible_in_both_lists(configu
             assert button.get_text(strip=True) == "Tôi đã lưu đủ tệp QR"
             assert button.has_attr("disabled")
             assert panel.select_one(".research-qr-confirm-state") is not None
-        assert soup.select('script[src*="research_measurement.js?v=confirm-progress-20261127"]')
+        assert soup.select('script[src*="research_measurement.js?v=shared-pending-20261128"]')
         for panel in controls:
             content=panel.select_one('.research-qr-confirm-message')
             actions=panel.select_one('.research-qr-confirm-actions')
@@ -447,3 +447,30 @@ def test_partial_confirmation_client_never_claims_measurement_done_early():
     assert "emphasis.hidden=pendingDownloads.length===0" in script
     assert "Đã ghi nhận yêu cầu tải " in script
     assert "Thời gian và thao tác vẫn tạm tính." in script
+
+
+def test_pending_confirmation_shared_between_sessions_and_not_reopened(configured_app):
+    app, keys, _ = configured_app
+    pid, qrs = prepare_pairs(app, keys, "QR_VIDEO_HANG_LOAT",
+                             video_count=2, playlist_count=0)
+    with app.test_client() as first:
+        with first.session_transaction() as sess:
+            sess["user_id"] = keys["teacher"]
+            sess["research_measurement_id"] = pid
+        manifest = first.get("/qr/download-all.zip", headers={"Accept": "application/json"})
+        assert manifest.status_code == 200
+        assert set(qrs).issubset({f["id"] for f in manifest.json["files"]})
+        fields = {"download_style": "bulk", "qr_ids": json.dumps(qrs),
+                  "save_method": "not_verified", "operations_count": 4}
+        assert first.post("/research/auto/download-saved", data=fields).json["matched"] == 2
+        assert first.get("/research/auto/status").json["pending"] == [{"style":"bulk","ids":sorted(qrs)}]
+    with app.test_client() as second:
+        with second.session_transaction() as sess:
+            sess["user_id"] = keys["teacher"]
+        assert second.get("/research/auto/status").json["pending"] == [{"style":"bulk","ids":sorted(qrs)}]
+        confirmed = second.post("/research/auto/download-saved", data={
+            **fields, "save_method":"manual_confirmed", "user_confirmed":"yes"})
+        assert confirmed.json["completed"] is True
+        assert second.get("/research/auto/status").json["pending"] == []
+        assert second.post("/research/auto/download-saved", data=fields).json["matched"] == 0
+        assert second.get("/research/auto/status").json["pending"] == []
