@@ -211,6 +211,7 @@
   // cả thao tác tạo và lưu, không chỉ thời gian sinh ảnh QR.
   document.addEventListener('submit',async event=>{
     const form=event.target;
+    if(event.defaultPrevented || event.submitter?.dataset.unassignScope)return;
     if(!form.matches('#playlistBulkActions,#assignVideoForm,.playlist-course-form,.playlist-qr-actions,.video-qr-actions'))
       return;
     if(isDownloadButton(event.submitter)){
