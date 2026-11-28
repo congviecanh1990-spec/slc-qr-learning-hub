@@ -3096,7 +3096,13 @@ def register_routes(app):
         playlist = db.session.get(Playlist, playlist_id) or abort(404)
         if playlist.channel.user_id != user.id:
             abort(403)
-        selected_course_ids = {int(x) for x in request.form.getlist("course_ids") if str(x).isdigit()}
+        raw_ids = request.form.getlist("course_ids")
+        if any(not x.isascii() or not x.isdigit() or int(x) <= 0 for x in raw_ids):
+            abort(400)
+        selected_course_ids = {int(x) for x in raw_ids}
+        owned_ids = {c.id for c in Course.query.filter_by(owner_id=user.id, active=True).all()}
+        if not selected_course_ids.issubset(owned_ids):
+            abort(403)
         activated, deactivated, auto_added, auto_removed = set_playlist_courses(playlist, selected_course_ids, user)
         record_functional_test(
             "SET_PLAYLIST_COURSES", "Thiết lập môn học/ mô đun cho playlist", True, owner_id=user.id,
@@ -3155,6 +3161,17 @@ def register_routes(app):
         for cid in sorted(selected):
             ensure_course_video_link(owned[cid], video, user, manual=True)
         db.session.commit()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            db.session.expire_all()
+            return jsonify({"ok": True, "row_html": render_template(
+                "_video_library_row.html",
+                v=db.session.get(Video, video_id),
+                courses=Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all(),
+                retarget_videos=visible_video_query(user).filter(
+                    Video.is_available.is_(True), Video.privacy_status != "private",
+                    Video.embeddable.isnot(False)).order_by(Video.title).all(),
+                library_return_query=request.form.get("return_query", "")[:1200],
+            )})
         flash("Đã lưu môn học/mô đun áp dụng cho video.", "success")
         return redirect(videos_library_return(f"video-{video.id}", request.form.get("return_query", "")))
 
