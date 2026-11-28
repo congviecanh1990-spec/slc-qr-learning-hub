@@ -108,7 +108,7 @@
          data-files-url="{{ url_for('download_selected_playlist_qrs') }}"
          title="Tải toàn bộ QR playlist đã tạo trong các môn được gán">Tải tất cả QR đã tạo</button>
       </div><div class="d-flex flex-wrap gap-2 bulk-unassign-actions">
-      <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_playlists', scope='selected') }}" data-unassign-scope="selected" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho playlist đã chọn</button>
+      <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_playlists', scope='selected') }}" formnovalidate data-unassign-scope="selected" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho playlist đã chọn</button>
       <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_playlists', scope='all') }}" formnovalidate data-unassign-scope="all" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho tất cả playlist</button>
       </div></div>
     </div>
@@ -219,7 +219,7 @@
                 formaction="{{ url_for('download_selected_video_qrs') }}"
                 {{ 'disabled' if not courses else '' }}>Tải tất cả QR đã tạo</button>
         </div><div class="d-flex flex-wrap gap-2 bulk-unassign-actions">
-      <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_videos', scope='selected') }}" data-unassign-scope="selected" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho video đã chọn</button>
+      <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_videos', scope='selected') }}" formnovalidate data-unassign-scope="selected" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho video đã chọn</button>
       <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_videos', scope='all') }}" formnovalidate data-unassign-scope="all" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho tất cả video</button>
         </div><span class="text-muted small" id="selectedVideoCount">Chưa chọn video nào.</span></div>
       </div>
@@ -452,22 +452,13 @@
 </script>
 
 <script>
-// Xác nhận phạm vi bỏ gán trước khi gửi POST; không kích hoạt đo QR.
+// Chỉ yêu cầu tích học liệu khi bỏ gán các mục đã chọn.
 document.addEventListener('submit', function(event){
   const button=event.submitter;
-  if(!button?.dataset.unassignScope)return;
-  const form=event.target;
-  const course=form.querySelector('[name="course_id"]');
+  if(!button?.dataset.unassignScope || button.dataset.unassignScope==='all')return;
   const kind=button.dataset.unassignKind;
-  const all=button.dataset.unassignScope==='all';
   const count=kind==='playlist'?window.playlistBulkSelection?.selectedCount():window.videoBulkSelection?.selectedCount();
-  if(!all && !course?.value){event.preventDefault();alert('Hãy chọn môn học/mô đun cần bỏ gán.');return;}
-  if(!all && !count){event.preventDefault();alert('Hãy tích chọn '+kind+' cần bỏ gán.');return;}
-  const target=all?'tất cả '+kind+' thuộc kho học liệu (không phụ thuộc bộ lọc/phân trang)':count+' '+kind+' đã chọn';
-  const subject=all?'tất cả môn học/mô đun':course.selectedOptions[0].textContent.trim();
-  if(!confirm('Bỏ gán '+subject+' cho '+target+'? Mã QR đã tạo và dữ liệu học liệu vẫn được giữ nguyên.')){
-    event.preventDefault();
-  }
+  if(!count){event.preventDefault();alert('Hãy tích chọn '+kind+' cần bỏ gán.');}
 },true);
 </script>
 <script>
