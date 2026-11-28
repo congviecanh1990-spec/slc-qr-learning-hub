@@ -1050,6 +1050,7 @@ def ensure_research_comparison_schema():
         "measurement_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_saved_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_pending_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
+        "measurement_course_breakdown": "TEXT NOT NULL DEFAULT '{}'",
         "measurement_download_style": "VARCHAR(20)",
         "auto_discovered": "BOOLEAN NOT NULL DEFAULT FALSE",
         "measurement_save_method": "VARCHAR(32)",
@@ -1106,6 +1107,14 @@ def research_pending_qr_ids(pair):
         return set()
 
 
+def research_course_breakdown(pair):
+    try:
+        data = json.loads(pair.measurement_course_breakdown or "{}")
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
 def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
     """Lưu QR mới đúng môn và giảng viên; giữ phân loại theo cách tải thực tế.
 
@@ -1117,6 +1126,59 @@ def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
     if not has_request_context() or not qr_id or session.get("user_id") != lecturer_id:
         return
     pair = active_research_measurement(lecturer_id)
+    shared = request.form.get("research_shared") == "1" and request.endpoint in {
+        "create_video_qr_from_library", "create_playlist_qr_from_library",
+        "bulk_create_selected_video_qrs", "bulk_create_playlist_qrs_from_library",
+    }
+    if shared:
+        course = db.session.get(Course, course_id)
+        if not course or course.owner_id != lecturer_id or not course.active:
+            return
+        if not pair or not research_course_breakdown(pair):
+            lecturer = db.session.get(User, lecturer_id)
+            now = utcnow()
+            elapsed = request.form.get("research_elapsed_ms", type=float)
+            valid = elapsed is not None and 0 <= elapsed <= 7200000
+            start = now - timedelta(milliseconds=elapsed) if valid else now
+            pair = ResearchComparisonPair(
+                pair_code="TN" + secrets.token_hex(8).upper(),
+                lecturer_id=lecturer_id, course_id=course_id,
+                lecturer_name_snapshot=(lecturer.name or lecturer.email or "")[:255],
+                course_name_snapshot=course.name[:255],
+                task_kind="QR_TUNG_VIDEO_PLAYLIST", video_count=0, playlist_count=0,
+                playlist_video_count=0, qr_count=0, manual_operations=0, manual_seconds=0.0,
+                auto_discovered=True, measurement_started_at=start,
+                measurement_start_source="ui_shared" if valid else "server_fallback",
+                measurement_operations=max(1, min(100000, request.form.get("research_ops", type=int) or 1)),
+            )
+            db.session.add(pair)
+            db.session.flush()
+            session["research_measurement_id"] = pair.id
+            session["research_measurement_nonce"] = secrets.token_hex(12)
+        known = research_created_qr_ids(pair)
+        if qr_id in known:
+            return
+        breakdown = research_course_breakdown(pair)
+        entry = breakdown.setdefault(str(course_id), {"name": course.name, "qr": 0})
+        entry["qr"] += 1
+        pair.measurement_course_breakdown = json.dumps(breakdown, ensure_ascii=False)
+        if len(breakdown) > 1:
+            pair.course_id = None
+            pair.course_name_snapshot = "Nhiều học phần/mô đun"
+        known.append(qr_id)
+        pair.measurement_qr_ids = json.dumps(known)
+        pair.qr_count = len(known)
+        if kind == "playlist":
+            pair.playlist_count += 1
+            pair.measurement_single_playlists += 1
+            pair.playlist_video_count += PlaylistVideo.query.filter_by(
+                playlist_id=db.session.get(QrCode, qr_id).playlist_id).count()
+        else:
+            pair.video_count += 1
+            pair.measurement_single_videos += 1
+            if request.endpoint == "bulk_create_selected_video_qrs":
+                pair.measurement_bulk_videos += 1
+        return
     if not pair or pair.course_id != course_id:
         pair = ResearchComparisonPair.query.filter_by(lecturer_id=lecturer_id, course_id=course_id, active=True, measurement_finished_at=None).filter(ResearchComparisonPair.measurement_started_at.isnot(None)).order_by(ResearchComparisonPair.id.desc()).first()
     if not pair and request.method == "POST" and request.endpoint in {
@@ -1179,8 +1241,17 @@ def research_measurement_complete_qrs(pair):
     ids = research_created_qr_ids(pair)
     if len(ids) != pair.qr_count:
         return False
-    qrs = QrCode.query.filter(QrCode.id.in_(ids), QrCode.active.is_(True),
-                              QrCode.course_id == pair.course_id).all()
+    qrs = QrCode.query.filter(QrCode.id.in_(ids), QrCode.active.is_(True)).all()
+    breakdown = research_course_breakdown(pair)
+    if breakdown:
+        actual = {}
+        for q in qrs:
+            key = str(q.course_id)
+            actual[key] = actual.get(key, 0) + 1
+        if actual != {k: v["qr"] for k, v in breakdown.items()}:
+            return False
+    elif any(q.course_id != pair.course_id for q in qrs):
+        return False
     return (
         len(qrs) == len(ids)
         and sum(not q.is_playlist for q in qrs) == pair.video_count
@@ -4429,11 +4500,20 @@ def register_routes(app):
                                   QrCode.course_id == course.id).all()
         qr_ids = [q.id for q in qrs]
         qr_set = set(qr_ids)
-        pairs = ResearchComparisonPair.query.filter_by(course_id=course.id).all()
+        pairs = ResearchComparisonPair.query.filter(or_(ResearchComparisonPair.course_id == course.id,
+            ResearchComparisonPair.lecturer_id == user.id)).all()
         removed_pairs = 0
         removed_pair_ids = set()
         for pair in pairs:
             linked = set(research_created_qr_ids(pair)) | set(research_saved_qr_ids(pair))
+            breakdown = research_course_breakdown(pair)
+            if len(breakdown) > 1 and linked.intersection(qr_set):
+                pair.active = False
+                pair.void_reason = "Đã xóa QR một môn trong lượt đo chung; không thể tách thời gian/thao tác."
+                removed_pair_ids.add(pair.id)
+                continue
+            if pair.course_id != course.id:
+                continue
             if linked.intersection(qr_set) or (
                 pair.measurement_started_at is not None
                 or pair.measurement_finished_at is not None
@@ -5979,6 +6059,7 @@ def register_routes(app):
             research_pairs=research_pairs, web_only_pairs=web_only_pairs,
             user_confirmed_count=len(user_confirmed_pairs),
             pending_measurements=pending_measurements,
+            shared_course_breakdowns={p.id: research_course_breakdown(p) for p in research_pairs},
             paired_groups=paired_groups, paired_totals=paired_totals,
             summary_groups=summary_groups,
             pair_kinds=RESEARCH_PAIR_KINDS, normalize_pair_kind=normalize_kind,
@@ -6002,6 +6083,7 @@ def register_routes(app):
             "active": True, "id": pair.id, "code": pair.pair_code,
             "nonce": session.get("research_measurement_nonce", ""),
             "course_id": pair.course_id, "kind": normalize_kind(pair.task_kind),
+            "shared": bool(research_course_breakdown(pair)),
             "expected": pair.qr_count, "created": len(created_qrs),
             "saved": confirmed_count,
             "remaining": max(0, pair.qr_count - confirmed_count),
@@ -6032,7 +6114,7 @@ def register_routes(app):
                 continue
             ids = research_pending_qr_ids(pair) & set(research_created_qr_ids(pair))
             ids -= set(research_saved_qr_ids(pair))
-            pending[style].update(i for i in ids if i in active_ids and active_ids[i] == pair.course_id)
+            pending[style].update(i for i in ids if i in active_ids and (str(active_ids[i]) in research_course_breakdown(pair) or active_ids[i] == pair.course_id))
         bulk = sorted(pending["bulk"])
         items = [{"style": "bulk", "ids": bulk[i:i+1000]} for i in range(0, len(bulk), 1000)]
         items.extend({"style": "row", "ids": [i]} for i in sorted(pending["row"] - pending["bulk"]))
@@ -6194,7 +6276,8 @@ def register_routes(app):
             saved = set(research_saved_qr_ids(pair))
             matched = [qid for qid in posted if qid in created and qid not in claimed
                        and qid not in saved and qid in qr_map
-                       and qr_map[qid].course_id == pair.course_id]
+                       and (str(qr_map[qid].course_id) in research_course_breakdown(pair)
+                            or qr_map[qid].course_id == pair.course_id)]
             if matched:
                 groups.append((pair, created, matched))
                 claimed.update(matched)
