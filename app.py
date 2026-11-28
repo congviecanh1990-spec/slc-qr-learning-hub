@@ -1163,7 +1163,8 @@ def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
         entry["qr"] += 1
         pair.measurement_course_breakdown = json.dumps(breakdown, ensure_ascii=False)
         if len(breakdown) > 1:
-            pair.course_id = None
+            # Giữ khóa ngoại môn đầu tiên để tương thích CSDL cũ NOT NULL.
+            # Phạm vi lượt đo thực tế nằm trong measurement_course_breakdown.
             pair.course_name_snapshot = "Nhiều học phần/mô đun"
         known.append(qr_id)
         pair.measurement_qr_ids = json.dumps(known)
@@ -5868,6 +5869,7 @@ def register_routes(app):
                     candidates = ResearchComparisonPair.query.filter(*criteria).order_by(
                         ResearchComparisonPair.measurement_finished_at.desc(),
                         ResearchComparisonPair.id.desc()).all()
+                    candidates = [p for p in candidates if len(research_course_breakdown(p)) <= 1]
                     existing = None
                     if explicit_id:
                         existing = db.session.get(ResearchComparisonPair, explicit_id)
