@@ -7,29 +7,50 @@
 (() => {
   'use strict';
   const api=window.researchMeasurement;
-  if(!api || (!document.getElementById('videos') && !document.getElementById('qr-course-filter')))return;
+  if(!api)return;
+  const measurementPage=Boolean(document.getElementById('videos')||document.getElementById('qr-course-filter'));
   const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';
   const status=document.getElementById('researchQrStatus');
   let active=null,ops=0,lastSent=-1,preflight=null,confirming=false;
-  const draftKey='slc-shared-qr-draft:'+api.userId;
-  let draft=null;
+  const draftKey='slc-shared-qr-draft-v2:'+api.userId;
+  const logKey=id=>'slc-qr-action-log-v2:'+api.userId+':'+id;
+  let draft=null,actions=[];
   try{draft=JSON.parse(sessionStorage.getItem(draftKey)||'null');}catch(_){}
-  if(draft && (Date.now()-draft.started>7200000 || Date.now()<draft.started))draft=null;
+  if(draft && (Date.now()-draft.started>7200000 || Date.now()<draft.started || !Array.isArray(draft.actions)))draft=null;
   function saveDraft(){try{if(draft)sessionStorage.setItem(draftKey,JSON.stringify(draft));else sessionStorage.removeItem(draftKey);}catch(_){}}
-  function trackDraft(){
+  function action(label){return {id:crypto.randomUUID?.()||Date.now().toString(36)+'_'+Math.random().toString(36).slice(2),label:label.slice(0,160),at:Date.now()};}
+  function trackDraft(label){
     if(active)return;
-    if(!draft)draft={started:Date.now(),operations:0};
-    draft.operations++;saveDraft();
+    if(!draft)draft={started:Date.now(),actions:[]};
+    draft.actions.push(action(label));saveDraft();
   }
   function attachShared(form){
-    if(!draft&&!active)trackDraft();
-    const fields={research_shared:1,research_elapsed_ms:draft?Math.max(0,Date.now()-draft.started):0,research_ops:draft?.operations||ops||1};
+    if(!draft&&!active)trackDraft('Tạo mã QR');
+    const fields={research_shared:1,research_elapsed_ms:draft?Math.max(0,Date.now()-draft.started):0,research_ops:draft?.actions.length||ops||1,research_actions:JSON.stringify(active?actions:draft?.actions||[])};
     for(const [name,value] of Object.entries(fields)){
       let input=form.querySelector('input[name="'+name+'"]');
       if(!input){input=document.createElement('input');input.type='hidden';input.name=name;form.append(input);}
       input.value=String(value);
     }
   }
+  function storeActions(){if(active)try{sessionStorage.setItem(logKey(active.id),JSON.stringify(actions));}catch(_){}}
+  function track(label){if(active)addOperation(label);else trackDraft(label);}
+  // A trusted navigation click starts a clean draft, not a page reload.
+  document.addEventListener('click',event=>{
+    if(!event.isTrusted)return;
+    const link=event.target.closest('nav a');
+    if(!link)return;
+    const path=new URL(link.href,location.href).pathname;
+    if(path==='/videos'){
+      if(active)addOperation('Mở Kho video học liệu');
+      else if(!api.id){draft=null;trackDraft('Mở Kho video học liệu');}
+    }else if(path==='/qr'&&active)addOperation('Mở Mã QR động');
+  },true);
+  // An error response is not a valid continuation of a draft.
+  if(location.pathname.startsWith('/videos/qr/')||location.pathname.startsWith('/playlists/bulk-create')){
+    draft=null;saveDraft();
+  }
+  if(!measurementPage)return;
   // Server là nguồn trạng thái duy nhất, dùng chung giữa các trang và tab.
   let pendingDownloads=[];
   function setPending(items){
@@ -113,7 +134,7 @@
   document.addEventListener('click',event=>{
     if(event.target.closest('.research-qr-confirm-button')){
       // Đếm chính nút xác nhận TRƯỚC khi gửi số thao tác chốt lên máy chủ.
-      if(!confirming && pendingDownloads.length && active)addOperation();
+      if(event.isTrusted && !confirming && pendingDownloads.length && active)addOperation('Xác nhận đã lưu đủ tệp QR');
       confirmPendingDownloads();
     }else if(event.target.closest('.research-qr-confirm-cancel')){
       cancelPendingDownloads();
@@ -121,7 +142,7 @@
   });
 
   document.addEventListener('submit',event=>{
-    if(event.target.matches('form[action$="/qr/delete-all"]') && !event.defaultPrevented){
+    if(event.target.matches('form[action$="/qr/delete-all"],form[action*="/qr/delete-course/"]') && !event.defaultPrevented){
       pendingDownloads=[];persistPending();draft=null;saveDraft();
     }
   });
@@ -157,8 +178,11 @@
       if(!confirming)setPending(data.pending);
       if(data.active){
         active=data;
-        if(data.shared){draft=null;saveDraft();}
-        try{ops=Math.max(data.operations||0,Number(sessionStorage.getItem(sessionKey()))||0);}catch(_){ops=data.operations||0;}
+        if(data.shared){
+          let local=[];try{local=JSON.parse(sessionStorage.getItem(logKey(data.id))||'[]');}catch(_){}
+          actions=[...new Map([...(data.actions||[]),...local,...(draft?.actions||[])].map(x=>[x.id,x])).values()].sort((a,b)=>a.at-b.at);
+          ops=actions.length||data.operations||0;storeActions();draft=null;saveDraft();
+        }else{try{ops=Math.max(data.operations||0,Number(sessionStorage.getItem(sessionKey()))||0);}catch(_){ops=data.operations||0;}}
         if(data.saved>0 && !pendingDownloads.length){
           idleConfirmationMessage='Đã xác nhận lưu '+data.saved+'/'+data.expected+
             ' mã QR. Còn '+data.remaining+
@@ -172,9 +196,10 @@
       }else {active=null;ops=0;showPendingConfirmation();}
     }catch(_){}
   }
-  function addOperation(){
+  function addOperation(label){
     if(!active)return;
-    ops=Math.min(100000,ops+1);
+    if(active.shared){actions.push(action(label||'Thao tác QR'));ops=actions.length;storeActions();}
+    else ops=Math.min(100000,ops+1);
     try{sessionStorage.setItem(sessionKey(),String(ops));}catch(_){}
   }
   async function begin(course,kind,selectedCount=null){
@@ -248,12 +273,15 @@
 
   // Chỉ đếm các thao tác trong Web App khi một cặp đo đã được giao và khởi động.
   document.addEventListener('click',event=>{
-    const target=event.target.closest('button,a,input,select,textarea');
-    if(target && !target.matches('input,select,textarea') && !target.closest('.research-qr-confirm-button')){
+    if(!event.isTrusted)return;
+    const target=event.target.closest('button,a');
+    if(target && !target.disabled && !target.closest('[data-unassign-scope],.research-qr-confirm-button,.research-qr-confirm-cancel')){
       const relevant=target.closest('#playlistBulkActions,#assignVideoForm,.course-picker,.video-qr-actions,.playlist-qr-actions,.qr-course-actions') ||
-        target.matches('a[data-research-inventory-zip],a.qr-save-picker,a.video-qr-download,a.playlist-qr-download') ||
-        target.closest('nav') && new URL(target.href||location.href,location.href).pathname==='/qr';
-      if(relevant){if(active)addOperation();else if(!target.closest('[data-unassign-scope]') && !target.matches('a[data-research-inventory-zip],a.qr-save-picker,a.video-qr-download,a.playlist-qr-download'))trackDraft();}
+        target.matches('a[data-research-inventory-zip],a.qr-save-picker,a.video-qr-download,a.playlist-qr-download');
+      if(relevant){
+        const download=target.matches('a[data-research-inventory-zip],a.qr-save-picker,a.video-qr-download,a.playlist-qr-download,#playlistBulkDownloadQr,button[formaction*="download-selected"]');
+        if(active||!download)track(target.matches('.course-picker-toggle')?'Mở danh sách môn học':target.textContent.trim().replace(/\s+/g,' ')||'Thao tác QR');
+      }
     }
     const inventoryZip=event.target.closest('a[data-research-inventory-zip]');
     if(inventoryZip){
@@ -281,8 +309,10 @@
     }
   },true);
   document.addEventListener('change',event=>{
-    if(event.target.matches('#playlistBulkCourse,#assignVideoForm select,.playlist-bulk-check,.video-check,#selectAllPlaylists,#selectAllVideos,.playlist-course-check,.video-course-check')){
-      if(active)addOperation();else trackDraft();
+    if(event.isTrusted && event.target.matches('#playlistBulkCourse,#assignVideoForm select,.playlist-bulk-check,.video-check,#selectAllPlaylists,#selectAllVideos,.playlist-course-check,.video-course-check')){
+      const el=event.target;
+      const label=el.matches('.playlist-course-check,.video-course-check')?(el.checked?'Gán môn: ':'Bỏ gán môn: ')+(el.closest('label')?.textContent.trim()||el.value):el.type==='checkbox'?(el.checked?'Tích chọn học liệu':'Bỏ tích học liệu'):'Chọn môn: '+(el.selectedOptions?.[0]?.textContent.trim()||'');
+      track(label);
     }
   },true);
 
@@ -294,7 +324,7 @@
       const result=await post(api.savedUrl,{
         download_style:classification==='QR_VIDEO_HANG_LOAT'?'bulk':'row',
         qr_ids:JSON.stringify(ids),save_method:method,
-        user_confirmed:manual?'yes':'no',operations_count:Math.max(1,ops)
+        user_confirmed:manual?'yes':'no',operations_count:Math.max(1,ops),research_actions:JSON.stringify(actions)
       });
       if(result.measured){
         if(result.completed){
@@ -304,6 +334,8 @@
               ?' (tệp PNG được hệ thống xác minh).'
               :' (GV đã tự xác nhận lưu; chưa kiểm chứng độc lập).'));
           const key=sessionKey();
+          if(active)try{sessionStorage.removeItem(logKey(active.id));}catch(_){}
+          actions=[];
           active=null;ops=0;lastSent=-1;draft=null;saveDraft();
           try{sessionStorage.removeItem(key);}catch(_){}
         }else announce('Đã xác nhận lưu '+result.saved+'/'+result.expected+
@@ -427,7 +459,7 @@
   const sendProgress=()=>{
     if(!active||ops===lastSent)return;
     lastSent=ops;
-    post(api.progressUrl,{operations_count:ops}).catch(()=>{lastSent=-1;});
+    post(api.progressUrl,{operations_count:ops,research_actions:JSON.stringify(actions)}).catch(()=>{lastSent=-1;});
   };
   window.setInterval(()=>{sendProgress();refresh();},4500);
   window.addEventListener('focus',refresh);
@@ -438,6 +470,7 @@
     const data=new FormData();
     if(csrf)data.set('csrf_token',csrf);
     data.set('operations_count',String(ops));
+    data.set('research_actions',JSON.stringify(actions));
     navigator.sendBeacon?.(api.progressUrl,data);
   });
   refresh();
