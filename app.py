@@ -1051,6 +1051,7 @@ def ensure_research_comparison_schema():
         "measurement_saved_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_pending_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_course_breakdown": "TEXT NOT NULL DEFAULT '{}'",
+        "measurement_action_log": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_download_style": "VARCHAR(20)",
         "auto_discovered": "BOOLEAN NOT NULL DEFAULT FALSE",
         "measurement_save_method": "VARCHAR(32)",
@@ -1107,6 +1108,42 @@ def research_pending_qr_ids(pair):
         return set()
 
 
+def research_action_log(pair):
+    try:
+        data = json.loads(pair.measurement_action_log or "[]")
+        return data if isinstance(data, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def merge_research_actions(pair):
+    """Merge idempotent UI action IDs, not network requests or synthetic events."""
+    if pair.measurement_start_source != "ui_shared":
+        return False
+    try:
+        incoming = json.loads(request.form.get("research_actions", "[]"))
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(incoming, list) or not incoming or len(incoming) > 2000:
+        return False
+    existing = {x["id"]: x for x in research_action_log(pair) if isinstance(x, dict) and "id" in x}
+    for item in incoming:
+        if not isinstance(item, dict):
+            continue
+        ident, label, stamp = item.get("id"), item.get("label"), item.get("at")
+        if not isinstance(ident, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", ident):
+            continue
+        if not isinstance(label, str) or not label or len(label) > 160 or type(stamp) is not int:
+            continue
+        existing.setdefault(ident, {"id": ident, "label": label, "at": stamp})
+    if not existing or len(existing) > 2000:
+        return False
+    actions = sorted(existing.values(), key=lambda x: x["at"])
+    pair.measurement_action_log = json.dumps(actions, ensure_ascii=False)
+    pair.measurement_operations = len(actions)
+    return True
+
+
 def research_course_breakdown(pair):
     try:
         data = json.loads(pair.measurement_course_breakdown or "{}")
@@ -1155,6 +1192,7 @@ def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
             db.session.flush()
             session["research_measurement_id"] = pair.id
             session["research_measurement_nonce"] = secrets.token_hex(12)
+        merge_research_actions(pair)
         known = research_created_qr_ids(pair)
         if qr_id in known:
             return
@@ -6062,6 +6100,7 @@ def register_routes(app):
             user_confirmed_count=len(user_confirmed_pairs),
             pending_measurements=pending_measurements,
             shared_course_breakdowns={p.id: research_course_breakdown(p) for p in research_pairs},
+            action_logs={p.id: research_action_log(p) for p in research_pairs},
             paired_groups=paired_groups, paired_totals=paired_totals,
             summary_groups=summary_groups,
             pair_kinds=RESEARCH_PAIR_KINDS, normalize_pair_kind=normalize_kind,
@@ -6086,6 +6125,7 @@ def register_routes(app):
             "nonce": session.get("research_measurement_nonce", ""),
             "course_id": pair.course_id, "kind": normalize_kind(pair.task_kind),
             "shared": bool(research_course_breakdown(pair)),
+            "actions": research_action_log(pair),
             "expected": pair.qr_count, "created": len(created_qrs),
             "saved": confirmed_count,
             "remaining": max(0, pair.qr_count - confirmed_count),
@@ -6221,7 +6261,8 @@ def register_routes(app):
         value = request.form.get("operations_count", type=int)
         if value is None or value < 0 or value > 100000:
             abort(400)
-        pair.measurement_operations = max(pair.measurement_operations or 0, value)
+        if not merge_research_actions(pair) and not research_action_log(pair):
+            pair.measurement_operations = max(pair.measurement_operations or 0, value)
         pair.updated_at = utcnow()
         db.session.commit()
         return jsonify({"ok": True, "operations": pair.measurement_operations})
@@ -6381,10 +6422,11 @@ def register_routes(app):
                 **result, "message": "Không trộn tải từng dòng và tải tất cả trong cùng một lượt đo."
             }
         pair.measurement_download_style = style
+        merge_research_actions(pair)
         if method == "not_verified":
             pair.measurement_pending_qr_ids = json.dumps(sorted(research_pending_qr_ids(pair) | set(matched)))
             reported_ops = request.form.get("operations_count", type=int)
-            if reported_ops is not None and 0 < reported_ops <= 100000:
+            if not research_action_log(pair) and reported_ops is not None and 0 < reported_ops <= 100000:
                 pair.measurement_operations = max(
                     pair.measurement_operations or 0, reported_ops
                 )
@@ -6407,7 +6449,7 @@ def register_routes(app):
         if method == "manual_confirmed":
             pair.measurement_save_method = "manual_confirmed"
         reported_ops = request.form.get("operations_count", type=int)
-        if reported_ops is not None and 0 < reported_ops <= 100000:
+        if not research_action_log(pair) and reported_ops is not None and 0 < reported_ops <= 100000:
             pair.measurement_operations = max(pair.measurement_operations or 0, reported_ops)
         pair.updated_at = utcnow()
         complete = set(saved) == set(created)
