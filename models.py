@@ -528,6 +528,7 @@ class ResearchComparisonPair(db.Model):
     measurement_verified = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     measurement_qr_ids = db.Column(db.Text, nullable=False, default="[]", server_default="[]")
     measurement_saved_qr_ids = db.Column(db.Text, nullable=False, default="[]", server_default="[]")
+    measurement_course_breakdown = db.Column(db.Text, nullable=False, default="{}", server_default="{}")
     measurement_pending_qr_ids = db.Column(db.Text, nullable=False, default="[]", server_default="[]")
     measurement_download_style = db.Column(db.String(20), nullable=True)
     measurement_save_method = db.Column(db.String(32), nullable=True)
