@@ -91,6 +91,8 @@
               {{ 'disabled' if not courses or playlist_total == 0 else '' }}>
         Gán MH cho playlist đã chọn
       </button>
+      <button type="submit" class="btn btn-outline-danger btn-sm" formaction="{{ url_for('bulk_unassign_library_playlists', scope='selected') }}" data-unassign-scope="selected" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho playlist đã chọn</button>
+      <button type="submit" class="btn btn-outline-danger btn-sm" formaction="{{ url_for('bulk_unassign_library_playlists', scope='all') }}" data-unassign-scope="all" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho tất cả playlist</button>
       <button type="submit" class="btn btn-outline-primary" name="bulk_action" value="qr"
               formaction="{{ url_for('bulk_create_playlist_qrs_from_library') }}"
               formnovalidate {{ 'disabled' if not courses else '' }}>
@@ -200,6 +202,8 @@
           </select>
         </div>
         <button type="submit" class="btn btn-primary" {{ 'disabled' if not courses else '' }}>Gán môn cho video đã chọn</button>
+      <button type="submit" class="btn btn-outline-danger btn-sm" formaction="{{ url_for('bulk_unassign_library_videos', scope='selected') }}" data-unassign-scope="selected" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho video đã chọn</button>
+      <button type="submit" class="btn btn-outline-danger btn-sm" formaction="{{ url_for('bulk_unassign_library_videos', scope='all') }}" data-unassign-scope="all" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho tất cả video</button>
         <button type="submit" class="btn btn-outline-primary"
                 formaction="{{ url_for('bulk_create_selected_video_qrs') }}"
                 {{ 'disabled' if not courses else '' }}>Tạo QR cho video đã gán môn</button>
@@ -499,6 +503,24 @@
 </script>
 
 <script>
+// Xác nhận phạm vi bỏ gán trước khi gửi POST; không kích hoạt đo QR.
+document.addEventListener('submit', function(event){
+  const button=event.submitter;
+  if(!button?.dataset.unassignScope)return;
+  const form=event.target;
+  const course=form.querySelector('[name="course_id"]');
+  const kind=button.dataset.unassignKind;
+  const all=button.dataset.unassignScope==='all';
+  const count=kind==='playlist'?window.playlistBulkSelection?.selectedCount():window.videoBulkSelection?.selectedCount();
+  if(!course?.value){event.preventDefault();alert('Hãy chọn môn học/mô đun cần bỏ gán.');return;}
+  if(!all && !count){event.preventDefault();alert('Hãy tích chọn '+kind+' cần bỏ gán.');return;}
+  const target=all?'tất cả '+kind+' thuộc kho học liệu (không phụ thuộc bộ lọc/phân trang)':count+' '+kind+' đã chọn';
+  if(!confirm('Bỏ gán môn '+course.selectedOptions[0].textContent.trim()+' cho '+target+'? Mã QR đã tạo và dữ liệu học liệu vẫn được giữ nguyên.')){
+    event.preventDefault();
+  }
+},true);
+</script>
+<script>
 const bulkCourseSelector=document.getElementById('playlistBulkCourse');
 const bulkDownload=document.getElementById('playlistBulkDownloadQr');
 const bulkForm=document.getElementById('playlistBulkActions');
@@ -698,7 +720,7 @@ document.querySelectorAll('.playlist-course-form').forEach(form=>{
 
 </script>
 {# Đổi URL để trình duyệt không tiếp tục dùng JS đã cache trước bản sửa cột QR. #}
-<script src="{{ url_for('static', filename='video_selection.js', v='assignment-reset-20261128') }}" defer></script>
+<script src="{{ url_for('static', filename='video_selection.js', v='bulk-unassign-20261128') }}" defer></script>
 <script src="{{ url_for('static', filename='library_filter_reset.js') }}" defer></script>
 {# Tải một QR bằng tính năng download gốc của trình duyệt.
    Không dùng showSaveFilePicker: server đã trả Content-Disposition đúng tên học liệu. #}
