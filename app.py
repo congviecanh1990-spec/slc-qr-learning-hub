@@ -4024,6 +4024,12 @@ def register_routes(app):
                 abort(403)
         all_qrs = (QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True))
                    .order_by(QrCode.created_at.desc()).all())
+        # Bộ lọc kho QR chỉ liệt kê môn còn QR đang hoạt động.
+        # Không thay đổi danh mục môn học hoặc liên kết gán học liệu.
+        active_qr_course_ids = {q.course_id for q in all_qrs if q.course_id is not None}
+        courses = [c for c in courses if c.id in active_qr_course_ids]
+        if selected_course_id is not None and selected_course_id not in active_qr_course_ids:
+            return redirect(url_for("qr_page"))
         if selected_course_id is None:
             qrs = all_qrs
         else:
