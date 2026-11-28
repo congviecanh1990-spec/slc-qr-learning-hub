@@ -6098,9 +6098,9 @@ def register_routes(app):
         # sau khi kiểm tra quyền của TOÀN BỘ danh sách được gửi.
         qr_map = {q.id: q for q in QrCode.query.filter(
             QrCode.id.in_(posted), QrCode.active.is_(True)).all()}
-        if not qr_map:
+        if len(qr_map) != len(posted):
             return jsonify({"ok": True, "measured": False, "matched": 0,
-                            "message": "Không còn mã QR hoạt động trong lượt tải."})
+                            "message": "Danh sách tải chứa QR không tồn tại hoặc đã ngừng hoạt động."})
         if not all(qr_managed_by_user(qr, user) for qr in qr_map.values()):
             abort(403)
         candidates = ResearchComparisonPair.query.filter(
