@@ -26,7 +26,7 @@
     <div class="col-lg-4 d-flex gap-2 flex-wrap">
       <button class="btn btn-primary" type="submit">Lọc mã QR</button>
       {% if selected_course %}
-        <a class="btn btn-outline-secondary qr-save-picker {{ 'disabled' if not qrs else '' }}" href="{{ url_for('download_course_qrs', course_id=selected_course.id) }}" title="Tải tệp ZIP của môn học/mô đun đang chọn">Tải mã QR</a>
+        <a class="btn btn-outline-secondary qr-save-picker {{ 'disabled' if not qrs else '' }}" data-research-inventory-zip="1" href="{{ url_for('qr_download_all', course_id=selected_course.id) }}" title="Tải tệp ZIP của môn học/mô đun đang chọn">Tải mã QR</a>
       {% endif %}
     </div>
   </div>
@@ -36,7 +36,7 @@
 <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
   <h3 class="h4 mb-0">Kho mã QR <span class="text-muted fs-6 fw-normal">({{ filtered_qr_count }} mã đang hiển thị)</span></h3>
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary btn-sm qr-save-picker {{ 'disabled' if not qrs else '' }}" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}" title="{{ 'Tải tất cả mã QR thuộc môn học/mô đun đang lọc' if selected_course_id is not none else 'Tải tất cả mã QR, sắp xếp theo thư mục môn học/mô đun' }}">Tải tất cả mã QR</a>
+    <a class="btn btn-outline-secondary btn-sm qr-save-picker {{ 'disabled' if not qrs else '' }}" data-research-inventory-zip="1" href="{{ url_for('qr_download_all', course_id=selected_course_id) if selected_course_id is not none else url_for('qr_download_all') }}" title="{{ 'Tải tất cả mã QR thuộc môn học/mô đun đang lọc' if selected_course_id is not none else 'Tải tất cả mã QR, sắp xếp theo thư mục môn học/mô đun' }}">Tải tất cả mã QR</a>
     {% if selected_course %}
     <form method="post" action="{{ url_for('delete_course_qrs', course_id=selected_course.id) }}"
           data-confirm-message="Xóa vĩnh viễn toàn bộ mã QR của môn {{ selected_course.name }} ({{ filtered_qr_count }} mã đang hoạt động, cùng các mã cũ nếu có), lịch sử quét/xem và lượt đo liên quan? Các môn khác không bị ảnh hưởng. Không thể hoàn tác."
