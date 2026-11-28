@@ -11,6 +11,25 @@
   const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';
   const status=document.getElementById('researchQrStatus');
   let active=null,ops=0,lastSent=-1,preflight=null,confirming=false;
+  const draftKey='slc-shared-qr-draft:'+api.userId;
+  let draft=null;
+  try{draft=JSON.parse(sessionStorage.getItem(draftKey)||'null');}catch(_){}
+  if(draft && (Date.now()-draft.started>7200000 || Date.now()<draft.started))draft=null;
+  function saveDraft(){try{if(draft)sessionStorage.setItem(draftKey,JSON.stringify(draft));else sessionStorage.removeItem(draftKey);}catch(_){}}
+  function trackDraft(){
+    if(active)return;
+    if(!draft)draft={started:Date.now(),operations:0};
+    draft.operations++;saveDraft();
+  }
+  function attachShared(form){
+    if(!draft&&!active)trackDraft();
+    const fields={research_shared:1,research_elapsed_ms:draft?Math.max(0,Date.now()-draft.started):0,research_ops:draft?.operations||ops||1};
+    for(const [name,value] of Object.entries(fields)){
+      let input=form.querySelector('input[name="'+name+'"]');
+      if(!input){input=document.createElement('input');input.type='hidden';input.name=name;form.append(input);}
+      input.value=String(value);
+    }
+  }
   // Server là nguồn trạng thái duy nhất, dùng chung giữa các trang và tab.
   let pendingDownloads=[];
   function setPending(items){
@@ -103,7 +122,7 @@
 
   document.addEventListener('submit',event=>{
     if(event.target.matches('form[action$="/qr/delete-all"]') && !event.defaultPrevented){
-      pendingDownloads=[];persistPending();
+      pendingDownloads=[];persistPending();draft=null;saveDraft();
     }
   });
   const sessionKey=()=>active?'slc-qr-ops:'+active.id+':'+active.nonce:'';
@@ -138,6 +157,7 @@
       if(!confirming)setPending(data.pending);
       if(data.active){
         active=data;
+        if(data.shared){draft=null;saveDraft();}
         try{ops=Math.max(data.operations||0,Number(sessionStorage.getItem(sessionKey()))||0);}catch(_){ops=data.operations||0;}
         if(data.saved>0 && !pendingDownloads.length){
           idleConfirmationMessage='Đã xác nhận lưu '+data.saved+'/'+data.expected+
@@ -219,39 +239,22 @@
       await downloadAll(form,event.submitter.formAction);
       return;
     }
-    // Tạo QR cho TẤT CẢ video đã gán môn: không có course_id duy nhất.
-    // Đưa thẳng biểu mẫu đến máy chủ; máy chủ tự ghi nhận lượt tạo QR
-    // cho tất cả môn, tránh chặn thao tác vì phép đo chỉ nhận một môn.
-    if((isVideoBulk(form) &&
-        event.submitter?.formAction?.includes('/videos/qr/bulk-selected')) ||
-       (isPlaylistBulk(form) &&
-        event.submitter?.formAction?.includes('/playlists/bulk-create-course-qrs')))return;
-    if(form.dataset.researchPreflight==='done'){
-      delete form.dataset.researchPreflight;
-      return; // Rời quyền xử lý cho handler Gán môn / Tạo QR vốn có.
+    const endpoint=new URL(event.submitter?.formAction||form.action,location.href).pathname;
+    if(endpoint==='/videos/qr/bulk-selected'||endpoint==='/playlists/bulk-create-course-qrs'||form.matches('.video-qr-actions,.playlist-qr-actions')){
+      attachShared(form);
     }
-    const course=pickCourse(form);
-    if(!course)return;
-    event.preventDefault();event.stopImmediatePropagation();
-    const btn=event.submitter;
-    const n=selectedNumber(form,event.submitter);
-    if(n<1 && (isPlaylistBulk(form)||isVideoBulk(form))){
-      announce('Chưa chọn video hoặc playlist; không khởi động lượt đo đối chứng.',true);
-      return;
-    }
-    const kind=(n>=2 && (isPlaylistBulk(form)||isVideoBulk(form)))
-      ?'QR_VIDEO_HANG_LOAT':'QR_TUNG_VIDEO_PLAYLIST';
-    await begin(course,kind,n>=2?n:null);
-    form.dataset.researchPreflight='done';
-    try{form.requestSubmit(btn||undefined);}
-    catch(e){delete form.dataset.researchPreflight;announce('Không tiếp tục được thao tác: '+e.message,true);}
+    // Gán môn không tạo bản ghi đo riêng; bản nháp đi cùng tới lần tạo QR.
   },true);
 
   // Chỉ đếm các thao tác trong Web App khi một cặp đo đã được giao và khởi động.
   document.addEventListener('click',event=>{
-    if(active && !event.target.closest('.research-qr-confirm-button') &&
-       event.target.closest('main button,main a,main input[type="checkbox"]'))
-      addOperation();
+    const target=event.target.closest('button,a,input,select,textarea');
+    if(target && !target.matches('input,select,textarea') && !target.closest('.research-qr-confirm-button')){
+      const relevant=target.closest('#playlistBulkActions,#assignVideoForm,.course-picker,.video-qr-actions,.playlist-qr-actions,.qr-course-actions') ||
+        target.matches('a[data-research-inventory-zip],a.qr-save-picker,a.video-qr-download,a.playlist-qr-download') ||
+        target.closest('nav') && new URL(target.href||location.href,location.href).pathname==='/qr';
+      if(relevant){if(active)addOperation();else if(!target.closest('[data-unassign-scope]') && !target.matches('a[data-research-inventory-zip],a.qr-save-picker,a.video-qr-download,a.playlist-qr-download'))trackDraft();}
+    }
     const inventoryZip=event.target.closest('a[data-research-inventory-zip]');
     if(inventoryZip){
       event.preventDefault();event.stopImmediatePropagation();
@@ -278,8 +281,9 @@
     }
   },true);
   document.addEventListener('change',event=>{
-    if(active && event.target.matches('main select,main input,main textarea'))
-      addOperation();
+    if(event.target.matches('#playlistBulkCourse,#assignVideoForm select,.playlist-bulk-check,.video-check,#selectAllPlaylists,#selectAllVideos,.playlist-course-check,.video-course-check')){
+      if(active)addOperation();else trackDraft();
+    }
   },true);
 
   async function recordDownload(style,ids,method,manual=false){
@@ -300,7 +304,7 @@
               ?' (tệp PNG được hệ thống xác minh).'
               :' (GV đã tự xác nhận lưu; chưa kiểm chứng độc lập).'));
           const key=sessionKey();
-          active=null;ops=0;lastSent=-1;
+          active=null;ops=0;lastSent=-1;draft=null;saveDraft();
           try{sessionStorage.removeItem(key);}catch(_){}
         }else announce('Đã xác nhận lưu '+result.saved+'/'+result.expected+
           ' QR của lượt đo; còn '+result.remaining+
