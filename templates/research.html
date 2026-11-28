@@ -190,7 +190,7 @@
         {% for p in research_pairs %}
           <tr class="{{ 'table-secondary' if not p.active else '' }}">
             <td>{{ (p.lecturer.name or p.lecturer.email) if p.lecturer else p.lecturer_name_snapshot }}</td>
-            <td>{{ p.course.name if p.course else p.course_name_snapshot }}</td>
+            <td>{% set breakdown = shared_course_breakdowns.get(p.id, {}) %}{% if breakdown %}{% for item in breakdown.values() %}<div>{{ item.name }} – {{ item.qr }} QR</div>{% endfor %}{% else %}{{ p.course.name if p.course else p.course_name_snapshot }}{% endif %}{% if not p.active and p.void_reason %}<div class="small text-muted">{{ p.void_reason }}</div>{% endif %}</td>
             <td>
               {{ dict(pair_kinds).get(normalize_pair_kind(p.task_kind), p.task_kind) }}
               {% if p.measurement_started_at and not p.measurement_finished_at %}
