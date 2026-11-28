@@ -1,5 +1,13 @@
 {% extends 'base.html' %}
 {% block content %}
+<style>
+.bulk-actions-layout {align-items:start!important;grid-template-columns:minmax(200px, 1fr) minmax(0, 2.15fr)!important;}
+.bulk-course-control {align-self:start;}
+.bulk-primary-actions {padding-top:24px;}
+.bulk-primary-actions .btn,.bulk-unassign-actions .btn {font-size:var(--bs-body-font-size);white-space:nowrap;}
+@media (min-width:1200px){.bulk-actions-layout {grid-template-columns:minmax(180px, 0.85fr) minmax(0, 2.4fr)!important;}.bulk-primary-actions{flex-wrap:nowrap!important;}}
+@media (max-width:767px){.bulk-actions-layout{grid-template-columns:1fr!important;}.bulk-primary-actions{padding-top:0;}.bulk-primary-actions .btn,.bulk-unassign-actions .btn{white-space:normal;}}
+</style>
 {% macro library_pagination(page, pages, field, anchor) %}
   {% if pages > 1 %}
   <nav aria-label="Chuyển trang {{ anchor }}" class="my-3">
@@ -79,20 +87,18 @@
     <input type="hidden" name="p_q" value="{{ playlist_search }}">
     <input type="hidden" name="p_assignment" value="{{ playlist_assignment }}">
     <input type="hidden" name="download_scope" value="all_assigned">
-    <div class="d-flex flex-wrap align-items-end gap-2">
-      <div class="flex-grow-1" style="min-width:210px;max-width:420px">
+    <div class="d-grid gap-2 bulk-actions-layout" style="grid-template-columns:minmax(210px, 1fr) minmax(0, 2fr);align-items:end">
+      <div class="bulk-course-control">
         <label class="form-label small" for="playlistBulkCourse">Môn học/ mô đun áp dụng hàng loạt</label>
         <select id="playlistBulkCourse" class="form-select" name="course_id" required>
           <option value="">— Chọn môn học/ mô đun —</option>
           {% for c in courses %}<option value="{{ c.id }}" data-qr-download="{{ url_for('download_course_qrs', course_id=c.id) }}" data-qr-count="{{ (course_qr_counts|default({})).get(c.id, 0) }}" data-qr-filename="Ma_QR_{{ c.code }}.zip">{{ c.name }}</option>{% endfor %}
         </select>
       </div>
-      <button type="submit" class="btn btn-primary" name="bulk_action" value="assign"
+      <div class="d-flex flex-column gap-2"><div class="d-flex flex-wrap gap-2 align-items-center bulk-primary-actions"><button type="submit" class="btn btn-primary" name="bulk_action" value="assign"
               {{ 'disabled' if not courses or playlist_total == 0 else '' }}>
         Gán MH cho playlist đã chọn
       </button>
-      <button type="submit" class="btn btn-outline-danger btn-sm" formaction="{{ url_for('bulk_unassign_library_playlists', scope='selected') }}" data-unassign-scope="selected" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho playlist đã chọn</button>
-      <button type="submit" class="btn btn-outline-danger btn-sm" formaction="{{ url_for('bulk_unassign_library_playlists', scope='all') }}" data-unassign-scope="all" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho tất cả playlist</button>
       <button type="submit" class="btn btn-outline-primary" name="bulk_action" value="qr"
               formaction="{{ url_for('bulk_create_playlist_qrs_from_library') }}"
               formnovalidate {{ 'disabled' if not courses else '' }}>
@@ -101,6 +107,10 @@
       <button type="button" id="playlistBulkDownloadQr" class="btn btn-outline-success"
          data-files-url="{{ url_for('download_selected_playlist_qrs') }}"
          title="Tải toàn bộ QR playlist đã tạo trong các môn được gán">Tải tất cả QR đã tạo</button>
+      </div><div class="d-flex flex-wrap gap-2 bulk-unassign-actions">
+      <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_playlists', scope='selected') }}" data-unassign-scope="selected" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho playlist đã chọn</button>
+      <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_playlists', scope='all') }}" formnovalidate data-unassign-scope="all" data-unassign-kind="playlist" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho tất cả playlist</button>
+      </div></div>
     </div>
     <div id="playlistBulkSelectedSummary" class="small fw-semibold text-primary mt-1" aria-live="polite">{{ 'Các playlist tìm được đang được chọn.' if playlist_search else 'Chưa chọn playlist nào.' }}</div>
   </form>
@@ -193,24 +203,25 @@
     {# Tải tất cả QR thuộc những video đã gán môn, không cần tích hay chọn môn. #}
     <input type="hidden" name="download_scope" value="all_assigned">
     <div class="card shadow-sm mb-3">
-      <div class="card-body d-flex flex-wrap gap-2 align-items-end">
-        <div class="flex-grow-1" style="min-width:210px;max-width:420px">
+      <div class="card-body d-grid gap-2 bulk-actions-layout" style="grid-template-columns:minmax(210px, 1fr) minmax(0, 2fr);align-items:end">
+        <div class="bulk-course-control">
           <label class="form-label small">Môn học/ mô đun áp dụng cho video tích chọn</label>
           <select class="form-select" name="course_id">
             <option value="">— Chọn môn học/ mô đun —</option>
             {% for c in courses %}<option value="{{ c.id }}" data-assigned-video-count="{{ (course_assigned_video_counts|default({})).get(c.id, 0) }}" {{ 'selected' if (request.args.get('video_course_id')|int) == c.id else '' }}>{{ c.name }}</option>{% endfor %}
           </select>
         </div>
-        <button type="submit" class="btn btn-primary" {{ 'disabled' if not courses else '' }}>Gán môn cho video đã chọn</button>
-      <button type="submit" class="btn btn-outline-danger btn-sm" formaction="{{ url_for('bulk_unassign_library_videos', scope='selected') }}" data-unassign-scope="selected" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho video đã chọn</button>
-      <button type="submit" class="btn btn-outline-danger btn-sm" formaction="{{ url_for('bulk_unassign_library_videos', scope='all') }}" data-unassign-scope="all" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho tất cả video</button>
+        <div class="d-flex flex-column gap-2"><div class="d-flex flex-wrap gap-2 align-items-center bulk-primary-actions"><button type="submit" class="btn btn-primary" {{ 'disabled' if not courses else '' }}>Gán môn cho video đã chọn</button>
         <button type="submit" class="btn btn-outline-primary"
                 formaction="{{ url_for('bulk_create_selected_video_qrs') }}"
                 {{ 'disabled' if not courses else '' }}>Tạo QR cho video đã gán môn</button>
         <button type="submit" class="btn btn-outline-success"
                 formaction="{{ url_for('download_selected_video_qrs') }}"
                 {{ 'disabled' if not courses else '' }}>Tải tất cả QR đã tạo</button>
-        <span class="text-muted small" id="selectedVideoCount">Chưa chọn video nào.</span>
+        </div><div class="d-flex flex-wrap gap-2 bulk-unassign-actions">
+      <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_videos', scope='selected') }}" data-unassign-scope="selected" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho video đã chọn</button>
+      <button type="submit" class="btn btn-outline-danger" formaction="{{ url_for('bulk_unassign_library_videos', scope='all') }}" formnovalidate data-unassign-scope="all" data-unassign-kind="video" {{ 'disabled' if not courses else '' }}>Bỏ gán môn học cho tất cả video</button>
+        </div><span class="text-muted small" id="selectedVideoCount">Chưa chọn video nào.</span></div>
       </div>
     </div>
     <div class="small fw-semibold text-primary mt-1 mb-2" id="videoBulkSelectedSummary" aria-live="polite">Chưa chọn video nào.</div>
@@ -512,10 +523,11 @@ document.addEventListener('submit', function(event){
   const kind=button.dataset.unassignKind;
   const all=button.dataset.unassignScope==='all';
   const count=kind==='playlist'?window.playlistBulkSelection?.selectedCount():window.videoBulkSelection?.selectedCount();
-  if(!course?.value){event.preventDefault();alert('Hãy chọn môn học/mô đun cần bỏ gán.');return;}
+  if(!all && !course?.value){event.preventDefault();alert('Hãy chọn môn học/mô đun cần bỏ gán.');return;}
   if(!all && !count){event.preventDefault();alert('Hãy tích chọn '+kind+' cần bỏ gán.');return;}
   const target=all?'tất cả '+kind+' thuộc kho học liệu (không phụ thuộc bộ lọc/phân trang)':count+' '+kind+' đã chọn';
-  if(!confirm('Bỏ gán môn '+course.selectedOptions[0].textContent.trim()+' cho '+target+'? Mã QR đã tạo và dữ liệu học liệu vẫn được giữ nguyên.')){
+  const subject=all?'tất cả môn học/mô đun':course.selectedOptions[0].textContent.trim();
+  if(!confirm('Bỏ gán '+subject+' cho '+target+'? Mã QR đã tạo và dữ liệu học liệu vẫn được giữ nguyên.')){
     event.preventDefault();
   }
 },true);
