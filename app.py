@@ -1478,6 +1478,14 @@ def videos_library_return(anchor: str, raw_query: str = "") -> str:
     return target + "#" + anchor
 
 
+def videos_library_return_after_assignment(anchor: str, raw_query: str = "") -> str:
+    """One-use success marker: reset only the relevant bulk assignment controls."""
+    target = videos_library_return(anchor, raw_query)
+    path_query, _, fragment = target.partition("#")
+    separator = "&" if "?" in path_query else "?"
+    return f"{path_query}{separator}assignment_reset={anchor}#{fragment}"
+
+
 def videos_library_return_with_bulk_course(raw_query: str, course_id: int) -> str:
     """Preserve bulk course exactly across POST/redirect, not across manual refresh.
 
@@ -2801,15 +2809,7 @@ def register_routes(app):
             f"Đã nhận môn chọn riêng tại {len(row_course_ids)} dòng Mã QR.",
             "success",
         )
-        # Giữ môn đã chọn phía trên để nút Tạo QR ngay sau khi gán hoạt động.
-        # Trường hợp chỉ gán theo cột QR: chọn môn đó nếu tất cả dòng cùng môn.
-        chosen_for_bulk = selected_course.id if selected_course else None
-        if chosen_for_bulk is None and len(set(row_course_ids.values())) == 1:
-            chosen_for_bulk = next(iter(row_course_ids.values()))
-        if chosen_for_bulk:
-            return redirect(videos_library_return_with_video_course(
-                request.form.get("return_query", ""), chosen_for_bulk))
-        return redirect(videos_library_return("videos", request.form.get("return_query")))
+        return redirect(videos_library_return_after_assignment("videos", request.form.get("return_query", "")))
 
     @app.post("/playlists/assign-course")
     @login_required
@@ -2910,7 +2910,8 @@ def register_routes(app):
                   f"không khả dụng {skipped}; tự thêm video {auto_added}; tự bỏ video {auto_removed}."),
         )
         db.session.commit()
-        # Thao tác hàng loạt thành công/không có bản ghi phù hợp: chỉ cập nhật kết quả lọc.
+        if created or already:
+            return redirect(videos_library_return_after_assignment("playlists", request.form.get("return_query", "")))
         return redirect(redirect_to)
 
     @app.post("/playlists/bulk-create-course-qrs")
