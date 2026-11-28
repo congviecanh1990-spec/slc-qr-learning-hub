@@ -2914,6 +2914,69 @@ def register_routes(app):
             return redirect(videos_library_return_after_assignment("playlists", request.form.get("return_query", "")))
         return redirect(redirect_to)
 
+    @app.post("/playlists/unassign-course/<scope>")
+    @login_required
+    def bulk_unassign_library_playlists(scope):
+        user = current_user()
+        if scope not in {"selected", "all"}:
+            abort(404)
+        course = db.session.get(Course, request.form.get("course_id", type=int))
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        query = CoursePlaylist.query.filter_by(course_id=course.id, active=True)
+        if scope == "selected":
+            mode = request.form.get("playlist_selection_mode", "none")
+            if mode not in {"all", "none"}:
+                abort(400)
+            raw = request.form.getlist("excluded_playlist_ids" if mode == "all" else "selected_playlist_ids")
+            if len(raw) > 2000 or any(not x.isascii() or not x.isdigit() or int(x) <= 0 for x in raw):
+                abort(400)
+            ids = {int(x) for x in raw}
+            assignment = request.form.get("p_assignment", "").strip()
+            if assignment not in {"", "assigned", "unassigned"}:
+                abort(400)
+            candidates = filtered_library_playlist_query(
+                user, request.form.get("p_q", "").strip()[:150], assignment
+            ).with_entities(Playlist.id).all()
+            chosen = [pid for (pid,) in candidates if (pid not in ids if mode == "all" else pid in ids)]
+            query = query.filter(CoursePlaylist.playlist_id.in_(chosen))
+        links = query.all()
+        for link in links:
+            link.active = False
+        db.session.flush()
+        if links:
+            reconcile_course_videos_from_playlists(course, user)
+        count = len(links)
+        name = course.name
+        db.session.commit()
+        flash(f"Đã bỏ gán {count} playlist khỏi môn {name}. Mã QR đã tạo được giữ nguyên.",
+              "success" if count else "info")
+        return redirect(videos_library_return_after_assignment("playlists", request.form.get("return_query", "")))
+
+    @app.post("/videos/unassign-course/<scope>")
+    @login_required
+    def bulk_unassign_library_videos(scope):
+        user = current_user()
+        if scope not in {"selected", "all"}:
+            abort(404)
+        course = db.session.get(Course, request.form.get("course_id", type=int))
+        if not course or not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        # Danh sách video độc lập: không bỏ các liên kết do playlist quản lý.
+        ids = (selected_filtered_library_video_ids(user, request.form) if scope == "selected"
+               else filtered_library_video_query(user).with_entities(Video.id))
+        query = CourseVideo.query.filter(CourseVideo.course_id == course.id,
+                                         CourseVideo.video_id.in_(ids))
+        links = query.all()
+        for link in links:
+            db.session.delete(link)
+        count = len(links)
+        name = course.name
+        db.session.commit()
+        flash(f"Đã bỏ gán {count} video khỏi môn {name}. Mã QR đã tạo được giữ nguyên.",
+              "success" if count else "info")
+        return redirect(videos_library_return_after_assignment("videos", request.form.get("return_query", "")))
+
     @app.post("/playlists/bulk-create-course-qrs")
     @login_required
     def bulk_create_playlist_qrs_from_library():
