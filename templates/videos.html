@@ -523,10 +523,14 @@ function updateBulkQrDownload(){
   if(bulkDownload)bulkDownload.disabled=false;
 }
 // One-use URL marker after bulk POST. Remove before the next refresh/navigation.
-restoreBulkCourse();
 const bulkRedirectUrl = new URL(window.location.href);
+const resetPlaylistAssignment = bulkRedirectUrl.searchParams.get('assignment_reset') === 'playlists';
+if (resetPlaylistAssignment) {
+  if (bulkCourseSelector) bulkCourseSelector.value='';
+  rememberBulkCourse();
+} else restoreBulkCourse();
 const pendingBulkCourse = bulkRedirectUrl.searchParams.get('bulk_course_id');
-if (pendingBulkCourse !== null) {
+if (pendingBulkCourse !== null && !resetPlaylistAssignment) {
   if (bulkCourseSelector?.querySelector(`option[value="${Number(pendingBulkCourse)}"]`)) {
     bulkCourseSelector.value = String(Number(pendingBulkCourse));
   }
@@ -579,7 +583,22 @@ bulkDownload?.addEventListener('qr-download-complete',resetBulkCourseAfterDownlo
     return {mode:defaultMode(keyword),ids:new Set()};
   };
   let activeKey=scopeKey(bulkCourseSelector?.value,currentKeyword);
-  let initial=read(activeKey,currentKeyword);
+  if(resetPlaylistAssignment){
+    try{
+      for(let i=0;i<sessionStorage.length;i++){
+        const key=sessionStorage.key(i);
+        if(key?.startsWith(storagePrefix)){
+          const scope=JSON.parse(key.slice(storagePrefix.length));
+          if(String(scope[0])===String(form.dataset.userId||''))
+            sessionStorage.setItem(key,JSON.stringify({mode:'none',ids:[]}));
+        }
+      }
+      sessionStorage.setItem(activeKey,JSON.stringify({mode:'none',ids:[]}));
+    }catch(_){}
+    bulkRedirectUrl.searchParams.delete('assignment_reset');
+    history.replaceState(history.state,'',bulkRedirectUrl.pathname+bulkRedirectUrl.search+bulkRedirectUrl.hash);
+  }
+  let initial=resetPlaylistAssignment?{mode:'none',ids:new Set()}:read(activeKey,currentKeyword);
   let mode=initial.mode;
   let overrides=initial.ids;
   function write(){
@@ -679,7 +698,7 @@ document.querySelectorAll('.playlist-course-form').forEach(form=>{
 
 </script>
 {# Đổi URL để trình duyệt không tiếp tục dùng JS đã cache trước bản sửa cột QR. #}
-<script src="{{ url_for('static', filename='video_selection.js', v='row-mirror-20261126') }}" defer></script>
+<script src="{{ url_for('static', filename='video_selection.js', v='assignment-reset-20261128') }}" defer></script>
 <script src="{{ url_for('static', filename='library_filter_reset.js') }}" defer></script>
 {# Tải một QR bằng tính năng download gốc của trình duyệt.
    Không dùng showSaveFilePicker: server đã trả Content-Disposition đúng tên học liệu. #}
