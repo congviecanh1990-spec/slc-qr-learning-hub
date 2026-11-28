@@ -98,6 +98,7 @@
 {# Quản trị viên kiêm giảng viên cũng phải được tự động ghi nhận QR của chính mình. #}
 {% if me and me.profile_completed %}
 <script>window.researchMeasurement = {
+  userId: {{ me.id|tojson }},
   id: {{ session.get('research_measurement_id')|tojson }},
   nonce: {{ session.get('research_measurement_nonce', '')|tojson }},
   startUrl: {{ url_for('research_auto_start')|tojson }},
@@ -109,7 +110,7 @@
   savedUrl: {{ url_for('research_auto_download_saved')|tojson }},
   cancelPendingUrl: {{ url_for('research_auto_cancel_pending')|tojson }}
 };</script>
-<script defer src="{{ url_for('static', filename='research_measurement.js', v='shared-pending-unassign-20261128') }}"></script>
+<script defer src="{{ url_for('static', filename='research_measurement.js', v='shared-workflow-20261128') }}"></script>
 {% endif %}
 {% if me and me.profile_completed %}
 <script>window.youtubeSyncAutoStart = {{ 'true' if session.get('yt_auto_sync_request') else 'false' }};</script>
