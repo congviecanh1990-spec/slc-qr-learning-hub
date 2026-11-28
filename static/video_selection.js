@@ -35,7 +35,26 @@
     }catch(_){}
     return {mode:defaultMode(snapshot),ids:new Set()};
   }
-  let selected=read(),mode=selected.mode,overrides=selected.ids;
+  const redirectUrl=new URL(window.location.href);
+  const resetAssignment=redirectUrl.searchParams.get('assignment_reset')==='videos';
+  if(resetAssignment){
+    const course=form.querySelector('[name="course_id"]');
+    if(course)course.value='';
+    try{
+      for(let i=0;i<sessionStorage.length;i++){
+        const key=sessionStorage.key(i);
+        if(key?.startsWith(storagePrefix)){
+          const scope=JSON.parse(key.slice(storagePrefix.length));
+          if(String(scope[0])===String(form.dataset.userId||''))
+            sessionStorage.setItem(key,JSON.stringify({mode:'none',ids:[]}));
+        }
+      }
+      sessionStorage.setItem(currentKey,JSON.stringify({mode:'none',ids:[]}));
+    }catch(_){}
+    redirectUrl.searchParams.delete('assignment_reset');
+    history.replaceState(history.state,'',redirectUrl.pathname+redirectUrl.search+redirectUrl.hash);
+  }
+  let selected=resetAssignment?{mode:'none',ids:new Set()}:read(),mode=selected.mode,overrides=selected.ids;
   const contains=id=>mode==='all'?!overrides.has(id):overrides.has(id);
   const selectedCount=()=>mode==='all'?Math.max(0,total-overrides.size):overrides.size;
   const persist=()=>{
