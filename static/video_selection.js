@@ -142,6 +142,8 @@
       const endpoint=new URL(event.submitter?.formAction||target.action,window.location.href).pathname;
       const isAssignment=endpoint==='/videos/assign-course';
       const isCreateAllQr=endpoint==='/videos/qr/bulk-selected';
+      if(event.defaultPrevented)return;
+      if(event.submitter?.dataset.unassignScope==='all'){appendSelection(target);return;}
       if(!isCreateAllQr && !api.hasAny() && !(isAssignment && api.selectedQrCourseCount()>0)){
         event.preventDefault();
         if(summary)summary.textContent='Hãy chọn video hoặc môn học ở cột Mã QR trước khi thực hiện.';
