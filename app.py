@@ -4371,7 +4371,7 @@ def register_routes(app):
             session.pop("research_measurement_id", None)
             session.pop("research_measurement_nonce", None)
         flash(f"Đã xóa {len(qr_ids)} mã QR và {removed_pairs} lượt đo liên quan của môn {course_name}.", "success")
-        return redirect(url_for("qr_page", course_id=course_id))
+        return redirect(url_for("qr_page"))
 
     @app.get("/qr/<int:qr_id>/png")
     @login_required
