@@ -106,9 +106,10 @@
   zipUrl: {{ url_for('research_auto_zip')|tojson }},
   completeUrl: {{ url_for('research_auto_complete')|tojson }},
   progressUrl: {{ url_for('research_measurement_progress')|tojson }},
-  savedUrl: {{ url_for('research_auto_download_saved')|tojson }}
+  savedUrl: {{ url_for('research_auto_download_saved')|tojson }},
+  cancelPendingUrl: {{ url_for('research_auto_cancel_pending')|tojson }}
 };</script>
-<script defer src="{{ url_for('static', filename='research_measurement.js', v='multi-course-confirm-20261127') }}"></script>
+<script defer src="{{ url_for('static', filename='research_measurement.js', v='shared-pending-20261128') }}"></script>
 {% endif %}
 {% if me and me.profile_completed %}
 <script>window.youtubeSyncAutoStart = {{ 'true' if session.get('yt_auto_sync_request') else 'false' }};</script>
