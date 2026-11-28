@@ -1049,6 +1049,7 @@ def ensure_research_comparison_schema():
         "measurement_verified": "BOOLEAN NOT NULL DEFAULT FALSE",
         "measurement_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_saved_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
+        "measurement_pending_qr_ids": "TEXT NOT NULL DEFAULT '[]'",
         "measurement_download_style": "VARCHAR(20)",
         "auto_discovered": "BOOLEAN NOT NULL DEFAULT FALSE",
         "measurement_save_method": "VARCHAR(32)",
@@ -1095,6 +1096,14 @@ def research_saved_qr_ids(pair):
         return [int(v) for v in values if isinstance(v, int) and v > 0] if isinstance(values, list) else []
     except (ValueError, TypeError):
         return []
+
+
+def research_pending_qr_ids(pair):
+    try:
+        values = json.loads(pair.measurement_pending_qr_ids or "[]")
+        return {v for v in values if type(v) is int and v > 0} if isinstance(values, list) else set()
+    except (ValueError, TypeError):
+        return set()
 
 
 def record_research_qr_creation(course_id, lecturer_id, kind, qr_id=None):
@@ -1467,6 +1476,14 @@ def videos_library_return(anchor: str, raw_query: str = "") -> str:
                                 (anchor.startswith("video-") and key == "assignment"))], doseq=True)
     target = url_for("videos_page") + (("?" + query) if query else "")
     return target + "#" + anchor
+
+
+def videos_library_return_after_assignment(anchor: str, raw_query: str = "") -> str:
+    """One-use success marker: reset only the relevant bulk assignment controls."""
+    target = videos_library_return(anchor, raw_query)
+    path_query, _, fragment = target.partition("#")
+    separator = "&" if "?" in path_query else "?"
+    return f"{path_query}{separator}assignment_reset={anchor}#{fragment}"
 
 
 def videos_library_return_with_bulk_course(raw_query: str, course_id: int) -> str:
@@ -2792,15 +2809,7 @@ def register_routes(app):
             f"Đã nhận môn chọn riêng tại {len(row_course_ids)} dòng Mã QR.",
             "success",
         )
-        # Giữ môn đã chọn phía trên để nút Tạo QR ngay sau khi gán hoạt động.
-        # Trường hợp chỉ gán theo cột QR: chọn môn đó nếu tất cả dòng cùng môn.
-        chosen_for_bulk = selected_course.id if selected_course else None
-        if chosen_for_bulk is None and len(set(row_course_ids.values())) == 1:
-            chosen_for_bulk = next(iter(row_course_ids.values()))
-        if chosen_for_bulk:
-            return redirect(videos_library_return_with_video_course(
-                request.form.get("return_query", ""), chosen_for_bulk))
-        return redirect(videos_library_return("videos", request.form.get("return_query")))
+        return redirect(videos_library_return_after_assignment("videos", request.form.get("return_query", "")))
 
     @app.post("/playlists/assign-course")
     @login_required
@@ -2901,8 +2910,69 @@ def register_routes(app):
                   f"không khả dụng {skipped}; tự thêm video {auto_added}; tự bỏ video {auto_removed}."),
         )
         db.session.commit()
-        # Thao tác hàng loạt thành công/không có bản ghi phù hợp: chỉ cập nhật kết quả lọc.
+        if created or already:
+            return redirect(videos_library_return_after_assignment("playlists", request.form.get("return_query", "")))
         return redirect(redirect_to)
+
+    @app.post("/playlists/unassign-course/<scope>")
+    @login_required
+    def bulk_unassign_library_playlists(scope):
+        user = current_user()
+        if scope not in {"selected", "all"}:
+            abort(404)
+        owned_courses = {c.id: c for c in Course.query.filter_by(owner_id=user.id, active=True).all()}
+        query = CoursePlaylist.query.filter(CoursePlaylist.course_id.in_(owned_courses),
+                                            CoursePlaylist.active.is_(True))
+        if scope == "selected":
+            mode = request.form.get("playlist_selection_mode", "none")
+            if mode not in {"all", "none"}:
+                abort(400)
+            raw = request.form.getlist("excluded_playlist_ids" if mode == "all" else "selected_playlist_ids")
+            if len(raw) > 2000 or any(not x.isascii() or not x.isdigit() or int(x) <= 0 for x in raw):
+                abort(400)
+            ids = {int(x) for x in raw}
+            assignment = request.form.get("p_assignment", "").strip()
+            if assignment not in {"", "assigned", "unassigned"}:
+                abort(400)
+            candidates = filtered_library_playlist_query(
+                user, request.form.get("p_q", "").strip()[:150], assignment
+            ).with_entities(Playlist.id).all()
+            chosen = [pid for (pid,) in candidates if (pid not in ids if mode == "all" else pid in ids)]
+            if not chosen:
+                flash("Hãy tích chọn playlist cần bỏ gán.", "warning")
+                return redirect(videos_library_return("playlists", request.form.get("return_query", "")))
+            query = query.filter(CoursePlaylist.playlist_id.in_(chosen))
+        links = query.all()
+        for link in links:
+            link.active = False
+        db.session.flush()
+        for cid in {link.course_id for link in links}:
+            reconcile_course_videos_from_playlists(owned_courses[cid], user)
+        count = len(links)
+        db.session.commit()
+        return redirect(videos_library_return_after_assignment("playlists", request.form.get("return_query", "")))
+
+    @app.post("/videos/unassign-course/<scope>")
+    @login_required
+    def bulk_unassign_library_videos(scope):
+        user = current_user()
+        if scope not in {"selected", "all"}:
+            abort(404)
+        owned_courses = {c.id: c for c in Course.query.filter_by(owner_id=user.id, active=True).all()}
+        # Danh sách video độc lập: không bỏ các liên kết do playlist quản lý.
+        ids = (selected_filtered_library_video_ids(user, request.form) if scope == "selected"
+               else filtered_library_video_query(user).with_entities(Video.id))
+        if scope == "selected" and not ids:
+            flash("Hãy tích chọn video cần bỏ gán.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
+        query = CourseVideo.query.filter(CourseVideo.course_id.in_(owned_courses),
+                                         CourseVideo.video_id.in_(ids))
+        links = query.all()
+        for link in links:
+            db.session.delete(link)
+        count = len(links)
+        db.session.commit()
+        return redirect(videos_library_return_after_assignment("videos", request.form.get("return_query", "")))
 
     @app.post("/playlists/bulk-create-course-qrs")
     @login_required
@@ -3014,7 +3084,13 @@ def register_routes(app):
         playlist = db.session.get(Playlist, playlist_id) or abort(404)
         if playlist.channel.user_id != user.id:
             abort(403)
-        selected_course_ids = {int(x) for x in request.form.getlist("course_ids") if str(x).isdigit()}
+        raw_ids = request.form.getlist("course_ids")
+        if any(not x.isascii() or not x.isdigit() or int(x) <= 0 for x in raw_ids):
+            abort(400)
+        selected_course_ids = {int(x) for x in raw_ids}
+        owned_ids = {c.id for c in Course.query.filter_by(owner_id=user.id, active=True).all()}
+        if not selected_course_ids.issubset(owned_ids):
+            abort(403)
         activated, deactivated, auto_added, auto_removed = set_playlist_courses(playlist, selected_course_ids, user)
         record_functional_test(
             "SET_PLAYLIST_COURSES", "Thiết lập môn học/ mô đun cho playlist", True, owner_id=user.id,
@@ -3073,6 +3149,17 @@ def register_routes(app):
         for cid in sorted(selected):
             ensure_course_video_link(owned[cid], video, user, manual=True)
         db.session.commit()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            db.session.expire_all()
+            return jsonify({"ok": True, "row_html": render_template(
+                "_video_library_row.html",
+                v=db.session.get(Video, video_id),
+                courses=Course.query.filter_by(owner_id=user.id, active=True).order_by(Course.name).all(),
+                retarget_videos=visible_video_query(user).filter(
+                    Video.is_available.is_(True), Video.privacy_status != "private",
+                    Video.embeddable.isnot(False)).order_by(Video.title).all(),
+                library_return_query=request.form.get("return_query", "")[:1200],
+            )})
         flash("Đã lưu môn học/mô đun áp dụng cho video.", "success")
         return redirect(videos_library_return(f"video-{video.id}", request.form.get("return_query", "")))
 
@@ -4024,6 +4111,12 @@ def register_routes(app):
                 abort(403)
         all_qrs = (QrCode.query.filter(managed_qr_scope(user.id), QrCode.active.is_(True))
                    .order_by(QrCode.created_at.desc()).all())
+        # Bộ lọc kho QR chỉ liệt kê môn còn QR đang hoạt động.
+        # Không thay đổi danh mục môn học hoặc liên kết gán học liệu.
+        active_qr_course_ids = {q.course_id for q in all_qrs if q.course_id is not None}
+        courses = [c for c in courses if c.id in active_qr_course_ids]
+        if selected_course_id is not None and selected_course_id not in active_qr_course_ids:
+            return redirect(url_for("qr_page"))
         if selected_course_id is None:
             qrs = all_qrs
         else:
@@ -4323,6 +4416,56 @@ def register_routes(app):
         flash(f"Đã xóa {len(qr_ids)} mã QR (kể cả mã cũ) và {removed_pairs} lượt đo liên quan. Có thể bắt đầu đo lại.", "success")
         return redirect(url_for("qr_page"))
 
+    @app.post("/qr/delete-course/<int:course_id>")
+    @login_required
+    def delete_course_qrs(course_id):
+        """Xóa QR và số đo chỉ trong môn học được chọn; không bỏ gán học liệu."""
+        user = current_user()
+        course = db.session.get(Course, course_id) or abort(404)
+        if not course.active or not course_owned_by_user(course, user):
+            abort(403)
+        ensure_research_comparison_schema()
+        qrs = QrCode.query.filter(managed_qr_scope(user.id),
+                                  QrCode.course_id == course.id).all()
+        qr_ids = [q.id for q in qrs]
+        qr_set = set(qr_ids)
+        pairs = ResearchComparisonPair.query.filter_by(course_id=course.id).all()
+        removed_pairs = 0
+        removed_pair_ids = set()
+        for pair in pairs:
+            linked = set(research_created_qr_ids(pair)) | set(research_saved_qr_ids(pair))
+            if linked.intersection(qr_set) or (
+                pair.measurement_started_at is not None
+                or pair.measurement_finished_at is not None
+                or pair.webapp_operations is not None
+                or pair.webapp_seconds is not None
+            ):
+                removed_pair_ids.add(pair.id)
+                db.session.delete(pair)
+                removed_pairs += 1
+        if qr_ids:
+            watch_ids = [r[0] for r in db.session.query(WatchSession.id).filter(
+                WatchSession.qr_id.in_(qr_ids)).all()]
+            if watch_ids:
+                WatchEvent.query.filter(WatchEvent.watch_session_id.in_(watch_ids)).delete(
+                    synchronize_session=False)
+            WatchSession.query.filter(WatchSession.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            ScanLog.query.filter(ScanLog.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            QrTargetHistory.query.filter(QrTargetHistory.qr_id.in_(qr_ids)).delete(synchronize_session=False)
+            CourseVideo.query.filter(CourseVideo.qr_id.in_(qr_ids)).update(
+                {CourseVideo.qr_id: None}, synchronize_session=False)
+            CoursePlaylist.query.filter(CoursePlaylist.qr_id.in_(qr_ids)).update(
+                {CoursePlaylist.qr_id: None}, synchronize_session=False)
+            QrCode.query.filter(QrCode.id.in_(qr_ids)).delete(synchronize_session=False)
+        # ExperimentRun cũ không có course_id/QR ID: không xóa nhầm số liệu môn khác.
+        course_name = course.name
+        db.session.commit()
+        if session.get("research_measurement_id") in removed_pair_ids:
+            session.pop("research_measurement_id", None)
+            session.pop("research_measurement_nonce", None)
+        flash(f"Đã xóa {len(qr_ids)} mã QR và {removed_pairs} lượt đo liên quan của môn {course_name}.", "success")
+        return redirect(url_for("qr_page"))
+
     @app.get("/qr/<int:qr_id>/png")
     @login_required
     def qr_png(qr_id):
@@ -4361,6 +4504,8 @@ def register_routes(app):
         if selected is not None:
             qry = qry.filter(QrCode.course_id == selected if selected > 0 else QrCode.course_id.is_(None))
         qrs = qry.order_by(QrCode.course_id, QrCode.created_at, QrCode.id).all()
+        if request.headers.get("Accept") == "application/json":
+            return jsonify({"ok": True, "files": [{"id": q.id} for q in qrs]})
         bio = io.BytesIO()
         used_names = set()
         with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -5870,7 +6015,38 @@ def register_routes(app):
         user = current_user()
         # Quản trị viên kiêm giảng viên vẫn được đo QR của học phần mình sở hữu.
         ensure_research_comparison_schema()
-        return jsonify(research_auto_status_payload(active_research_measurement(user.id)))
+        payload = research_auto_status_payload(active_research_measurement(user.id))
+        payload["pending"] = research_pending_payload(user)
+        return jsonify(payload)
+
+    def research_pending_payload(user):
+        pairs = ResearchComparisonPair.query.filter_by(
+            lecturer_id=user.id, active=True, measurement_finished_at=None
+        ).filter(ResearchComparisonPair.measurement_started_at.isnot(None)).all()
+        active_ids = {q.id: q.course_id for q in QrCode.query.filter(
+            managed_qr_scope(user.id), QrCode.active.is_(True)).all()}
+        pending = {"bulk": set(), "row": set()}
+        for pair in pairs:
+            style = pair.measurement_download_style
+            if style not in pending:
+                continue
+            ids = research_pending_qr_ids(pair) & set(research_created_qr_ids(pair))
+            ids -= set(research_saved_qr_ids(pair))
+            pending[style].update(i for i in ids if i in active_ids and active_ids[i] == pair.course_id)
+        bulk = sorted(pending["bulk"])
+        items = [{"style": "bulk", "ids": bulk[i:i+1000]} for i in range(0, len(bulk), 1000)]
+        items.extend({"style": "row", "ids": [i]} for i in sorted(pending["row"] - pending["bulk"]))
+        return items
+
+    @app.post("/research/auto/cancel-pending")
+    @login_required
+    def research_auto_cancel_pending():
+        user = current_user()
+        ResearchComparisonPair.query.filter_by(
+            lecturer_id=user.id, active=True, measurement_finished_at=None
+        ).update({ResearchComparisonPair.measurement_pending_qr_ids: "[]"}, synchronize_session=False)
+        db.session.commit()
+        return jsonify({"ok": True, "pending": []})
 
     @app.post("/research/auto/start")
     @login_required
@@ -5943,6 +6119,7 @@ def register_routes(app):
             pair.measurement_bulk_videos = 0
             pair.measurement_qr_ids = "[]"
             pair.measurement_saved_qr_ids = "[]"
+            pair.measurement_pending_qr_ids = "[]"
             pair.measurement_download_style = None
             pair.measurement_verified = False
             db.session.commit()
@@ -6000,23 +6177,23 @@ def register_routes(app):
         qr_map = {q.id: q for q in QrCode.query.filter(
             QrCode.id.in_(posted), QrCode.active.is_(True)).all()}
         if len(qr_map) != len(posted):
-            return jsonify({
-                "ok": True, "measured": False,
-                "message": "Danh sách tải chứa QR không tồn tại hoặc đã ngừng hoạt động."
-            })
-        if not all(qr_managed_by_user(qr_map[qid], user) for qid in posted):
+            return jsonify({"ok": True, "measured": False, "matched": 0,
+                            "message": "Danh sách tải chứa QR không tồn tại hoặc đã ngừng hoạt động."})
+        if not all(qr_managed_by_user(qr, user) for qr in qr_map.values()):
             abort(403)
         candidates = ResearchComparisonPair.query.filter(
             ResearchComparisonPair.lecturer_id == user.id,
             ResearchComparisonPair.active.is_(True),
             ResearchComparisonPair.measurement_started_at.isnot(None),
             ResearchComparisonPair.measurement_finished_at.is_(None),
-        ).order_by(ResearchComparisonPair.id.desc()).all()
+        ).order_by(ResearchComparisonPair.id.desc()).with_for_update().all()
         groups = []
         claimed = set()
         for pair in candidates:
             created = research_created_qr_ids(pair)
+            saved = set(research_saved_qr_ids(pair))
             matched = [qid for qid in posted if qid in created and qid not in claimed
+                       and qid not in saved and qid in qr_map
                        and qr_map[qid].course_id == pair.course_id]
             if matched:
                 groups.append((pair, created, matched))
@@ -6057,7 +6234,7 @@ def register_routes(app):
         })
 
     def apply_research_download(pair, created, matched, style, method, user, downloaded):
-        task_kind = "QR_VIDEO_HANG_LOAT" if style == "bulk" and downloaded >= 2 else "QR_TUNG_VIDEO_PLAYLIST"
+        task_kind = "QR_VIDEO_HANG_LOAT" if style == "bulk" else "QR_TUNG_VIDEO_PLAYLIST"
         result = {"ok": True, "kind": task_kind, "measured": False,
                   "matched": len(matched), "downloaded": downloaded}
         # Không được đổi kiểu khi đã có mã QR được ghi là đã tải theo
@@ -6100,10 +6277,12 @@ def register_routes(app):
             equivalent.measurement_single_playlists = pair.measurement_single_playlists
             equivalent.measurement_bulk_videos = pair.measurement_bulk_videos
             equivalent.measurement_saved_qr_ids = pair.measurement_saved_qr_ids or "[]"
+            equivalent.measurement_pending_qr_ids = pair.measurement_pending_qr_ids or "[]"
             # Reset hoàn toàn cặp ban đầu: được sử dụng cho lần đo khác.
             pair.measurement_started_at = None
             pair.measurement_qr_ids = "[]"
             pair.measurement_saved_qr_ids = "[]"
+            pair.measurement_pending_qr_ids = "[]"
             pair.measurement_download_style = None
             pair.measurement_operations = 0
             pair.measurement_single_videos = 0
@@ -6118,6 +6297,7 @@ def register_routes(app):
             }
         pair.measurement_download_style = style
         if method == "not_verified":
+            pair.measurement_pending_qr_ids = json.dumps(sorted(research_pending_qr_ids(pair) | set(matched)))
             reported_ops = request.form.get("operations_count", type=int)
             if reported_ops is not None and 0 < reported_ops <= 100000:
                 pair.measurement_operations = max(
@@ -6138,6 +6318,7 @@ def register_routes(app):
             if qr_id not in saved:
                 saved.append(qr_id)
         pair.measurement_saved_qr_ids = json.dumps(saved)
+        pair.measurement_pending_qr_ids = json.dumps(sorted(research_pending_qr_ids(pair) - set(saved)))
         if method == "manual_confirmed":
             pair.measurement_save_method = "manual_confirmed"
         reported_ops = request.form.get("operations_count", type=int)
@@ -6171,7 +6352,6 @@ def register_routes(app):
             if session.get("research_measurement_id") == pair.id:
                 session.pop("research_measurement_id", None)
                 session.pop("research_measurement_nonce", None)
-        db.session.commit()
         return result
 
     @app.get("/research/auto/files")
@@ -6284,6 +6464,7 @@ def register_routes(app):
         pair.measurement_verified = False
         pair.measurement_qr_ids = "[]"
         pair.measurement_saved_qr_ids = "[]"
+        pair.measurement_pending_qr_ids = "[]"
         pair.measurement_download_style = None
         pair.measurement_save_method = None
         pair.measurement_saved_at = None
