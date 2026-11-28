@@ -2921,14 +2921,9 @@ def register_routes(app):
         if scope not in {"selected", "all"}:
             abort(404)
         owned_courses = {c.id: c for c in Course.query.filter_by(owner_id=user.id, active=True).all()}
-        course = None
         query = CoursePlaylist.query.filter(CoursePlaylist.course_id.in_(owned_courses),
                                             CoursePlaylist.active.is_(True))
         if scope == "selected":
-            course = owned_courses.get(request.form.get("course_id", type=int))
-            if not course:
-                abort(403)
-            query = query.filter(CoursePlaylist.course_id == course.id)
             mode = request.form.get("playlist_selection_mode", "none")
             if mode not in {"all", "none"}:
                 abort(400)
@@ -2943,6 +2938,9 @@ def register_routes(app):
                 user, request.form.get("p_q", "").strip()[:150], assignment
             ).with_entities(Playlist.id).all()
             chosen = [pid for (pid,) in candidates if (pid not in ids if mode == "all" else pid in ids)]
+            if not chosen:
+                flash("Hãy tích chọn playlist cần bỏ gán.", "warning")
+                return redirect(videos_library_return("playlists", request.form.get("return_query", "")))
             query = query.filter(CoursePlaylist.playlist_id.in_(chosen))
         links = query.all()
         for link in links:
@@ -2951,10 +2949,7 @@ def register_routes(app):
         for cid in {link.course_id for link in links}:
             reconcile_course_videos_from_playlists(owned_courses[cid], user)
         count = len(links)
-        name = course.name if course else "tất cả môn học/mô đun"
         db.session.commit()
-        flash(f"Đã bỏ {count} liên kết playlist với {name}. Mã QR đã tạo được giữ nguyên.",
-              "success" if count else "info")
         return redirect(videos_library_return_after_assignment("playlists", request.form.get("return_query", "")))
 
     @app.post("/videos/unassign-course/<scope>")
@@ -2964,26 +2959,19 @@ def register_routes(app):
         if scope not in {"selected", "all"}:
             abort(404)
         owned_courses = {c.id: c for c in Course.query.filter_by(owner_id=user.id, active=True).all()}
-        course = None
-        if scope == "selected":
-            course = owned_courses.get(request.form.get("course_id", type=int))
-            if not course:
-                abort(403)
         # Danh sách video độc lập: không bỏ các liên kết do playlist quản lý.
         ids = (selected_filtered_library_video_ids(user, request.form) if scope == "selected"
                else filtered_library_video_query(user).with_entities(Video.id))
+        if scope == "selected" and not ids:
+            flash("Hãy tích chọn video cần bỏ gán.", "warning")
+            return redirect(videos_library_return("videos", request.form.get("return_query", "")))
         query = CourseVideo.query.filter(CourseVideo.course_id.in_(owned_courses),
                                          CourseVideo.video_id.in_(ids))
-        if course:
-            query = query.filter(CourseVideo.course_id == course.id)
         links = query.all()
         for link in links:
             db.session.delete(link)
         count = len(links)
-        name = course.name if course else "tất cả môn học/mô đun"
         db.session.commit()
-        flash(f"Đã bỏ {count} liên kết video với {name}. Mã QR đã tạo được giữ nguyên.",
-              "success" if count else "info")
         return redirect(videos_library_return_after_assignment("videos", request.form.get("return_query", "")))
 
     @app.post("/playlists/bulk-create-course-qrs")
